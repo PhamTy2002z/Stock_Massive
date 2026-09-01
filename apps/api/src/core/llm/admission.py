@@ -49,6 +49,22 @@ TURN_CONTEXT_PER_CALL = 32_000
 TURN_INPUT_TOTAL = 100_000
 TURN_OUTPUT_TOTAL = 20_000
 TURN_COST_MICRO_USD = 500_000
+# What a Turn may ask for above the two figures above, and no further.
+#
+# A Turn's aggregate token allowance is no longer one number for every question:
+# a caller that funds more rounds asks admission to count against a larger total
+# (``SpendRequest.owner_input_total`` / ``owner_output_total``). The caller is
+# this deployment's own code, so this is not a trust boundary — it is a *bound*,
+# and it exists for the same reason the per-call ceilings do: a number arrived at
+# by editing a profile should not be able to walk the ledger past what anyone has
+# reasoned about. Asked for more, the ledger takes the ceiling rather than the
+# request, so the Turn ends with a stated reason instead of an unbounded spend.
+#
+# Three times today's figures, which is the widest lane anyone has proposed plus
+# room to be wrong about it. The money is bounded separately and always was:
+# ``TURN_COST_MICRO_USD`` does not move with these.
+TURN_OUTPUT_TOTAL_MAX = 60_000
+TURN_INPUT_TOTAL_MAX = 300_000
 # The five per-user ceilings live in ``UserCeilings`` (``config.py``) rather
 # than here. They are the one group of ceilings a deployment legitimately
 # changes without changing what the product promises, and each of them may be
@@ -106,6 +122,13 @@ class SpendRequest:
     workload: Workload
     input_tokens: int
     output_tokens: int
+    #: What every call of this owner may produce together, when the caller funds
+    #: something other than the default Turn. ``None`` is the default and means
+    #: :data:`TURN_OUTPUT_TOTAL`, so a caller that knows nothing about lanes gets
+    #: exactly the ceilings this ledger has always applied.
+    owner_output_total: int | None = None
+    #: The same for the input side, against :data:`TURN_INPUT_TOTAL`.
+    owner_input_total: int | None = None
 
 
 @dataclass(frozen=True)
@@ -319,12 +342,24 @@ class SpendAdmission:
                         session,
                         candidate.owner,
                     )
-                    if owner_input + candidate.input_tokens > TURN_INPUT_TOTAL:
+                    input_total = _owner_token_total(
+                        candidate.owner_input_total,
+                        default=TURN_INPUT_TOTAL,
+                        hard_max=TURN_INPUT_TOTAL_MAX,
+                        name="owner_input_total",
+                    )
+                    output_total = _owner_token_total(
+                        candidate.owner_output_total,
+                        default=TURN_OUTPUT_TOTAL,
+                        hard_max=TURN_OUTPUT_TOTAL_MAX,
+                        name="owner_output_total",
+                    )
+                    if owner_input + candidate.input_tokens > input_total:
                         raise BudgetRefusal(
                             "turn_input_total",
                             "This Turn has exhausted its aggregate input allowance.",
                         )
-                    if owner_output + candidate.output_tokens > TURN_OUTPUT_TOTAL:
+                    if owner_output + candidate.output_tokens > output_total:
                         raise BudgetRefusal(
                             "turn_output_total",
                             "This Turn has exhausted its aggregate output allowance.",
@@ -670,6 +705,41 @@ def _micro_usd(
         + Decimal(output_tokens + reasoning_tokens) * Decimal(str(prices.output))
     )
     return int(amount.to_integral_value(rounding=ROUND_CEILING))
+
+
+def _owner_token_total(
+    requested: int | None,
+    *,
+    default: int,
+    hard_max: int,
+    name: str,
+) -> int:
+    """One owner's aggregate token allowance: the default, or what was asked.
+
+    Clamped rather than refused. A caller asking for more than the ledger will
+    grant has made a configuration mistake, and refusing the call would turn that
+    mistake into a Turn that says it ran out of budget on its first call — which
+    is the one failure the operator would read as a money problem and go looking
+    for in the wrong place. Taking the ceiling instead ends the Turn at a bound
+    somebody reasoned about, and says so in the log.
+
+    A malformed value is a different thing and raises: ``0``, a negative number
+    or a non-integer is not a smaller allowance, it is a caller that has lost
+    track of what it is asking for.
+    """
+    if requested is None:
+        return default
+    if not isinstance(requested, int) or isinstance(requested, bool) or requested <= 0:
+        raise ValueError(f"{name} must be a positive integer, not {requested!r}")
+    if requested > hard_max:
+        logger.warning(
+            "%s of %d exceeds the ledger's ceiling of %d and was clamped",
+            name,
+            requested,
+            hard_max,
+        )
+        return hard_max
+    return requested
 
 
 def check_candidate_shape(candidate: SpendRequest) -> None:

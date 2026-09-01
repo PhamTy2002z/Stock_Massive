@@ -147,7 +147,14 @@ async def test_a_refused_call_settles_one_typed_result_and_spares_its_siblings()
     with isolated_registry():
         registry.register(permissioned("healthy"))
         registry.register(permissioned("denied", permission=registry.ToolPermission.DENY))
-        registry.register(permissioned("needs_approval", permission=registry.ToolPermission.ASK))
+        registry.register(
+            permissioned(
+                "needs_approval",
+                permission=registry.ToolPermission.ASK,
+                effect=registry.ToolEffect.WRITE,
+                concurrency=registry.ToolConcurrency.SERIALIZED,
+            )
+        )
         registry.register(permissioned("slow", handler=sleeper, timeout_seconds=0.05))
         registry.register(permissioned("broken", handler=broken))
         outcome = await ToolExecutor(context=registry.ToolContext()).run([
@@ -168,15 +175,14 @@ async def test_a_refused_call_settles_one_typed_result_and_spares_its_siblings()
             (executor.UNKNOWN_TOOL, False),
             (executor.INVALID_ARGUMENTS, False),
             (executor.PERMISSION_DENIED, False),
-            (executor.PERMISSION_DENIED, False),
+            (executor.APPROVAL_REQUIRED, False),
             (executor.TOOL_CALL_TIMEOUT, True),
             (executor.TOOL_FAILED, True),
         ]
-        # The two refusals share a code because the model's next move is the
-        # same, and differ in their text because the reasons are not: one route
-        # is closed, the other is waiting on somebody.
+        # Denial and missing approval are distinct typed outcomes: one route is
+        # closed, while the other could open after a person's decision.
         assert "not permitted" in settled["no"].text
-        assert "agreed" in settled["ask"].text
+        assert "approval" in settled["ask"].text
         assert settled["late"].duration_ms >= 40
 
 

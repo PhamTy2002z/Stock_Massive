@@ -27,6 +27,13 @@ rate-limits open-web reads for the whole process. When the lane cannot serve —
 no Redis, allowance exhausted, upstream down with nothing cached — the tool
 returns a stated reason rather than raising, so the model can tell the user the
 web is unavailable instead of retrying into the same wall.
+
+``fetch_url`` has one source ahead of that lane: the Thread's own record of
+having already read the page. The lane is a cache — a day of freshness, an
+eviction away from empty — while the trace of a call is durable, so a page read
+in one Turn stays readable in the next one without a second request. What comes
+back is the earlier read, said so (``from_record``) and stamped with the instant
+the bytes were actually fetched, never with now.
 """
 
 from __future__ import annotations
@@ -34,11 +41,13 @@ from __future__ import annotations
 import asyncio
 import http.client
 import ipaddress
+import logging
 import math
 import re
 import socket
 import ssl
-from collections.abc import Callable, Mapping, Sequence
+import uuid
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any
@@ -48,8 +57,9 @@ import certifi
 import httpx
 
 from src.core.config import Settings, get_settings
-from src.core.web_lane import WebLane, WebUnavailable
+from src.core.web_lane import URL_FRESH_SECONDS, WebLane, WebUnavailable
 
+from ..security import refuse_secret_egress
 from ..registry import (
     ContentTrust,
     ToolAccess,
@@ -96,6 +106,15 @@ Resolver = Callable[..., Sequence[tuple[Any, ...]]]
 Search = Callable[[str, int | None], Sequence[Mapping[str, Any]]]
 Download = Callable[[str, int, float], tuple[int, Mapping[str, str], bytes]]
 Clock = Callable[[], datetime]
+#: How a page read asks whether this Thread has already read a URL.
+#:
+#: A callable rather than the store itself, because the only thing this module
+#: wants from persistence is one answer about one URL. Depending on the whole
+#: store would make every test that reads a page need a database, and would put
+#: a second set of queries behind a module whose subject is the open web.
+PageRecords = Callable[[uuid.UUID, str], Awaitable[Mapping[str, Any] | None]]
+
+logger = logging.getLogger(__name__)
 
 
 class _TextExtractor(HTMLParser):
@@ -380,6 +399,43 @@ def _http_download(
     raise last_error
 
 
+def _age_seconds(retrieved_at: str, now: datetime) -> float | None:
+    """How old a recorded read is, or ``None`` when it will not say.
+
+    ``None`` is a refusal rather than a zero. A stored instant that cannot be
+    parsed is a page whose age nobody knows, and calling that "fresh" is the one
+    answer that could put a year-old figure in front of a reader as today's.
+    A record from the future is treated as brand new, matching the lane, because
+    a clock that ran backwards is the deployment's problem and not the page's.
+    """
+    try:
+        read_at = datetime.fromisoformat(retrieved_at)
+    except ValueError:
+        return None
+    if read_at.tzinfo is None:
+        read_at = read_at.replace(tzinfo=timezone.utc)
+    return max(0.0, (now.astimezone(timezone.utc) - read_at).total_seconds())
+
+
+def _thread_page_records() -> PageRecords:
+    """The default record lane: this deployment's own Tool Call Trace.
+
+    Imported inside the function rather than at the top of the module because
+    ``persistence`` imports the loop, which imports the registry these tools
+    register into. A module-level import would make the order the tool package
+    happens to be loaded in load-bearing, and the failure it produces is an
+    ``ImportError`` at process start rather than anything a reader could act on.
+    """
+    from ..persistence import AgentPersistence
+
+    store = AgentPersistence()
+
+    async def read(thread_id: uuid.UUID, url: str) -> Mapping[str, Any] | None:
+        return await store.recorded_result(thread_id, "fetch_url", {"url": url})
+
+    return read
+
+
 class WebTools:
     """Tavily search and public-page reads behind one bounded web lane."""
 
@@ -392,13 +448,19 @@ class WebTools:
         download: Download = _http_download,
         resolver: Resolver = socket.getaddrinfo,
         now: Clock | None = None,
+        records: PageRecords | None = None,
     ) -> None:
         self._injected_settings = settings
-        self._lane = lane or WebLane()
+        configured = settings or get_settings()
+        self._lane = lane or WebLane(
+            requests_per_minute=configured.web_fleet_requests_per_minute,
+            requests_per_domain_per_minute=configured.web_domain_requests_per_minute,
+        )
         self._search = search or self._tavily_search
         self._download = download
         self._resolver = resolver
         self._now = now or (lambda: datetime.now(timezone.utc))
+        self._records = records or _thread_page_records()
 
     @property
     def _settings(self) -> Settings:
@@ -441,6 +503,7 @@ class WebTools:
                 content_trust=ContentTrust.UNTRUSTED,
                 concurrency=ToolConcurrency.PARALLEL_SAFE,
                 permission=ToolPermission.ALLOW,
+                resource_arg="query",
                 # Above the one provider round trip this makes, which is already
                 # bounded at ``FETCH_TIMEOUT_SECONDS`` on the wire, and below the
                 # round's own backstop. It ends a search that is not answering
@@ -495,6 +558,7 @@ class WebTools:
                 content_trust=ContentTrust.UNTRUSTED,
                 concurrency=ToolConcurrency.PARALLEL_SAFE,
                 permission=ToolPermission.ALLOW,
+                resource_arg="url",
                 # The widest of the shipped bounds because this call is the one
                 # that can legitimately be several requests: ``MAX_REDIRECTS``
                 # hops, each with its own ``FETCH_TIMEOUT_SECONDS``. Cutting at
@@ -516,12 +580,16 @@ class WebTools:
         query = str(arguments.get("query") or "").strip()
         if not query:
             raise ValueError("query must not be blank")
+        refuse_secret_egress(query, label="web search query")
         recency = arguments.get("recency_days")
         recency_days = int(recency) if recency is not None else None
         key = f"{query}\n{recency_days or ''}"
         try:
-            read = self._lane.read(
-                "search", key, lambda: list(self._search(query, recency_days))
+            read = self._lane_read(
+                "search",
+                key,
+                lambda: list(self._search(query, recency_days)),
+                domain="api.tavily.com",
             )
         except WebUnavailable as exc:
             return {"query": query, "results": [], "reason": "web_unavailable", "detail": str(exc)}
@@ -541,15 +609,46 @@ class WebTools:
         }
 
     async def fetch_url(
-        self, _context: ToolContext, arguments: Mapping[str, Any]
+        self, context: ToolContext, arguments: Mapping[str, Any]
     ) -> Mapping[str, Any]:
         url = str(arguments.get("url") or "").strip()
         if not url:
             raise ValueError("url must not be blank")
+        refuse_secret_egress(url, label="URL")
         looking_for = str(arguments.get("looking_for") or "").strip()
-        return await asyncio.to_thread(self._fetch_url, url, looking_for)
+        recorded = await self._recorded_page(context.thread_id, url)
+        return await asyncio.to_thread(self._fetch_url, url, looking_for, recorded)
 
-    def _fetch_url(self, requested_url: str, looking_for: str = "") -> Mapping[str, Any]:
+    async def _recorded_page(
+        self, thread_id: uuid.UUID | None, url: str
+    ) -> Mapping[str, Any] | None:
+        """What this Thread's own trace holds for this URL, if anything.
+
+        Read here rather than inside the blocking half, because the store read
+        is itself a wait and this is the side of the call that can wait without
+        holding a worker thread. Outside a persisted Turn there is no Thread and
+        therefore no record, which is the case every offline harness runs in.
+
+        A store that cannot answer is never the caller's problem: the page is
+        then read the ordinary way, which is exactly what this call would have
+        done without a record lane at all. Failing the read instead would let a
+        database hiccup take down a capability whose subject is the open web.
+        """
+        if thread_id is None:
+            return None
+        try:
+            recorded = await self._records(thread_id, url)
+        except Exception as exc:  # noqa: BLE001 - a lost record is not a lost page
+            logger.warning("Could not read this thread's record of %s: %s", url, exc)
+            return None
+        return recorded if isinstance(recorded, Mapping) else None
+
+    def _fetch_url(
+        self,
+        requested_url: str,
+        looking_for: str = "",
+        recorded: Mapping[str, Any] | None = None,
+    ) -> Mapping[str, Any]:
         """Read one page, then take the part of it this call asked for.
 
         The order of those two halves is the whole point, and getting it wrong
@@ -563,12 +662,28 @@ class WebTools:
         than the first twenty thousand characters of it. Larger entries, bounded
         by ``web_fetch_max_bytes`` on the wire, and the trade is deliberate: one
         stored page can now answer questions it was not fetched for.
+
+        Three places can answer, and they are tried durable-first: this Thread's
+        own record of having read the page, then the lane's cache, then the
+        network. The record outlives the cache — Redis holds a URL for a day and
+        may evict it sooner — so it is what makes a page read in an earlier Turn
+        still usable in this one. Validation runs *before* any of the three, so
+        a URL that is denied today is denied whatever was recorded yesterday.
         """
         initial = validate_public_url(
             requested_url, denylist=self._denylist(), resolver=self._resolver
         )
+        if recorded is not None:
+            served = self._from_record(initial, recorded, looking_for)
+            if served is not None:
+                return served
         try:
-            read = self._lane.read("url", initial, lambda: self._fetch_page(initial))
+            read = self._lane_read(
+                "url",
+                initial,
+                lambda: self._fetch_page(initial),
+                domain=urlsplit(initial).hostname or "unknown",
+            )
         except WebUnavailable as exc:
             return {"url": initial, "reason": "web_unavailable", "detail": str(exc)}
         page = dict(read.payload) if isinstance(read.payload, Mapping) else {}
@@ -585,6 +700,79 @@ class WebTools:
             "retrieved_at": page.get("retrieved_at"),
             "stale": read.stale,
             "age_seconds": round(read.age_seconds, 1),
+            # Stated on both paths rather than only on the one it is true of.
+            # An absent key reads as "unknown", and the difference between
+            # "this came off the wire" and "nobody said" is exactly what a
+            # reader of the evidence needs this flag to settle.
+            "from_record": False,
+            "reason": None,
+        }
+
+    def _lane_read(
+        self, kind: str, key: str, fetch: Callable[[], Any], *, domain: str
+    ) -> Any:
+        """Use the domain-aware production lane while keeping replay seams small."""
+
+        try:
+            return self._lane.read(kind, key, fetch, domain=domain)
+        except TypeError as exc:
+            # Golden/offline lanes predate the policy dimension and do no real
+            # egress. Do not mask a TypeError raised by the loader itself.
+            if "unexpected keyword argument 'domain'" not in str(exc):
+                raise
+            return self._lane.read(kind, key, fetch)
+
+    def _from_record(
+        self, initial: str, recorded: Mapping[str, Any], looking_for: str
+    ) -> Mapping[str, Any] | None:
+        """This Thread's earlier read of the page, answered with no request.
+
+        Two facts travel out of the record unchanged, and they are what makes
+        serving it honest rather than merely cheap. The URL is the one the page
+        was actually read from, redirects and all. And ``retrieved_at`` is the
+        instant those bytes left the publisher — *not* the instant this call
+        re-read its own record. Restamping it with now would say a figure is
+        current today because the harness looked at its own notes today, and
+        every downstream judgement about whether evidence is still valid rests
+        on that field being the truth. A record that cannot say when it was read
+        is therefore not served at all: there is no honest timestamp to put on
+        it, and a page with no retrieval time is worth less than a fresh read.
+
+        Freshness is stated with the lane's own window rather than a second
+        opinion, so a page an hour old reads the same whether it came from Redis
+        or from the trace.
+
+        The record holds what the earlier call returned, which is the whole page
+        only when that call did not have to excerpt it. So a differently-worded
+        question is served from here only when the whole page is here; otherwise
+        this returns nothing and the call goes on to the lane, because passages
+        chosen for somebody else's question are not an answer to this one. A
+        record that will not say how long the page was counts as an excerpt: the
+        cost of being wrong that way is one page read, and the other way it is a
+        citation pointing at the wrong half of a page.
+        """
+        body = str(recorded.get("content") or "")
+        retrieved_at = str(recorded.get("retrieved_at") or "")
+        age_seconds = _age_seconds(retrieved_at, self._now())
+        if not body or age_seconds is None:
+            return None
+        page_chars = recorded.get("page_chars")
+        whole_page = isinstance(page_chars, int) and len(body) >= page_chars
+        if not whole_page and str(recorded.get("looking_for") or "") != looking_for:
+            return None
+        passages = select_passages(body, looking_for, MAX_PAGE_TEXT_CHARS)
+        return {
+            "url": str(recorded.get("url") or initial),
+            "title": recorded.get("title"),
+            "content": PASSAGE_GAP.join(passages),
+            "looking_for": looking_for or None,
+            "excerpted": bool(looking_for) and len(body) > MAX_PAGE_TEXT_CHARS,
+            "page_chars": len(body),
+            "source": recorded.get("source"),
+            "retrieved_at": retrieved_at,
+            "stale": age_seconds > URL_FRESH_SECONDS,
+            "age_seconds": round(age_seconds, 1),
+            "from_record": True,
             "reason": None,
         }
 
@@ -593,6 +781,7 @@ class WebTools:
         for redirect_count in range(MAX_REDIRECTS + 1):
             # Re-validated on every hop: a redirect is a new URL chosen by the
             # server, so the first validation says nothing about this one.
+            refuse_secret_egress(current, label="URL")
             current = validate_public_url(
                 current, denylist=self._denylist(), resolver=self._resolver
             )

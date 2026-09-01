@@ -387,7 +387,15 @@ async def flagged_call() -> TurnToolCall:
     async def handler(_context, _arguments):
         return ADVERSARIAL_PAGE
 
-    registry.register(stub_entry("market_bulletin", handler=handler))
+    registry.register(
+        stub_entry(
+            "market_bulletin",
+            handler=handler,
+            schema=registry.object_schema(
+                {"url": {"type": "string"}}, ("url",)
+            ),
+        )
+    )
     outcome = await executor.ToolExecutor(
         context=registry.ToolContext(user_id=11)
     ).run(

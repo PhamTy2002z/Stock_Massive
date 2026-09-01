@@ -2,16 +2,42 @@ import type { FlagReason } from "./types"
 
 export const TOOL_CALL_COPY = {
   label: "Công cụ đã dùng", running: "Đang chạy…", ok: "Xong", error: "Lỗi",
+  // A call written down before its effect ran, and one a permission rule
+  // refused. Two more states, and each says something the other four cannot: a
+  // pending call has not started yet, and a denied one never will.
+  pending: "Chờ chạy", denied: "Không được phép",
 } as const
 
 const REFUSED_CALL_LABELS: Record<string, string> = {
   external_budget_exhausted: "Hết lượt tra", round_fanout_exceeded: "Không chạy", halted_turn: "Đã dừng",
+  // Nothing ran and nothing will: the route is closed rather than broken, so the
+  // word must not invite a retry.
+  permission_denied: "Không được phép",
 }
 
 export function toolCallErrorLabel(error: string | null): string {
   if (error === null) return TOOL_CALL_COPY.error
   return REFUSED_CALL_LABELS[error] ?? TOOL_CALL_COPY.error
 }
+
+/**
+ * The words around one question card.
+ *
+ * The prompt, the options and the skip label are the backend's — a card is
+ * written where the question is decided, and a client that composed any of them
+ * would be asking something other than what was meant. What is here is the
+ * frame: what the card is, and what each settled state means now that pressing
+ * it is over. `skip` is a fallback for a stored card that carries no label of
+ * its own, never a rewording of one that does.
+ */
+export const QUESTION_COPY = {
+  region: "Câu hỏi cần bạn trả lời",
+  skip: "Bỏ qua",
+  answered: "Bạn đã chọn",
+  skipped: "Bạn đã bỏ qua — phần sau chạy theo giả định mặc định.",
+  superseded: "Bạn đã hỏi tiếp nên câu hỏi này không còn cần trả lời.",
+  failed: "Chưa ghi được lựa chọn này. Bạn thử lại giúp nhé.",
+} as const
 
 const TERMINAL_REASONS: Record<string, string> = {
   cancelled_by_user: "Bạn đã dừng lượt này.",

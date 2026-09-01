@@ -30,11 +30,16 @@
 
 import {
   appendThought,
+  readProgressPart,
+  readProgressParts,
+  readQuestion,
   readThoughts,
   readToolCall,
   readToolCalls,
 } from "./read-content"
 import type {
+  ProgressPart,
+  QuestionPart,
   SnapshotData,
   Thought,
   ToolCall,
@@ -91,6 +96,24 @@ export interface LiveTurn {
    */
   thoughts: Thought[]
   /**
+   * What the loop did, in the order it happened.
+   *
+   * A list and never a map: a part is not revised, so there is no key to upsert
+   * under, and the order it happened in is the information. Appended by each
+   * `part.progress` and replaced wholesale by a snapshot, exactly like the
+   * answer — a snapshot restates the trail rather than adding to it.
+   */
+  progress: ProgressPart[]
+  /**
+   * The card this Turn ended by asking for, or null.
+   *
+   * One and not a list: a question is a terminal, so a Turn asks at most once.
+   * Held here so a reader watching live can answer without waiting for the
+   * refetch; a reopened Thread draws the same card from the stored message,
+   * where the outcome is merged in.
+   */
+  question: QuestionPart | null
+  /**
    * How long the Turn has been running, as the backend last reported it.
    *
    * The backend's number rather than a timer this tab started, so a reader who
@@ -130,6 +153,8 @@ export const IDLE: LiveTurn = {
   text: "",
   toolCalls: [],
   thoughts: [],
+  progress: [],
+  question: null,
   elapsedMs: 0,
   terminalReason: null,
   messageId: null,
@@ -263,6 +288,25 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
       return call === null ? advanced : { ...advanced, toolCalls: upsert(state.toolCalls, call) }
     }
 
+    case "part.progress": {
+      const part = readProgressPart(event.data)
+      // Appended, and by the part's own `seq` rather than by arrival: the two
+      // are the same on a stream that behaved, and the sequence rules above
+      // have already refused one that did not.
+      return part === null
+        ? advanced
+        : { ...advanced, progress: ordered([...state.progress, part]) }
+    }
+
+    case "part.question": {
+      // A Turn asks at most once, so this sets rather than accumulates. The
+      // state on the wire is always `pending` — the card is published in the
+      // same breath as the terminal, before the reader can have done anything
+      // with it.
+      const question = readQuestion(event.data, "pending")
+      return question === null ? advanced : { ...advanced, question }
+    }
+
     default: {
       const phase = TERMINAL_PHASE[event.type]
       return phase === undefined
@@ -281,6 +325,11 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
           }
     }
   }
+}
+
+/** The trail in the order it happened, which is the parts' own order. */
+function ordered(parts: ProgressPart[]): ProgressPart[] {
+  return [...parts].sort((left, right) => left.seq - right.seq)
 }
 
 /** The list with this call in it: replaced where it already is, appended otherwise. */
@@ -309,6 +358,15 @@ function fromSnapshot(state: LiveTurn, event: TurnEvent): LiveTurn {
     // trusting it more than the stream would make a reconnect the way to get a
     // malformed call onto the screen.
     thoughts: readThoughts(data.thoughts),
+    // Replaced wholesale for the same reason the answer is: a snapshot restates
+    // the trail that was published, so merging would show a Turn doing every
+    // step twice on every reconnect.
+    progress: readProgressParts(data.progress),
+    // A card the snapshot does not carry is kept rather than cleared: a
+    // snapshot rebuilt from a checkpoint always says null — the outcome is not
+    // read out of a draft — and a reader holding a card must not lose it to a
+    // reconnect.
+    question: readQuestion(data.question, "pending") ?? state.question,
     elapsedMs: typeof data.elapsed_ms === "number" ? data.elapsed_ms : state.elapsedMs,
     terminalReason: data.terminal_reason ?? null,
     // A terminal snapshot names the message that replaces this draft, exactly

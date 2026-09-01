@@ -21,10 +21,48 @@
  * only that they *are* strings.
  */
 
-import type { Thought, ToolCall, ToolResult } from "./types"
+import type {
+  ProgressKind,
+  ProgressPart,
+  QuestionOption,
+  QuestionPart,
+  QuestionState,
+  Thought,
+  ToolCall,
+  ToolResult,
+} from "./types"
 
-/** The three statuses a call can be in, as either source may spell it. */
+/** The five statuses a call can be in, as either source may spell it. */
 type CallStatus = ToolCall["status"]
+
+/** Every status the backend's projection has, for the read below to match on. */
+const CALL_STATUSES: readonly CallStatus[] = [
+  "pending",
+  "running",
+  "ok",
+  "error",
+  "denied",
+]
+
+/** The loop events a progress part may name, as `parts.ProgressKind` names them. */
+const PROGRESS_KINDS: readonly ProgressKind[] = [
+  "lane_selected",
+  "model_attempt",
+  "tool_round",
+  "recovery",
+  "context_pruned",
+  "tools_halted",
+  "rounds_exhausted",
+  "deadline",
+]
+
+/** What a question can have become, as `agent_question.state` spells it. */
+const QUESTION_STATES: readonly QuestionState[] = [
+  "pending",
+  "answered",
+  "skipped",
+  "superseded",
+]
 
 /**
  * One tool call, or nothing.
@@ -53,10 +91,12 @@ export function readToolCall(
   return {
     id,
     name,
-    status:
-      status === "running" || status === "ok" || status === "error"
-        ? status
-        : fallbackStatus,
+    // Matched against the list rather than against three literals, so a status
+    // the backend adds arrives as itself instead of as the fallback. The raw
+    // value is what is kept: a surface asks `toolCallWaiting` or
+    // `toolCallFailed` what to draw, and collapsing `denied` into `error` here
+    // would throw away the one fact that says pressing again cannot help.
+    status: isCallStatus(status) ? status : fallbackStatus,
     summary: summary === "" ? name : summary,
     // Absent, empty, or the wrong type all mean the same thing here: nothing to
     // say beyond the status. Only a non-empty string is a reason.
@@ -108,6 +148,104 @@ export function readResults(value: unknown): ToolResult[] {
 }
 
 
+/**
+ * One loop event, or nothing.
+ *
+ * `payload` is passed through as it arrived rather than field-checked, because
+ * what may be in it was already decided by the allowlist that built it: codes,
+ * numbers and one list of call ids, and never a page's text. What is checked is
+ * what the timeline orders and files by — a part with an unknown kind is dropped
+ * rather than drawn, since a row nobody designed says nothing a reader can use.
+ */
+export function readProgressPart(value: unknown): ProgressPart | null {
+  const record = asRecord(value)
+  if (record === null) return null
+  const kind = record.kind
+  if (!isProgressKind(kind)) return null
+  return {
+    seq: asNumber(record.seq, 0),
+    kind,
+    round: asNumber(record.round, 0),
+    payload: asRecord(record.payload) ?? {},
+    at: asString(record.at),
+  }
+}
+
+/**
+ * Every loop event in a list, malformed ones dropped, in the order they happened.
+ *
+ * Sorted by the parts' own `seq` rather than left as they arrived. The stream
+ * delivers them in order and so does the snapshot, but the order *is* the
+ * information here, and a trail that read wrongly would be a story about a Turn
+ * that never happened.
+ */
+export function readProgressParts(value: unknown): ProgressPart[] {
+  if (!Array.isArray(value)) return []
+  const parts: ProgressPart[] = []
+  for (const item of value) {
+    const part = readProgressPart(item)
+    if (part !== null) parts.push(part)
+  }
+  return parts.sort((left, right) => left.seq - right.seq)
+}
+
+/**
+ * One question card, or nothing.
+ *
+ * Refused rather than half-drawn: a card is only a card if it has a prompt and
+ * at least two answerable options, and one drawn with a missing option is a
+ * dead end the reader cannot leave. That is the same rule the backend applies
+ * when it builds one, and this is the client's half of it.
+ *
+ * `fallbackState` is the difference between the two callers, the way it is for a
+ * tool call. A card arriving on the stream carries its state and is `pending`
+ * anyway. A stored one whose state is missing has no row behind it any more —
+ * the outcome lives on a row the transcript merges in — so it is read as
+ * `superseded`: asked, and no longer something an answer can be recorded for.
+ */
+export function readQuestion(
+  value: unknown,
+  fallbackState: QuestionState,
+): QuestionPart | null {
+  const record = asRecord(value)
+  if (record === null) return null
+  const questionId = asString(record.question_id)
+  const prompt = asString(record.prompt)
+  const options = readQuestionOptions(record.options)
+  if (questionId === "" || prompt === "" || options.length < 2) return null
+  const state = record.state
+  const chosen = readStrings(record.selected_option_ids)
+  return {
+    question_id: questionId,
+    prompt,
+    options,
+    multi_select: record.multi_select === true,
+    skip_label: asString(record.skip_label),
+    state: isQuestionState(state) ? state : fallbackState,
+    // Null and an empty list are different answers: nothing was chosen, versus
+    // this is not a state that chooses. Only a state that carries choices keeps
+    // them, so an `answered` card with none left cannot be drawn as a choice.
+    selected_option_ids: chosen.length === 0 ? null : chosen,
+  }
+}
+
+/** The choices on one card, malformed ones dropped. */
+function readQuestionOptions(value: unknown): QuestionOption[] {
+  if (!Array.isArray(value)) return []
+  const options: QuestionOption[] = []
+  for (const item of value) {
+    const record = asRecord(item)
+    if (record === null) continue
+    const id = asString(record.id)
+    const label = asString(record.label)
+    // Nothing to post back, or nothing to press: not a choice and not a button.
+    if (id === "" || label === "") continue
+    const detail = asString(record.detail)
+    options.push({ id, label, detail: detail === "" ? null : detail })
+  }
+  return options
+}
+
 export function readThoughts(value: unknown): Thought[] {
   if (!Array.isArray(value)) return []
   const thoughts: Thought[] = []
@@ -147,6 +285,18 @@ export function readStrings(value: unknown): string[] {
   return value.filter(
     (item): item is string => typeof item === "string" && item.trim() !== "",
   )
+}
+
+function isCallStatus(value: unknown): value is CallStatus {
+  return typeof value === "string" && (CALL_STATUSES as readonly string[]).includes(value)
+}
+
+function isProgressKind(value: unknown): value is ProgressKind {
+  return typeof value === "string" && (PROGRESS_KINDS as readonly string[]).includes(value)
+}
+
+function isQuestionState(value: unknown): value is QuestionState {
+  return typeof value === "string" && (QUESTION_STATES as readonly string[]).includes(value)
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

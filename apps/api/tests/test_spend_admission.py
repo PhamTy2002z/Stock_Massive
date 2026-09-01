@@ -41,6 +41,7 @@ from src.alpha.models import LlmCallUsage
 from src.core.llm.admission import (
     ANALYSIS_INPUT_PER_CALL,
     ANALYSIS_OUTPUT_PER_CALL,
+    TURN_OUTPUT_TOTAL_MAX,
 )
 
 
@@ -375,6 +376,16 @@ def reconcile_call(admission, candidate, usage):
     admission.reconcile(reservation, usage)
 
 
+def widened(**overrides) -> SpendRequest:
+    """A Turn call funded like one routed to a lane with more rounds in it."""
+    return replace(
+        spend(),
+        owner_input_total=280_000,
+        owner_output_total=44_000,
+        **overrides,
+    )
+
+
 class TestTurnCeilings:
     def test_constructed_context_is_capped_per_call(self, ledger):
         admission, _ = ledger
@@ -416,6 +427,79 @@ class TestTurnCeilings:
             )
 
         assert refused.value.reason == "turn_output_total"
+
+    # A Turn's aggregate token allowance is the caller's to widen, because how
+    # many rounds a question is worth is not a fact about the ledger. What the
+    # ledger keeps is a bound on how far that can go, and the difference between
+    # "widened" and "clamped" is what these four tests are about.
+
+    def test_a_caller_that_funds_more_calls_is_held_to_the_total_it_named(
+        self, ledger
+    ):
+        admission, _ = ledger
+        # Twice the default output total, spent in two calls the default would
+        # have refused the second half of.
+        for _ in range(2):
+            reconcile_call(
+                admission,
+                widened(input_tokens=0, output_tokens=20_000),
+                Usage(output_tokens=20_000),
+            )
+
+        with pytest.raises(BudgetRefusal) as refused:
+            admission.reserve(
+                widened(input_tokens=0, output_tokens=4_001),
+                "session-model",
+            )
+
+        assert refused.value.reason == "turn_output_total"
+
+    def test_a_widened_input_total_admits_what_the_default_would_refuse(self, ledger):
+        admission, _ = ledger
+        for _ in range(3):
+            reconcile_call(
+                admission,
+                widened(input_tokens=32_000, output_tokens=0),
+                Usage(input_tokens=32_000),
+            )
+
+        # 96_000 charged, and one more full call would pass the default 100_000.
+        reservation = admission.reserve(
+            widened(input_tokens=32_000, output_tokens=0),
+            "session-model",
+        )
+
+        assert reservation.reserved_micro_usd > 0
+
+    def test_a_total_above_the_ledgers_own_ceiling_is_clamped_not_granted(
+        self, ledger
+    ):
+        admission, _ = ledger
+        greedy = dict(owner_output_total=TURN_OUTPUT_TOTAL_MAX * 10)
+        reconcile_call(
+            admission,
+            replace(
+                spend(), input_tokens=0, output_tokens=TURN_OUTPUT_TOTAL_MAX, **greedy
+            ),
+            Usage(output_tokens=TURN_OUTPUT_TOTAL_MAX),
+        )
+
+        with pytest.raises(BudgetRefusal) as refused:
+            admission.reserve(
+                replace(spend(), input_tokens=0, output_tokens=1, **greedy),
+                "session-model",
+            )
+
+        assert refused.value.reason == "turn_output_total"
+
+    @pytest.mark.parametrize("bad", [0, -1, 20_000.5, True])
+    def test_a_total_that_is_not_a_positive_count_is_a_caller_error(self, ledger, bad):
+        admission, _ = ledger
+
+        with pytest.raises(ValueError):
+            admission.reserve(
+                replace(spend(), owner_output_total=bad), "session-model"
+            )
 
     def test_monetary_ceiling_can_bind_before_either_token_total(self):
         expensive = llm_config()

@@ -52,11 +52,89 @@ THOUGHT = "thought"
 
 
 class ToolCallStatus(str, Enum):
-    """The three states the interactive surface renders a tool call in."""
+    """The five states the interactive surface renders a tool call in.
 
+    ``pending`` is a call that has been *written down* before its effect runs:
+    the harness checkpoints the intent of a batch that changes durable state, so
+    a crash between dispatch and result leaves a record saying the effect may
+    have happened. ``running`` is stronger — it means the call is on its way to
+    the tool — and the difference is the whole reason both exist.
+
+    ``denied`` is a call the declaration's permission rule refused. It never
+    reached a tool and never will, which is a different fact from ``error``: a
+    tool that broke is worth asking again and a closed route is not. The
+    ``error`` code travels beside the status on both channels — the transcript
+    and the rendered one — so a surface can say which refusal this was and not
+    only that there was one.
+
+    The Tool Call Trace keeps its own four-value vocabulary
+    (``alpha/models.py``): these are the states of a call as a *screen* and a
+    checkpoint see it, and a projection is not a trace.
+    """
+
+    PENDING = "pending"
     RUNNING = "running"
     OK = "ok"
     ERROR = "error"
+    DENIED = "denied"
+
+
+#: The states a call is in while it is still somebody's responsibility.
+#:
+#: Named once, because three readers ask the same question: the context
+#: constructor leaves an unsettled call out of the transcript entirely, the loop
+#: settles what is left of them when a Turn ends, and the lifecycle settles the
+#: same thing in a checkpoint it is about to freeze.
+UNSETTLED_STATUSES = frozenset({ToolCallStatus.PENDING, ToolCallStatus.RUNNING})
+
+#: What a call that never got to settle is recorded as.
+#:
+#: The honest reading of an interrupted call rather than a claim about the tool:
+#: something ended the Turn — a restart, a deadline, a shutdown — while this call
+#: was outstanding, and whether its effect landed is unknown. ``dispatched`` is
+#: kept as it was, because that is the only fact anybody has about it.
+CALL_INTERRUPTED = "interrupted"
+
+#: The wire spellings of the states a call has not settled into.
+#:
+#: Derived from the enum rather than written out, so a state added to the
+#: projection cannot be a state a reader of a checkpoint silently keeps freezing.
+_UNSETTLED_WIRE_STATUSES = frozenset(status.value for status in UNSETTLED_STATUSES)
+
+
+def settle_orphan_calls(
+    calls: Sequence[Mapping[str, Any]], error: str
+) -> tuple[dict[str, Any], ...]:
+    """The same calls, with nothing left in a state somebody is waiting on.
+
+    A checkpoint is a photograph of a Turn in flight, so the calls in it are
+    routinely ``pending`` or ``running``. Copied into a canonical message or a
+    frozen snapshot unchanged, those states become permanent: a Thread reopened
+    tomorrow draws a spinner on a call that stopped being anybody's business
+    before the process running it was replaced, and a transcript that does that
+    is a transcript nobody can read the history off.
+
+    Only ``status`` changes, and ``error`` only where the record carries none — a
+    call that already said why it failed knows more than this function does.
+    Every other key is copied through, ``dispatched`` among them where a payload
+    carries one: whether the call's effect landed is a fact this function cannot
+    establish and must not invent.
+
+    Pure, and it lives here beside the vocabulary it reads rather than in the
+    lifecycle that first needed it. Three places turn a checkpoint into something
+    permanent — the loop's terminal gate, the lifecycle's bare finish, and the
+    startup freeze inside the store — and the store cannot import the lifecycle.
+    A second implementation for that third caller is exactly how one of them
+    comes to miss a state the others learned about.
+    """
+    settled: list[dict[str, Any]] = []
+    for call in calls:
+        entry = dict(call)
+        if entry.get("status") in _UNSETTLED_WIRE_STATUSES:
+            entry["status"] = ToolCallStatus.ERROR.value
+            entry["error"] = entry.get("error") or error
+        settled.append(entry)
+    return tuple(settled)
 
 
 #: How each tool is described on screen, and which one of its arguments may
@@ -85,7 +163,18 @@ CHARS_PER_TOKEN = 3
 # the ids on a tool block.
 MESSAGE_OVERHEAD_TOKENS = 4
 
-SUMMARY_LABEL = "Summary of the earlier turns in this conversation:"
+#: What the summary message says about itself, before the summary.
+#:
+#: The second sentence is the recovery path, and it is a sentence rather than a
+#: tool. Nothing was deleted to make the summary: the Turns it rewrote are still
+#: in the transcript word for word, and ``session_search`` reaches them by their
+#: own words. A model told only that the earlier turns were summarised has no
+#: way to know that, so it either answers from the compression or says the
+#: detail is gone — and the second is a false statement about this system.
+SUMMARY_LABEL = (
+    "Summary of the earlier turns in this conversation. Those turns are still on "
+    "record and session_search can find them again by their own words:"
+)
 
 #: The eight things a constructed context is made of.
 #:
@@ -173,6 +262,65 @@ def _text_tokens(text: str) -> int:
 
 
 @dataclass(frozen=True)
+class UsageFeedback:
+    """What the route charged for the last call, and what this module guessed it would.
+
+    Two measurements of the same thing, with two different jobs. The estimate
+    above is a *preflight backstop*: it is all there is before a Turn's first
+    call, it is what admission reserves against, and it is a rule about
+    characters rather than a fact about a tokenizer. The route's own count is
+    the *deciding* number, and until now it was parsed, billed and persisted
+    without ever reaching the decision it should have been making.
+
+    So the ceiling is met against a projection rather than against either one:
+    the last real count, moved by however much the transcript has changed since
+    it was taken. That keeps the correction anchored to a measurement while
+    still tracking a context that grew a tool result ago.
+
+    Both fields default to zero, and that is the whole of the "no measurement
+    yet" case: the projection of an unmeasured context is ``0 + estimate - 0``,
+    which is the estimate. One arithmetic and one code path, rather than a
+    branch that only the second call of a Turn ever takes and that nothing
+    exercises until it is wrong.
+    """
+
+    #: ``input_tokens + cached_input_tokens`` of the last successful call.
+    #: Cached input is included because a cached prefix is still prompt the
+    #: model read: it is discounted, not absent, and the number this feeds is
+    #: about the context window rather than about the bill.
+    real_input_tokens: int = 0
+    #: What this module estimated for exactly the messages that call sent.
+    estimate_at_real: int = 0
+
+    @property
+    def measured(self) -> bool:
+        """Whether the route has answered at all under this Turn's context."""
+        return self.estimate_at_real > 0
+
+    @property
+    def bias(self) -> float | None:
+        """How wrong the estimate was, as a ratio, or ``None`` before it is known.
+
+        Carried rather than logged because the honest way to change
+        :data:`CHARS_PER_TOKEN` is to read this off real traffic. A constant
+        picked from a distribution nobody measured is how the estimate came to
+        be a rule about characters in the first place.
+        """
+        if not self.measured:
+            return None
+        return self.real_input_tokens / self.estimate_at_real
+
+    def project(self, estimated_tokens: int) -> int:
+        """The real cost of a context this large, as far as anything can tell.
+
+        Never negative: a transcript that shrank by more than the last call was
+        charged would otherwise project a context of below nothing, and the
+        smallest true answer is zero.
+        """
+        return max(0, self.real_input_tokens + estimated_tokens - self.estimate_at_real)
+
+
+@dataclass(frozen=True)
 class ContextComposition:
     """Where a request's input tokens went, by layer.
 
@@ -187,6 +335,13 @@ class ContextComposition:
     by construction: the parts of a message's charged text are contiguous and
     cover all of it, and the rounding is applied to running prefixes so the
     pieces sum to the whole rather than to the whole plus two.
+
+    The last two fields are not layers and :attr:`total` does not count them.
+    They say what the estimate is worth: what the route is expected to charge
+    for this context, and how far its last real count stood from the guess. They
+    ride here rather than on a log line because the reader that has to act on
+    them — the ceiling, and anything later measuring how good the estimate is —
+    is already holding the composition.
     """
 
     system_core: int = 0
@@ -196,6 +351,15 @@ class ContextComposition:
     user_intent: int = 0
     attachments: int = 0
     tool_results: int = 0
+    #: What the route is expected to charge for these layers, given what it
+    #: charged last time (:class:`UsageFeedback`). Equal to :attr:`total` until
+    #: a call of this Turn has come back with a count of its own, which is why
+    #: nothing downstream needs to ask which of the two it is looking at.
+    projected_tokens: int = 0
+    #: The last measured call's real count over its estimate, or ``None`` before
+    #: there is one. Carried so the estimate's error is a number somebody can
+    #: read off traffic rather than a thing to be argued about.
+    estimate_bias: float | None = None
 
     @property
     def total(self) -> int:
@@ -207,12 +371,20 @@ class ContextComposition:
         The loop appends messages after the context is constructed and reserves
         room for them; both halves land here, so the arithmetic that funds the
         call and the arithmetic that explains it are the same arithmetic.
+
+        The projection moves with them, by the same tokens. What separates the
+        two numbers is a property of the *last measured call* and not of what
+        was appended to this one, so leaving the projection behind would make it
+        describe a context nobody is sending.
         """
         unknown = set(layers) - set(CONTEXT_LAYERS)
         if unknown:
             raise ValueError(f"no such context layer: {sorted(unknown)}")
+        added = {name: getattr(self, name) + value for name, value in layers.items()}
         return replace(
-            self, **{name: getattr(self, name) + value for name, value in layers.items()}
+            self,
+            **added,
+            projected_tokens=self.projected_tokens + sum(layers.values()),
         )
 
     def as_dict(self) -> dict[str, int]:
@@ -355,7 +527,14 @@ class TurnToolCall:
 
     @property
     def finished(self) -> bool:
-        return self.status is not ToolCallStatus.RUNNING
+        """Whether this call has a state nobody is waiting on any more.
+
+        Read against :data:`UNSETTLED_STATUSES` rather than against ``running``
+        alone: a ``pending`` call is an intent that has been written down and not
+        yet answered, so a transcript built from it would hand the model half a
+        tool exchange — the very thing ``completed_calls`` exists to prevent.
+        """
+        return self.status not in UNSETTLED_STATUSES
 
     @property
     def model_text(self) -> str:
@@ -794,11 +973,34 @@ def context_projection(
 #:
 #: The words are chosen to say two true things and no third. The result *was*
 #: recorded — the Tool Call Trace holds it in full, and an auditor reading the
-#: Turn tomorrow can see what this call returned. And it is **not** something
-#: the model can ask for back: there is no retrieval tool in this deployment,
-#: and a sentence implying one would send the model looking for a call it cannot
-#: make, spending a round to learn that.
+#: Turn tomorrow can see what this call returned. And it is not repeated in this
+#: message, which is the whole of what the collapse did.
+#:
+#: What it deliberately does **not** say is anything about getting the body
+#: back, because that answer is not the same for every tool and the shared
+#: prefix is paid for by every collapsed line at the moment the context is
+#: already over budget. There is no retrieval tool in this deployment, so for
+#: most calls there is nothing to offer and a sentence implying otherwise would
+#: spend a round teaching the model that. The one tool where asking again is
+#: genuinely cheap says so itself, in :data:`REREAD_COSTS_NOTHING`.
 TRACE_HANDLE_PREFIX = "earlier call, recorded in full and not repeated here:"
+
+#: What a collapsed page read adds, and the only tool it is true of.
+#:
+#: A page this Thread has already read is served back out of its own trace with
+#: no request made (``tools/web.py``), so the honest cost of asking for it again
+#: is a round of the tool loop and nothing else. The model is told because the
+#: alternative is worse in both directions: a model that believes the body is
+#: gone forever either answers without evidence it could have had, or refuses on
+#: the grounds that the lookup failed.
+#:
+#: Scoped to the one tool on purpose. Re-running a search *does* reach the
+#: provider, and a line promising a free re-read beside a collapsed
+#: ``web_search`` would be false where it mattered most.
+REREAD_COSTS_NOTHING = "reading it again in this conversation costs no new request"
+
+#: The tool the note above is true of, named where the note is.
+_REREADABLE_TOOL = "fetch_url"
 
 
 def _collapsed_result(call: TurnToolCall) -> str:
@@ -826,11 +1028,19 @@ def _collapsed_result(call: TurnToolCall) -> str:
     guess whether the call failed, returned nothing, or returned something it is
     not being shown — and one of those three guesses turns a collapse into an
     answer that says the lookup did not work.
+
+    A collapsed page read says one thing more, :data:`REREAD_COSTS_NOTHING`, and
+    only when the read succeeded. A failed call left no record to serve, so the
+    page would in fact be fetched over the network, and telling the model a
+    retry is free is the kind of small lie that shows up later as a Turn that
+    spent its rounds on the one URL that never answered.
     """
     line = (
         f"{TRACE_HANDLE_PREFIX} {call.name} with arguments "
         f"{_compact(call.arguments)}"
     )
+    if call.name == _REREADABLE_TOOL and call.status is ToolCallStatus.OK:
+        line = f"{line}; {REREAD_COSTS_NOTHING}"
     links = [
         str(item.get("url") or "")
         for item in call.results[:COLLAPSED_RESULT_URLS]
@@ -1078,6 +1288,12 @@ class ConstructedContext:
     summary_needed: bool = False
     turns_dropped: int = 0
     results_collapsed: int = 0
+    #: Which rung of :func:`_reductions` this context came off, counting the
+    #: untouched one as zero. The two counters above say what was given up; this
+    #: says how far down the ladder the constructor had to walk to give it up,
+    #: which is the difference between a Turn that trimmed one old result and a
+    #: Turn that is one rung from having nothing left to trim.
+    rung: int = 0
     #: Where those tokens went. ``composition.total`` is ``estimated_tokens``,
     #: and the equality is not a coincidence to be checked but the definition:
     #: the estimate is the sum of the layers. A test pins it for every rung of
@@ -1093,6 +1309,10 @@ class ConstructedContextTooLarge(ValueError):
     over-budget context would hand admission a call it must refuse mid-Turn, and
     returning a silently mangled one is the failure this constructor exists to
     prevent.
+
+    The number it carries is the one the refusal was decided on: the projection
+    of the smallest context the ladder could build, which is that context's
+    estimate until the route has been heard from.
     """
 
     def __init__(self, estimated_tokens: int, budget: int) -> None:
@@ -1455,6 +1675,31 @@ def aged_results(turn: TranscriptTurn) -> frozenset[str]:
     )
 
 
+def worth_collapsing(turns: Sequence[TranscriptTurn]) -> frozenset[str]:
+    """The calls whose handle is genuinely smaller than the result it replaces.
+
+    A collapse is a trade: a page of prose for a line naming where it came from.
+    For a real page the trade is overwhelming, which is why the ladder makes it.
+    But a result can be *shorter* than the handle that would replace it — a rate,
+    a one-line refusal, a search that found nothing — and collapsing one of those
+    spends tokens to lose content. A ladder that did it would climb upward while
+    trying to come down, and a Turn over its ceiling would be handed a rung that
+    made its problem worse.
+
+    Decided once, on the text both sides are actually rendered from, and applied
+    to every rung. A rung whose only remaining call is not worth collapsing then
+    repeats the rung before it, which costs one comparison and keeps the ladder
+    monotone — and it keeps ``results_collapsed`` counting collapses that
+    happened rather than collapses that were asked for.
+    """
+    return frozenset(
+        call.id
+        for turn in turns
+        for call in turn.completed_calls
+        if len(_collapsed_result(call)) < len(shown_result(call))
+    )
+
+
 def _reductions(
     turns: Sequence[TranscriptTurn], budget: ContextBudget
 ) -> Iterator[tuple[int, frozenset[str]]]:
@@ -1494,15 +1739,25 @@ def _reductions(
 
 
 def build_messages(
-    transcript: Transcript, budget: ContextBudget | None = None
+    transcript: Transcript,
+    budget: ContextBudget | None = None,
+    feedback: UsageFeedback | None = None,
 ) -> ConstructedContext:
     """Construct one call's messages under the constructed-context ceiling.
 
-    Pure: the same transcript and the same budget give the same list, every
+    Pure: the same transcript, budget and feedback give the same list, every
     time. The ceiling is met here and nowhere else, which is why the ladder is
     exhaustive rather than best-effort.
+
+    *feedback* is what the route charged for this Turn's last call, and it is
+    what the ceiling is met against — the estimate is what a caller who has
+    never been told anything better falls back to, which is exactly what an
+    absent feedback describes. A caller with no route behind it (a replay, a
+    test of the ladder itself) passes nothing and gets the construction it
+    always got.
     """
     budget = budget or ContextBudget()
+    feedback = feedback or UsageFeedback()
     # A summary without a span could only be applied by guessing which Turns it
     # replaced, so an unaccompanied span is ignored rather than trusted.
     covered = transcript.summarised_turns if transcript.summary else 0
@@ -1513,15 +1768,20 @@ def build_messages(
     # the shape of a context that has not been paying for the same page four
     # times.
     aged = aged_results(live[-1]) if live else frozenset()
+    # And what collapsing would actually buy. Both the ageing above and every
+    # rung below are filtered through it, so no concession this constructor
+    # makes can leave the context larger than it was.
+    worth = worth_collapsing(live)
 
     smallest = 0
-    for dropped, collapsed in _reductions(live, budget):
-        collapsed = collapsed | aged
+    for rung, (dropped, collapsed) in enumerate(_reductions(live, budget)):
+        collapsed = (collapsed | aged) & worth
         tagged = _render_messages(transcript, live, dropped, collapsed)
         messages = tuple(piece.message for piece in tagged)
         tokens = sum(estimate_tokens(message) for message in messages)
-        smallest = tokens
-        if tokens <= budget.max_tokens:
+        projected = feedback.project(tokens)
+        smallest = projected
+        if projected <= budget.max_tokens:
             return ConstructedContext(
                 messages=messages,
                 estimated_tokens=tokens,
@@ -1531,7 +1791,12 @@ def build_messages(
                 ),
                 turns_dropped=dropped,
                 results_collapsed=len(collapsed),
-                composition=_attribute(tagged),
+                rung=rung,
+                composition=replace(
+                    _attribute(tagged),
+                    projected_tokens=projected,
+                    estimate_bias=feedback.bias,
+                ),
             )
 
     raise ConstructedContextTooLarge(smallest, budget.max_tokens)
@@ -1540,6 +1805,7 @@ def build_messages(
 __all__ = [
     "ANSWER",
     "ATTACHMENTS",
+    "CALL_INTERRUPTED",
     "CHARS_PER_TOKEN",
     "COLLAPSED_RESULT_URLS",
     "CONTEXT_LAYERS",
@@ -1557,6 +1823,7 @@ __all__ = [
     "MESSAGE_OVERHEAD_TOKENS",
     "SUMMARY_LABEL",
     "THOUGHT",
+    "UNSETTLED_STATUSES",
     "ConstructedContext",
     "ConstructedContextTooLarge",
     "ContextBudget",
@@ -1565,15 +1832,19 @@ __all__ = [
     "TranscriptTurn",
     "TurnAttachment",
     "TurnToolCall",
+    "UsageFeedback",
+    "REREAD_COSTS_NOTHING",
     "RESULT_CALLS",
     "SELECTION_CALLS",
     "TRACE_HANDLE_PREFIX",
     "aged_results",
+    "worth_collapsing",
     "build_messages",
     "context_projection",
     "dedup_key",
     "display_results",
     "estimate_tokens",
+    "settle_orphan_calls",
     "shown_result",
     "summarise_call",
 ]

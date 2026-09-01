@@ -10,6 +10,7 @@ import { FollowUps } from "./follow-ups"
 import { Markdown } from "./markdown"
 import { MessageActions } from "./message-actions"
 import { MessageShell } from "./message-shell"
+import { QuestionCard } from "./question-card"
 import { ReasoningTimeline } from "./reasoning-timeline"
 import { SourcePill } from "./source-pill"
 
@@ -49,6 +50,8 @@ export function AssistantMessage({
   onRegenerate,
   onFollowUp,
   onOpenSources,
+  onAnswerQuestion,
+  onSkipQuestion,
   className,
 }: {
   view: AssistantView
@@ -66,6 +69,15 @@ export function AssistantMessage({
   onFollowUp?: (text: string) => void
   /** Opens the panel listing every page behind this answer. */
   onOpenSources?: (messageId: number) => void
+  /**
+   * Record a choice on this answer's question card, or that it was declined.
+   *
+   * Conditional the way the flag handlers are: a surface with nowhere to send
+   * either press draws the card as the history it is rather than as a control
+   * that swallows the press.
+   */
+  onAnswerQuestion?: (questionId: string, selectedOptionIds: string[]) => void
+  onSkipQuestion?: (questionId: string) => void
   className?: string
 }) {
   // Whether the reason menu is open. Held here rather than inside the action
@@ -97,6 +109,16 @@ export function AssistantMessage({
         <p role="status" className="text-meta text-muted-foreground">
           {terminalSentence(null)}
         </p>
+      )}
+
+      {/* Directly under the prose, because the question is how this answer
+          ended: the sentence above it is what the Turn could say without one. */}
+      {view.question !== null && (
+        <QuestionCard
+          question={view.question}
+          onAnswer={onAnswerQuestion}
+          onSkip={onSkipQuestion}
+        />
       )}
 
       {/* Above the actions, because it is about the answer rather than about

@@ -36,8 +36,12 @@ of invisible and bidirectional marks first.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import html
 import re
 import unicodedata
+from urllib.parse import unquote
 
 #: Unicode code points that occupy no width, or that reorder what follows them.
 #:
@@ -69,6 +73,7 @@ INVISIBLE_CHARS = (
 )
 
 _INVISIBLE = re.compile(f"[{INVISIBLE_CHARS}]")
+_BASE64_TEXT = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/_-]{24,512}={0,2}")
 
 #: Scope names. ``ALL`` applies to every result read from outside; ``CONTEXT``
 #: adds the phrases that only make sense against something holding a system
@@ -174,7 +179,34 @@ def normalise(text: str) -> str:
     together they are the difference between a list of patterns and a list of
     patterns that can be walked around with a text editor.
     """
-    return _INVISIBLE.sub("", unicodedata.normalize("NFKC", text))
+    folded = str(text)
+    # Two bounded rounds handle nested HTML/percent encoding without turning a
+    # page into an unbounded decoder. Both transformations are deterministic
+    # and leave ordinary market prose byte-for-byte unchanged.
+    for _ in range(2):
+        decoded = html.unescape(unquote(folded))
+        if decoded == folded:
+            break
+        folded = decoded
+    folded = _INVISIBLE.sub("", unicodedata.normalize("NFKC", folded))
+
+    # Encoded directives are appended for scanning; the original content is
+    # never replaced and no decoded span enters a trace. Only short printable
+    # UTF-8 blocks are considered, keeping random binary and page assets out.
+    decoded_blocks: list[str] = []
+    for match in _BASE64_TEXT.finditer(folded):
+        token = match.group(0)
+        padded = token + "=" * (-len(token) % 4)
+        try:
+            raw = base64.b64decode(padded, altchars=b"-_", validate=True)
+            candidate = raw.decode("utf-8")
+        except (binascii.Error, UnicodeDecodeError, ValueError):
+            continue
+        if candidate and sum(character.isprintable() for character in candidate) / len(candidate) >= 0.9:
+            decoded_blocks.append(candidate)
+    if decoded_blocks:
+        folded = "\n".join((folded, *decoded_blocks))
+    return folded
 
 
 def findings_in(text: str, *, scope: str = SCOPE_ALL) -> list[str]:

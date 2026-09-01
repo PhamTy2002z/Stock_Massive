@@ -43,7 +43,12 @@ logger = logging.getLogger("golden.context_replay")
 #: corpus is a recording of a run and only changes when a run is re-exported,
 #: while the report's shape changes whenever a layer is added.
 CORPUS_SCHEMA = "golden.context-replay@1"
-REPORT_SCHEMA = "golden.context-replay-report@1"
+#: Bumped when the playbook decision entered the replay: a report now says
+#: which cases carried the pack body, and a report from before that says
+#: nothing about it while having measured every case as though it did. The two
+#: are not comparable case by case, and a version is how a reader finds that
+#: out instead of subtracting them.
+REPORT_SCHEMA = "golden.context-replay-report@2"
 
 #: The date the replayed prompt is rendered for.
 #:
@@ -312,7 +317,8 @@ def replay_case(case: Mapping[str, Any], runtime: Mapping[str, Any]) -> dict[str
     """
     from src.agent.budget import TurnBudget, thresholds_for_context
     from src.agent.domain import active_pack
-    from src.agent.loop import MAX_TOOL_ROUNDS, SYSTEM_NOTE_TOKENS
+    from src.agent.lanes import route_intent
+    from src.agent.loop import MAX_TOOL_ROUNDS, SYSTEM_NOTE_TOKENS, domain_body_reason
     from src.agent.messages import (
         SYSTEM_DYNAMIC,
         ContextBudget,
@@ -331,6 +337,18 @@ def replay_case(case: Mapping[str, Any], runtime: Mapping[str, Any]) -> dict[str
     ]
     rounds = max((call.round for call in calls), default=-1) + 1
     pack = active_pack()
+    question = str(case.get("question") or "")
+    # The same two decisions the Turn made, rebuilt from the same input it made
+    # them from. Both are pure functions of the question — the router derives
+    # the lane from it and the loop asks the pack about it — so a corpus that
+    # records the question records everything either of them read, and neither
+    # needs a field the corpus does not have.
+    #
+    # Rebuilt rather than assumed, because assuming was wrong in one direction
+    # only: a replay that gave every case the body measured a context no Turn
+    # off the domain ever sends, and reported the saving as zero by
+    # construction.
+    carries_body, body_reason = domain_body_reason(question, route_intent(question))
 
     prompt = render(
         RuntimeContext(
@@ -372,10 +390,10 @@ def replay_case(case: Mapping[str, Any], runtime: Mapping[str, Any]) -> dict[str
             Transcript(
                 system_prompt=prompt,
                 system_prefix=prompt_prefix(),
-                system_body=pack.body_text,
+                system_body=pack.body_text if carries_body else None,
                 turns=(
                     TranscriptTurn(
-                        user_text=str(case.get("question") or ""),
+                        user_text=question,
                         tool_calls=shown,
                     ),
                 ),
@@ -406,7 +424,7 @@ def replay_case(case: Mapping[str, Any], runtime: Mapping[str, Any]) -> dict[str
                 # reads. It is protected by ``keep_intact_turns`` and by the
                 # ladder never dropping the newest Turn — this is the assertion
                 # that the protection held rather than the belief that it did.
-                "intent_in_context": str(case.get("question") or "") in body,
+                "intent_in_context": question in body,
             }
         )
 
@@ -418,6 +436,11 @@ def replay_case(case: Mapping[str, Any], runtime: Mapping[str, Any]) -> dict[str
         "id": case.get("id"),
         "family": case.get("family"),
         "rounds": rounds,
+        # Whether this Turn carried the pack's playbook, and the machine reason.
+        # Printed rather than inferred from the layer, because a body of zero
+        # tokens and a body nobody asked for look the same in a breakdown.
+        "domain_body": carries_body,
+        "domain_body_reason": body_reason,
         "calls": len(calls),
         "refused_calls": sum(
             1 for entry in case.get("calls") or () if entry.get("refused")
@@ -496,6 +519,13 @@ def replay(corpus: Mapping[str, Any]) -> dict[str, Any]:
             ),
             "distinct_source_urls": len(
                 {url for case in cases for url in case["source_urls"]}
+            ),
+            # How many of them reached for the domain. The denominator of the
+            # playbook decision: a corpus where every question is about the
+            # market saves nothing by loading the body on intent, and this is
+            # the number that says so rather than a belief about the corpus.
+            "cases_carrying_the_pack_body": sum(
+                1 for case in cases if case["domain_body"]
             ),
             # Out of every (call, url) pair the Turn could point at, how many
             # the model could still see. The denominator is per model call, not

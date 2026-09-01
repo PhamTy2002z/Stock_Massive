@@ -24,10 +24,19 @@ machine it ran on.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 
 from ..prompt.contract import assert_no_formatting_hole
 from ..prompt.sections import PromptSection
+
+#: Why a question got the body when nothing in it decided either way.
+#:
+#: Ambiguity resolves towards carrying the playbook. The two ways of being wrong
+#: do not cost the same: a market question answered without the domain's rules
+#: is answered worse, while a greeting that carries them is a few hundred tokens
+#: nobody reads.
+BODY_DEFAULT_REASON = "default"
 
 
 class DomainPackInvalid(ValueError):
@@ -73,6 +82,27 @@ class DomainPack:
     #: not because a pack is expected to stay wordless.
     prompt_sections: tuple[PromptSection, ...] = ()
 
+    #: How something tradable in this domain is written, as a regular expression
+    #: source rather than a compiled pattern — a pack stays a declaration of
+    #: strings, and ``re`` caches the compilation anyway.
+    #:
+    #: Matched against the question as typed, so case carries meaning: a ticker
+    #: is shouted and ordinary prose is not. Deliberately loose at the edges,
+    #: because every shape it over-matches costs the body and nothing else.
+    symbol_shape: str = ""
+
+    #: Words that put a question inside this domain, casefolded and matched as
+    #: substrings for the reason :mod:`..lanes` matches its own that way: they
+    #: are written the way a reader types them, and no diacritic folding means a
+    #: reader who types without tone marks lands on the default, which carries
+    #: the body rather than dropping it.
+    topic_markers: tuple[str, ...] = ()
+
+    #: Words that put a question outside *every* domain — about the assistant
+    #: rather than about a market. The only evidence strong enough to withhold
+    #: the body, and only when nothing above has already claimed the question.
+    off_topic_markers: tuple[str, ...] = ()
+
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise DomainPackInvalid(
@@ -90,6 +120,19 @@ class DomainPack:
         # here means a malformed body cannot be shipped, rather than cannot be
         # noticed.
         assert_no_formatting_hole(self.prompt_sections)
+        if self.symbol_shape:
+            # Compiled here and thrown away: what the call site needs is that the
+            # source is a pattern at all. A pack whose shape does not compile
+            # would raise on its first question instead of on the way up, and
+            # ``body_reason`` has no failure mode to report it with — it answers
+            # every question, including the ones asked before anyone looked.
+            try:
+                re.compile(self.symbol_shape)
+            except re.error as error:
+                raise DomainPackInvalid(
+                    f"pack {self.name!r} declares a symbol shape that is not a "
+                    f"regular expression: {error}"
+                ) from error
 
     @property
     def body_text(self) -> str:
@@ -136,6 +179,48 @@ class DomainPack:
 
         return estimate_tokens(Message(role=Role.SYSTEM, content=self.body_text))
 
+    def body_reason(self, question: str) -> tuple[bool, str]:
+        """Whether this question is one the pack has anything to say about.
+
+        The pack answers it rather than the loop, because every rule involved is
+        a fact about the domain — what its instruments look like, what its
+        readers call things — and a loop that held those rules would be a loop a
+        second domain has to come back and edit. The loop keeps the half that is
+        about the Turn: which lane funded it.
+
+        The answer travels with the reason it was reached, the way
+        ``lanes.route_reason`` does, so a Turn that ran without the playbook can
+        say which word cost it one instead of having the question re-read after
+        the fact.
+
+        **The order of the three tests is the policy.** A symbol or a topic word
+        claims the question outright; only a question nothing has claimed is
+        allowed to be disowned. So "cách bạn hoạt động khi tôi hỏi về cổ phiếu"
+        keeps the body, while "bạn là ai" does not — the same words, and the
+        difference is that one of them names the domain.
+
+        Pure and first-match, which is what makes it testable: no clock, no
+        settings, no store, and a tuple rather than a set on either vocabulary so
+        the reason names the same word on every run.
+        """
+        # One line rather than a reader's newlines, so a pasted block is read as
+        # the sentence it is. Written out here instead of borrowed from
+        # ``lanes``: the two fold text for their own reasons, and a shared helper
+        # would make one of them move whenever the other's policy changed.
+        text = " ".join(question.split())
+        folded = text.casefold()
+        if self.symbol_shape:
+            found = re.search(self.symbol_shape, text)
+            if found is not None:
+                return True, f"symbol:{found.group()}"
+        for marker in self.topic_markers:
+            if marker in folded:
+                return True, f"topic:{marker}"
+        for marker in self.off_topic_markers:
+            if marker in folded:
+                return False, f"off_topic:{marker}"
+        return True, BODY_DEFAULT_REASON
+
     @property
     def identity(self) -> str:
         """What makes two packs the same pack, for a cache to key on.
@@ -157,4 +242,4 @@ class DomainPack:
         return digest.hexdigest()
 
 
-__all__ = ["DomainPack", "DomainPackInvalid"]
+__all__ = ["BODY_DEFAULT_REASON", "DomainPack", "DomainPackInvalid"]

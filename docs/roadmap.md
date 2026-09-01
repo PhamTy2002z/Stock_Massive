@@ -516,7 +516,7 @@ không đổi. Hai câu hỏi chuyển P5: có rút tool non-allow khỏi schema
 thấy không, và số đo tần suất chạm timeout trên mạng thật. Plan và số đo:
 [`plans/260901-1130-phase-02-capability-plane/plan.md`](../plans/260901-1130-phase-02-capability-plane/plan.md).
 
-### Phase 3 — Durable loop, lane và progress thật — **Target**
+### Phase 3 — Durable loop, lane và progress thật — **Done (2026-09-01)**
 
 **Outcome.** Loop semantics Hermes trên state OpenCode; Turn phục hồi có giới
 hạn hoặc kết thúc có lý do; tiến trình hiển thị là sự thật.
@@ -544,7 +544,25 @@ overflow, output cap, cancel, disconnect) settle đúng; 0 orphan tool state;
 0 duplicate external effect; replay timeline nhất quán sau disconnect; question
 card ba trạng thái sống qua replay.
 
-### Phase 4 — Context Engine — **Target**
+**Kết quả (2026-09-01).** Gate đạt bằng
+`pytest tests/test_agent_fault_injection.py …` (14 test / 12 dòng ma trận,
+mutation-probed; toàn suite 1283 passed, web 458 + build xanh). Trần
+round/deadline/external/output nay là `LaneProfile` (`agent/lanes.py`, light =
+hằng cũ, deep 10 round/1800s; intent router heuristic tất định, mặc định
+light); progress part typed phát từ 7 sự kiện thật của loop, sống qua
+stream/snapshot/checkpoint/message và không bao giờ vào context model;
+question part + bảng `agent_question` + endpoint answer/skip + supersede
+trong transaction tạo Turn — ba trạng thái replay qua GET thread (state
+đổi-sau-terminal không sống trong draft, amendment tường minh trong plan);
+tool call thêm `pending|denied` trên wire, intent persist trước write effect,
+mọi view persist 0 orphan sau terminal; cancel truyền xuống model call
+in-flight và read segment, write barrier chạy nốt đúng một lần. Câu hỏi mở
+chuyển P5 (guardrail rung theo lane, trace row cho call bị cancel), P6
+(routing quality + re-baseline golden trước khi nới deep), P7/P9
+(`dispatched` lên wire, trail của Turn câm). Plan và số đo:
+[`plans/260901-1154-phase-03-durable-loop-lane/plan.md`](../plans/260901-1154-phase-03-durable-loop-lane/plan.md).
+
+### Phase 4 — Context Engine — **Done (2026-09-01)**
 
 **Outcome.** Model nhận đúng context cho step hiện tại. Mục tiêu là **chất
 lượng suy luận** (context dài làm model xuống cấp), tiết kiệm token là phụ
@@ -561,7 +579,48 @@ summary fail-open về context hợp lệ gần nhất; cache boundary theo pref
 hội tụ bounded; không tách call khỏi result; evidence từ Turn trước (scout của
 elicitation) dùng lại được ở Turn sau không refetch.
 
-### Phase 5 — Permission, guardrails, web security — **Target**
+**Kết quả (2026-09-01).** Gate đạt bằng
+`pytest tests/test_agent_context_engine.py …` (29 test ở mức hệ thống; toàn
+suite 1375 passed, baseline đầu phase 1283; web 458 + build xanh). Tầng lắp ráp
+đã chín từ trước — bảy layer có kế toán, ladder bốn nấc, collapse giữ URL — nên
+phase đóng đúng bốn mảnh còn thiếu: số token **thật** của route quyết định
+context qua projection không nhánh (ước lượng giữ vai backstop preflight,
+`estimate_bias` ghi lại sai số cho P9); một trang Turn trước đã đọc được phục vụ
+lại từ bản ghi của chính thread với **0 HTTP request** và `retrieved_at` gốc
+(validate SSRF vẫn chạy trước, bản ghi không thành cửa hậu); lossy summary có
+producer là specialist ẩn chạy **sau** khi Turn settle — provenance đủ span,
+protected tail, cooldown, fail-open tuyệt đối, recovery search bằng
+`session_search` sẵn có; playbook chỉ nạp khi câu hỏi với tới nó. Không bảng,
+không cột, không migration; catalog vẫn đúng năm tool; hợp đồng HTTP/SSE chỉ
+thêm một progress kind.
+
+Hai lỗi thật do chính gate bắt được, sửa hướng-nguyên-nhân: (1)
+`ConstructedContextTooLarge` từng thoát khỏi `_call` và settle `turn_failed`,
+mất phần trả lời dở — vi phạm §4(7), nay là `incomplete/context_overflow` giữ
+narration; (2) **ladder có thể leo lên** — handle dài hơn chính kết quả khi kết
+quả ngắn, nên nấc nhường đất làm context *to hơn* và mất luôn nội dung (đo được
+129 → 182 → 235 token), nay collapse chỉ xảy ra khi thật sự đổi được, cùng
+fixture cho 129/129/129/98/67.
+
+Composition trên cùng corpus, replay thuần miễn phí: 377.434 → **377.495**
+token. Playbook-theo-intent tiết kiệm **0 trên corpus release**, và đó là số đo
+chứ không phải suy đoán: `cases_carrying_the_pack_body = 20/20` — mọi case đều
+là câu hỏi thị trường, nên corpus không thể đo được thứ này.
+
+Một dòng gate **BLIND**, không ghi xanh: "replay corpus giữ **task success**".
+Replay thuần đo token và cấu tạo, không đo chất lượng; task success cần
+`make golden-release` tiêu tiền thật và chưa có ngân sách cấp. Đây là khoản chi
+chờ product owner, không phải nợ kỹ thuật của phase.
+
+Câu hỏi mở chuyển đúng chủ: corpus release thiếu case ngoài domain nên
+playbook-theo-intent chưa có số thật (golden owner/P9); `agent_tool_call` thiếu
+index `thread_id` — cố ý để lại, cần đo trên bảng thật trước (P6); giá batch
+thật vs trần $0.015/owner của lane analysis chưa bao giờ bị chạm (P9);
+`estimate_bias` chưa có ai đọc (P9); `REPORT_SCHEMA@2` của replay chưa có
+consumer (P5). Plan và số đo:
+[`plans/260901-1643-phase-04-context-engine/plan.md`](../plans/260901-1643-phase-04-context-engine/plan.md).
+
+### Phase 5 — Permission, guardrails, web security — **Done (2026-09-01)**
 
 **Outcome.** Capability được phép vì policy typed.
 
@@ -583,6 +642,20 @@ elicitation) dùng lại được ở Turn sau không refetch.
 **Gate.** Adversarial suite: indirect injection, encoded/bidi, SSRF, redirect,
 oversized, permission bypass, repeated calls, secret leakage — 0 escalation,
 0 raw secret trong trace; benign corpus không bị block quá threshold baseline.
+
+**Kết quả.** Rule set capability/resource typed đã chạy last-match-wins,
+no-match/unknown deny; schema frozen được validate trước dispatch và các cửa
+permission/approval/availability/authorization/content escalation tách thành
+kết quả typed. Untrusted external read chặn durable write về sau trong cùng
+Turn; web secret egress bị chặn trước I/O; trace redact đệ quy; scanner nhận
+diện encoded/zero-width/bidi và vẫn fail-open. Web lane có Redis allowance toàn
+fleet và theo domain trên cache miss, giữ cache/single-flight cùng per-Turn
+logical ceiling; Phase 10 vẫn sở hữu full scale enforcement. Gate adversarial
+25 test đạt escalation `0`, raw secret `0`, benign false-positive `0/20`; toàn
+API **1401 passed**, web **458 tests** + lint/type/build xanh. Không đổi catalog
+năm tool, default permission, HTTP/SSE hay schema DB. Plan và bằng chứng:
+[`plans/260901-2304-phase-05-permission-guardrails-web-security/plan.md`](../plans/260901-2304-phase-05-permission-guardrails-web-security/plan.md),
+[`plans/reports/fullstack-260901-2304-phase-05-permission-guardrails-web-security.md`](../plans/reports/fullstack-260901-2304-phase-05-permission-guardrails-web-security.md).
 
 ### Phase 6 — Evidence engine: research 3-pass + finance evidence — **Target**
 
@@ -761,8 +834,8 @@ child, 0 budget escape. Không đạt → single-agent + Rejected.
 ## 11. Dependency
 
 ```text
-P0 done → P1 eval done → P2 capability done → P3 loop/lane ◀ next
-        → P4 context → P5 security → P6 evidence engine → P7 desk UX
+P0 done → P1 eval done → P2 capability done → P3 loop/lane done
+        → P4 context done → P5 security done → P6 evidence engine ◀ next → P7 desk UX
         → P8 memory/consent → P9 observability/release
                                    │
               ┌────────────────────┼──────────────────────┐

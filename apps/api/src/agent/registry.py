@@ -42,11 +42,12 @@ Which *bundle* a caller selects is still what decides what a lane may call
 was called, is what came back somebody else's writing.
 
 **Permission and time are declared here too, and only here.** A registration
-says whether it may run at all (:attr:`ToolEntry.permission`) and how long one
-call of it may take (:attr:`ToolEntry.timeout_seconds`). The executor enforces
-both from this declaration rather than from a table of its own, for the reason
-every other axis lives here: a second place that knows which tools are
-permitted is a second place that can disagree with the one the model was shown.
+says which capability/resource pairs may run
+(:attr:`ToolEntry.permission_rules`) and how long one call may take
+(:attr:`ToolEntry.timeout_seconds`). The executor enforces both from this
+declaration rather than from a table of its own, for the reason every other
+axis lives here: a second place that knows which tools are permitted is a
+second place that can disagree with the one the model was shown.
 """
 
 from __future__ import annotations
@@ -60,10 +61,14 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
+from fnmatch import fnmatchcase
 from types import MappingProxyType
 from typing import Any
 
 from src.core.llm import ToolSchema
+
+from .permissions import PermissionRule, ToolPermission
+from .schema_validation import assert_supported_schema
 
 logger = logging.getLogger(__name__)
 
@@ -120,20 +125,6 @@ class ToolConcurrency(str, Enum):
 
     PARALLEL_SAFE = "parallel_safe"
     SERIALIZED = "serialized"
-
-
-class ToolPermission(str, Enum):
-    """Whether a declaration may be dispatched, and on whose say-so.
-
-    ``ALLOW`` runs. ``DENY`` never runs here. ``ASK`` means a person has to
-    agree first, and there is no way to ask one yet, so the executor refuses it
-    and says so — a capability that needs consent must not run because the
-    consent machinery is missing.
-    """
-
-    ALLOW = "allow"
-    ASK = "ask"
-    DENY = "deny"
 
 
 class AvailabilityReason(str, Enum):
@@ -279,6 +270,14 @@ class ToolEntry:
     #: Both are answers this layer is not entitled to give, so it declines to
     #: give one and refuses the registration instead.
     permission: ToolPermission | None = None
+    #: Ordered capability/resource policy. ``permission`` above is the concise
+    #: spelling for one exact-capability, all-resource rule; declarations that
+    #: need resource exceptions use this tuple instead. Supplying both is
+    #: refused so there is never a hidden order between two policy sources.
+    permission_rules: tuple[PermissionRule, ...] = ()
+    #: Model argument whose value is the resource permission rules match. A
+    #: declaration with only ``resource="*"`` needs none.
+    resource_arg: str | None = None
     #: How long one call of this tool may take before the executor gives up on
     #: it and tells the model so. Declared per tool because the honest bound is
     #: a property of the work: reading a page that redirects twice is not the
@@ -298,8 +297,40 @@ class ToolEntry:
             ("concurrency", ToolConcurrency),
         ):
             object.__setattr__(self, field_name, enum_type(getattr(self, field_name)))
+        if self.permission is not None and self.permission_rules:
+            action = ToolPermission(self.permission)
+            generated = (PermissionRule(self.name, "*", action),)
+            # ``dataclasses.replace`` reconstructs the object with every field,
+            # including the rules this shorthand generated on the first pass.
+            # Accept that exact reconstruction; any independently supplied
+            # second source still conflicts and is refused.
+            if tuple(self.permission_rules) != generated:
+                raise ValueError(
+                    f"tool {self.name!r} must declare permission or "
+                    "permission_rules, not both"
+                )
         if self.permission is not None:
-            object.__setattr__(self, "permission", ToolPermission(self.permission))
+            action = ToolPermission(self.permission)
+            object.__setattr__(self, "permission", action)
+            object.__setattr__(
+                self,
+                "permission_rules",
+                (PermissionRule(self.name, "*", action),),
+            )
+        else:
+            object.__setattr__(
+                self,
+                "permission_rules",
+                tuple(
+                    rule if isinstance(rule, PermissionRule) else PermissionRule(*rule)
+                    for rule in self.permission_rules
+                ),
+            )
+        if self.resource_arg is not None:
+            resource_arg = str(self.resource_arg).strip()
+            if not resource_arg:
+                raise ValueError(f"tool {self.name!r} has a blank resource_arg")
+            object.__setattr__(self, "resource_arg", resource_arg)
         timeout = float(self.timeout_seconds)
         if not math.isfinite(timeout) or timeout <= 0:
             # A tool that may take forever has no bound at all, and a bound of
@@ -351,9 +382,9 @@ class ResolvedTool:
 
     Every axis the executor, the message layer and the budget need is carried
     here, so a task decides once what a tool is and no consumer re-derives it
-    from the live registry half a round later. :attr:`permission` is one of
-    those axes and is never absent on a snapshot of a *registered* declaration,
-    because :func:`register` refuses one that leaves it unset.
+    from the live registry half a round later. :attr:`permission_rules` is one
+    of those axes and is never empty on a snapshot of a *registered*
+    declaration, because :func:`register` refuses one that leaves it unset.
     """
 
     name: str
@@ -373,7 +404,8 @@ class ResolvedTool:
     access: ToolAccess
     content_trust: ContentTrust
     concurrency: ToolConcurrency
-    permission: ToolPermission
+    permission_rules: tuple[PermissionRule, ...]
+    resource_arg: str | None
     timeout_seconds: float
     contract_version: str
     is_async: bool
@@ -383,6 +415,17 @@ class ResolvedTool:
     def reads_external(self) -> bool:
         """Compatibility projection for trust-aware consumers."""
         return self.content_trust is ContentTrust.UNTRUSTED
+
+    @property
+    def permission(self) -> ToolPermission | None:
+        """Compatibility view for a single all-resource declaration."""
+
+        if len(self.permission_rules) != 1:
+            return None
+        rule = self.permission_rules[0]
+        if rule.capability == self.name and rule.resource == "*":
+            return rule.action
+        return None
 
     @classmethod
     def from_entry(
@@ -419,7 +462,8 @@ class ResolvedTool:
             access=entry.access,
             content_trust=entry.content_trust,
             concurrency=entry.concurrency,
-            permission=entry.permission,
+            permission_rules=entry.permission_rules,
+            resource_arg=entry.resource_arg,
             timeout_seconds=entry.timeout_seconds,
             contract_version=entry.contract_version,
             is_async=entry.is_async,
@@ -469,18 +513,32 @@ def register(entry: ToolEntry, *, override: bool = False) -> ToolEntry:
             f"tool {entry.name!r} needs a display_name a person can read; the "
             "model's name for it is not one"
         )
-    if entry.permission is None:
+    if not entry.permission_rules:
         # Refused rather than defaulted, for the reason a display name is:
         # a default here would be a rule about every tool nobody thought about,
         # decided by whoever picked the default rather than by whoever ships the
         # capability. The refusal makes the omission loud at import time instead
         # of quiet at dispatch time.
         raise ValueError(
-            f"tool {entry.name!r} needs a permission; whether it may run is a "
+            f"tool {entry.name!r} needs permission rules; whether it may run is a "
             "decision its registration has to state"
         )
     if not isinstance(entry.schema, Mapping):
         raise TypeError(f"tool {entry.name!r} needs a JSON Schema mapping")
+    assert_supported_schema(entry.schema)
+    for rule in entry.permission_rules:
+        if not fnmatchcase(entry.name, rule.capability):
+            raise ValueError(
+                f"tool {entry.name!r} carries a permission rule for another capability"
+            )
+        if rule.action is ToolPermission.ASK and entry.effect is not ToolEffect.WRITE:
+            raise ValueError(
+                f"tool {entry.name!r} may use ask only for a declared write effect"
+            )
+    if any(rule.resource != "*" for rule in entry.permission_rules) and not entry.resource_arg:
+        raise ValueError(
+            f"tool {entry.name!r} has resource rules but no resource_arg"
+        )
     existing = _ENTRIES.get(entry.name)
     if existing is not None and existing.toolset != entry.toolset and not override:
         raise ToolShadowError(entry.name, existing.toolset, entry.toolset)
@@ -692,6 +750,7 @@ __all__ = [
     "DEFAULT_TOOL_TIMEOUT_SECONDS",
     "Handler",
     "MAX_RESOLUTION_RETRIES",
+    "PermissionRule",
     "ResolvedTool",
     "ToolAccess",
     "ToolConcurrency",

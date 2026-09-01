@@ -71,10 +71,16 @@ import { UPSTREAM_UNREACHABLE } from "@/lib/connection-status"
 // off): upstream mounts a single `GET /capabilities` behind the session that
 // takes no parameters and answers the same for every caller, so nothing
 // account-specific is reachable through it.
+// `questions` is the two writes a question card makes — answer and skip.
+// Upstream mounts `POST /questions/{id}/answer` and `POST /questions/{id}/skip`
+// and nothing else, and both resolve the owner through the Thread the question
+// was asked in, so the same argument that covers `messages` covers this: a
+// wider grant here still reaches only this reader's own cards.
 const FORWARDED_RESOURCES = new Set([
   "threads",
   "turns",
   "messages",
+  "questions",
   "attachments",
   "assets",
   "usage",

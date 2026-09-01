@@ -195,10 +195,10 @@ async def test_parallel_safe_calls_overlap_and_results_keep_the_issued_order():
 @pytest.mark.asyncio
 async def test_a_write_never_overlaps_the_reads_around_it():
     surface = Surface()
-    surface.add("web_search", delay=0.02)
-    surface.add("fetch_url", delay=0.02)
-    surface.add("remember_fact", delay=0.02)
-    calls = [call("web_search"), call("fetch_url"), call("remember_fact")]
+    surface.add("session_search", delay=0.02, reads_external=False)
+    surface.add("recall_facts", delay=0.02, reads_external=False)
+    surface.add("remember_fact", delay=0.02, reads_external=False)
+    calls = [call("session_search"), call("recall_facts"), call("remember_fact")]
 
     await surface.executor().run(calls)
 
@@ -336,6 +336,116 @@ async def test_a_sequential_barrier_that_cannot_be_dispatched_answers_too():
     ]
     # The barrier after the failure still ran: one dead call is not a dead round.
     assert surface.order == ["remember_fact", "remember_fact"]
+
+
+# -- the reader stops the turn -----------------------------------------------
+
+
+def presses_stop(
+    surface: Surface, name: str, stop: asyncio.Event, *, work: float = 0.0
+) -> None:
+    """Make one tool press stop the way a reader does: while the batch is running.
+
+    It records itself in ``surface.order`` like every other tool here, and only
+    when it reaches its end — so ``work``, what this tool still has left to do
+    *after* the stop arrives, is what tells a call that was allowed to finish
+    from one that merely finished first.
+    """
+
+    async def handler(_context, arguments):
+        stop.set()
+        if work:
+            await asyncio.sleep(work)
+        surface.order.append(name)
+        return {"tool": name, "arguments": dict(arguments)}
+
+    surface.entries[name] = dataclasses.replace(
+        surface.entries[name], handler=handler
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_stop_ends_the_reads_in_flight_and_keeps_what_already_answered():
+    stop = asyncio.Event()
+    surface = Surface()
+    surface.add("fetch_url")
+    surface.add("web_search", delay=5.0)
+    surface.add("session_search", delay=5.0)
+    presses_stop(surface, "fetch_url", stop)
+    calls = [call("web_search"), call("fetch_url"), call("session_search")]
+
+    outcome = await surface.executor(cancel_event=stop).run(calls)
+
+    # One result per call, in the order the model issued them, whatever became
+    # of each.
+    assert [result.call_id for result in outcome.results] == [
+        "call-web_search",
+        "call-fetch_url",
+        "call-session_search",
+    ]
+    assert [result.error for result in outcome.results] == [
+        executor.CANCELLED_CALL,
+        None,
+        executor.CANCELLED_CALL,
+    ]
+    # Every one of them was sent, and the two that were given up on say so: the
+    # read left here, and what the other side did with it is not knowable here.
+    assert [result.dispatched for result in outcome.results] == [True, True, True]
+    # The one that answered keeps its own result rather than the stop's, and the
+    # other two were torn down rather than run to their end.
+    assert outcome.results[1].ok is True
+    assert surface.order == ["fetch_url"]
+
+
+@pytest.mark.asyncio
+async def test_a_write_already_running_finishes_once_and_the_stop_takes_the_rest():
+    """The asymmetry: a read may be abandoned, an effect may not be half made."""
+    stop = asyncio.Event()
+    surface = Surface()
+    surface.add("web_search", reads_external=False)
+    surface.add("remember_fact")
+    surface.add("session_search", delay=5.0)
+    presses_stop(surface, "remember_fact", stop, work=0.01)
+    calls = [call("web_search"), call("remember_fact"), call("session_search")]
+
+    outcome = await surface.executor(cancel_event=stop).run(calls)
+
+    # The write ran past the stop to its end, exactly once, and answered with
+    # what it did.
+    assert surface.order == ["web_search", "remember_fact"]
+    assert outcome.results[1].ok is True
+    # The read before it had already answered and is untouched.
+    assert outcome.results[0].ok is True
+    # The read behind it never left, and the record does not pretend otherwise.
+    assert (outcome.results[2].error, outcome.results[2].dispatched) == (
+        executor.CANCELLED_CALL,
+        False,
+    )
+    assert [result.call_id for result in outcome.results] == [
+        "call-web_search",
+        "call-remember_fact",
+        "call-session_search",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_batch_that_meets_a_stop_already_set_answers_every_call():
+    """Nothing runs, and nothing is left without a result to send back."""
+    stop = asyncio.Event()
+    stop.set()
+    surface = Surface()
+    surface.add("web_search")
+    surface.add("remember_fact")
+    calls = [call("web_search"), call("remember_fact")]
+
+    outcome = await surface.executor(cancel_event=stop).run(calls)
+
+    assert surface.order == []
+    assert [(result.error, result.dispatched) for result in outcome.results] == [
+        (executor.CANCELLED_CALL, False),
+        (executor.CANCELLED_CALL, False),
+    ]
+    assert len({result.call_id for result in outcome.results}) == len(calls)
 
 
 @pytest.mark.asyncio
@@ -745,7 +855,9 @@ def page(surface: Surface, name: str, body: str) -> None:
 
     surface.add(name)
     surface.entries[name] = dataclasses.replace(
-        surface.entries[name], handler=handler
+        surface.entries[name],
+        schema=registry.object_schema({"url": {"type": "string"}}, ("url",)),
+        handler=handler,
     )
 
 

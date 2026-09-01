@@ -39,6 +39,21 @@ round that wrote it, and never joins ``text``. The reader sees it in the
 timeline of what happened; the model still sees all of it, because the loop
 keeps its own full string for the transcript and that is a separate concern from
 what this module streams.
+
+**What the loop did travels as a part, in the order it happened.** A lane
+chosen, a model attempt opened and closed, a recovery performed, the rounds
+spent — each is published once as ``part.progress`` and restated on the snapshot
+under ``progress``. This module does not decide what a part may say; ``parts.py``
+owns that allowlist, and what is added here is the one property the transport
+must guarantee, which is that the trail a reconnecting reader is handed is the
+trail that was published.
+
+**A question travels the same way, once, just before the end.** A Turn that ends
+by asking publishes ``part.question`` and then its terminal event, and the
+snapshot restates the card under ``question`` — so a reader whose connection
+dropped in that gap is not the one reader who never sees it. What the reader then
+*did* with the card is not on this channel at all: it changes after the Turn
+ended, and it is read from the transcript.
 """
 
 from __future__ import annotations
@@ -55,6 +70,7 @@ from typing import Any
 from src.alpha.models import ACTIVE_TURN_STATUSES, TURN_RUNNING
 
 from .messages import ANSWER, THOUGHT
+from .parts import PROGRESS_WIRE_FIELDS, QUESTION_PENDING, QUESTION_WIRE_FIELDS
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +87,23 @@ SUBSCRIBER_QUEUE_SIZE = 256
 
 
 class EventType(str, Enum):
-    """The seven v2 event types."""
+    """The v2 event types.
+
+    ``part.progress`` and ``part.question`` were added to the seven rather than
+    in place of any of them, and the addition is why ``ENVELOPE_VERSION`` did not
+    move: the envelope is unchanged, the other types are byte-identical, and a
+    client that only listens for the events it knows never sees either.
+    """
 
     SNAPSHOT = "turn.snapshot"
     CONTENT_DELTA = "content.delta"
     TOOL_CALL = "tool.call"
+    #: One typed loop event — a lane, an attempt, a recovery — as ``parts.py``
+    #: builds it.
+    PART_PROGRESS = "part.progress"
+    #: The question that is ending this Turn, published just before the terminal
+    #: so a reader watching live is handed the card without refetching.
+    PART_QUESTION = "part.question"
     COMPLETED = "turn.completed"
     INCOMPLETE = "turn.incomplete"
     FAILED = "turn.failed"
@@ -124,7 +152,21 @@ TOOL_CALL_FIELDS = (
     # model reads. It carries pattern names and never a matched span, so nothing
     # a page wrote travels under it.
     "scan",
+    # Why the call did not answer, as the stable code this harness wrote. Never
+    # a sentence, never the tool's own message and never a page's text: the codes
+    # are a closed vocabulary of this deployment's, and the surface owns the
+    # words for them the way it already owns the words for ``terminal_reason``.
+    #
+    # On the allowlist because ``status`` alone cannot say why a call was
+    # refused. A permission rule that closed the route, an allowance of ours
+    # that was already spent and a search engine that went down are three
+    # different things to be told, and only one of the three is worth pressing
+    # again. The transcript has carried the code all along
+    # (``messages.TurnToolCall.as_wire``), so what this adds is that the live row
+    # and the stored row finally say the same thing.
+    "error",
 )
+
 
 @dataclass(frozen=True)
 class TurnEvent:
@@ -243,6 +285,14 @@ class TurnPublisher:
         # published twice — running, then its outcome — and the second event
         # replaces the first rather than adding a row.
         self._tool_calls: dict[str, dict[str, Any]] = {}
+        # Every progress part published, in the order the loop emitted them. A
+        # list and not a dictionary: a part is never revised, so there is no key
+        # to upsert under, and the order it happened in *is* the information.
+        self._progress: list[dict[str, Any]] = []
+        # The question this Turn ended by asking, if it did. One and not a list:
+        # a question is a terminal, so a Turn asks at most once, and ``None`` is
+        # what every Turn that answered instead carries.
+        self._question: dict[str, Any] | None = None
         self._status = TURN_RUNNING
         self._terminal_reason: str | None = None
         # The canonical assistant message, once the terminal transaction has
@@ -305,6 +355,15 @@ class TurnPublisher:
         )
 
     @property
+    def progress_parts(self) -> tuple[Mapping[str, Any], ...]:
+        """Every loop event this Turn reported, in the order it happened.
+
+        Not ``progress``: that name belongs to the method the loop emits
+        through, and one of the two would have silently shadowed the other.
+        """
+        return tuple(dict(part) for part in self._progress)
+
+    @property
     def subscriber_count(self) -> int:
         return len(self._subscribers)
 
@@ -359,6 +418,41 @@ class TurnPublisher:
             {key: payload.get(key) for key in TOOL_CALL_FIELDS},
         )
 
+    def progress(self, part_wire: Mapping[str, Any]) -> TurnEvent:
+        """Emit one typed loop event, exactly as ``parts.py`` shaped it.
+
+        The keys are taken by name like a tool call's are, for the same reason:
+        this is the channel the browser renders, and a payload assembled
+        somewhere else must not be able to widen it by handing over an extra
+        field. The part's own allowlist has already decided what may be *inside*
+        ``payload``.
+        """
+        return self.publish(
+            EventType.PART_PROGRESS,
+            {key: part_wire.get(key) for key in PROGRESS_WIRE_FIELDS},
+        )
+
+    def question(
+        self,
+        part_wire: Mapping[str, Any],
+        *,
+        state: str = QUESTION_PENDING,
+    ) -> TurnEvent:
+        """Emit the question ending this Turn, exactly as ``parts.py`` shaped it.
+
+        The keys are taken by name like a progress part's are, for the same
+        reason. ``state`` rides along even though it is always ``pending`` here:
+        the live card and the card a reopened Thread draws are the same component,
+        and one shape for both is what keeps the surface from having to know which
+        of the two it is looking at.
+        """
+        data = {key: part_wire.get(key) for key in QUESTION_WIRE_FIELDS}
+        data["state"] = state
+        # Nothing is chosen at the moment of asking. Carried as null rather than
+        # omitted so the key exists before the answer does.
+        data["selected_option_ids"] = None
+        return self.publish(EventType.PART_QUESTION, data)
+
     def terminal(
         self,
         event_type: EventType,
@@ -406,6 +500,15 @@ class TurnPublisher:
                 "text": self._text,
                 "thoughts": [dict(thought) for thought in self.thoughts],
                 "tool_calls": [dict(call) for call in self._tool_calls.values()],
+                # Restated like the thoughts and the calls, and for the same
+                # reason: a reader who reconnects has to be able to draw the same
+                # timeline as the reader who never left.
+                "progress": [dict(part) for part in self._progress],
+                # And the card, if this Turn ended by asking for one. Restated
+                # for the same reason again: a reader whose connection dropped
+                # between the question and the terminal would otherwise be the
+                # one reader who never sees it.
+                "question": None if self._question is None else dict(self._question),
                 "message_id": self._message_id,
                 "elapsed_ms": self.elapsed_ms,
             },
@@ -434,6 +537,10 @@ class TurnPublisher:
             identifier = call.get("id")
             if identifier:
                 self._tool_calls[str(identifier)] = call
+        elif event.type is EventType.PART_PROGRESS:
+            self._progress.append(dict(event.data))
+        elif event.type is EventType.PART_QUESTION:
+            self._question = dict(event.data)
 
     def _fan_out(self, event: TurnEvent) -> None:
         surviving: list[Subscriber] = []
@@ -487,10 +594,15 @@ def snapshot_from_draft(
     text = ""
     tool_calls: Sequence[Mapping[str, Any]] = ()
     thoughts: Sequence[Mapping[str, Any]] = ()
+    progress: Sequence[Mapping[str, Any]] = ()
     if draft:
         text = str(draft.get("text") or "")
         tool_calls = tuple(draft.get("tool_calls") or ())
         thoughts = tuple(draft.get("thoughts") or ())
+        # Absent from every checkpoint written before parts existed, which is
+        # what the empty default means: a Turn from that build reported no loop
+        # events rather than one whose trail was lost.
+        progress = tuple(draft.get("progress") or ())
     return TurnEvent(
         seq=through_seq,
         type=EventType.SNAPSHOT,
@@ -502,6 +614,14 @@ def snapshot_from_draft(
             "text": text,
             "thoughts": [dict(thought) for thought in thoughts],
             "tool_calls": [dict(call) for call in tool_calls],
+            "progress": [dict(part) for part in progress],
+            # Always null here, and the key is present so that both producers of
+            # a snapshot have one shape. A question is not read out of a
+            # checkpoint: its outcome changes after the Turn ended, so the card a
+            # reopened Thread draws comes from the transcript, where the store
+            # merges the live state in. A snapshot rebuilt from a draft would be
+            # the one view able to show a state the reader has already left.
+            "question": None,
             "message_id": message_id,
             "elapsed_ms": elapsed_ms,
         },

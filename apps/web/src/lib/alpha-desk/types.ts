@@ -12,11 +12,21 @@
  * disagree about a field that already has exactly one name.
  */
 
-/** The seven event types of the current contract. */
+/**
+ * The nine event types of the current contract.
+ *
+ * `part.progress` and `part.question` were added to the seven rather than in
+ * place of any of them, which is why {@link TURN_EVENT_VERSION} did not move:
+ * the envelope is unchanged and the other seven are byte-identical. A client
+ * only ever sees a named event it subscribed to (`use-live-turn`), so the
+ * addition costs an older build nothing.
+ */
 export type TurnEventType =
   | "turn.snapshot"
   | "content.delta"
   | "tool.call"
+  | "part.progress"
+  | "part.question"
   | "turn.completed"
   | "turn.incomplete"
   | "turn.failed"
@@ -39,14 +49,22 @@ export type TurnStatus = "admitted" | "running" | "complete" | "incomplete" | "c
  * One tool call the Turn made, as both the stream and a stored message carry it.
  *
  * `summary` is the sentence shown to the reader — the backend writes it, so the
- * surface never assembles one out of arguments it would have to interpret.
- * `status` moves from `running` to exactly one of `ok` or `error`, and the id is
- * what a later event updates rather than duplicates.
+ * surface never assembles one out of arguments it would have to interpret. The
+ * id is what a later event updates rather than duplicates.
+ *
+ * `status` is the five states the backend's own projection has
+ * (`messages.ToolCallStatus`), and the two beyond the original three are facts
+ * no other field carries. `pending` is a call *written down* before its effect
+ * ran — the harness checkpoints the intent of a batch that changes durable
+ * state, so a crash between dispatch and result still leaves a record; it is
+ * weaker than `running`, which means the call is on its way to the tool.
+ * `denied` is a call a permission rule refused: nothing ran and nothing will, so
+ * it is not a tool that broke and not something pressing again can fix.
  */
 export interface ToolCall {
   id: string
   name: string
-  status: "running" | "ok" | "error"
+  status: "pending" | "running" | "ok" | "error" | "denied"
   summary: string
   /**
    * Which round of the tool loop asked for this call, counting from zero.
@@ -57,14 +75,17 @@ export interface ToolCall {
    */
   round: number
   /**
-   * Why the call ended in `error`, as the backend's stable code — or `null`.
+   * Why the call did not answer, as the backend's stable code — or `null`.
    *
-   * `status` alone cannot answer what the reader wants to know, because three of
-   * the codes are not failures: the Turn spent its allowance of external calls,
-   * the round asked for more than it may dispatch, the tool loop was halted.
-   * Those were refused here before anything left the deployment, and drawing
-   * them like a search engine going down asks the reader to retry something
-   * retrying will not fix.
+   * `status` alone cannot answer what the reader wants to know, because several
+   * of the codes are not failures: the Turn spent its allowance of external
+   * calls, the round asked for more than it may dispatch, the tool loop was
+   * halted, a permission rule closed the route. Those were refused here before
+   * anything left the deployment, and drawing them like a search engine going
+   * down asks the reader to retry something retrying will not fix.
+   *
+   * It arrives on the stream as well as on a stored message, so a live row and
+   * the row a reopened Thread draws say the same thing.
    */
   error: string | null
   /** How many results the call produced, which is not always `results.length`. */
@@ -94,6 +115,30 @@ export type ToolCallKind = "external" | "store"
 /** What a call read, defaulting the way the backend defaults an unknown tool. */
 export function toolCallKind(call: ToolCall): ToolCallKind {
   return call.kind === "store" ? "store" : "external"
+}
+
+/**
+ * Whether this call is still on its way, whichever of the two ways that is.
+ *
+ * Asked here rather than compared to `running` at each site, because `pending`
+ * is the same thing to a reader — a call that has not come back — and a surface
+ * comparing statuses one by one gains a settled-looking row for a call still
+ * out at every site somebody forgets.
+ */
+export function toolCallWaiting(call: ToolCall): boolean {
+  return call.status === "running" || call.status === "pending"
+}
+
+/**
+ * Whether this call ended with nothing to show, whichever of the two ways.
+ *
+ * A tool that broke and a route a permission rule closed both leave the row
+ * with no result, and both are drawn as the failure they are. Which of the two
+ * it was is on `error` rather than on the status: that is where the words come
+ * from.
+ */
+export function toolCallFailed(call: ToolCall): boolean {
+  return call.status === "error" || call.status === "denied"
 }
 
 /**
@@ -157,6 +202,106 @@ export interface Thought {
   text: string
 }
 
+/**
+ * The eight loop events a Turn reports progress for (`agent/parts.py`).
+ *
+ * A closed set on the backend and a closed union here, for the same reason the
+ * payload is an allowlist there: a kind nobody named is a kind nobody decided
+ * was fit for a screen.
+ */
+export type ProgressKind =
+  | "lane_selected"
+  | "model_attempt"
+  | "tool_round"
+  | "recovery"
+  | "context_pruned"
+  | "tools_halted"
+  | "rounds_exhausted"
+  | "deadline"
+
+/**
+ * One thing the loop did, numbered within its Turn.
+ *
+ * The audit trail of the *loop* rather than a second copy of the tool calls:
+ * which ceilings the Turn was given, that it asked the model and how that
+ * asking ended, that it gave up transcript and asked again, that it ran out of
+ * rounds. Every part is emitted by the code that did the thing it names, so
+ * there is no stage a Turn is declared to have entered because a clock said so.
+ *
+ * `seq` is the part's ordinal in this Turn and not the publisher's event
+ * sequence — the two count different things, and it is the parts' own order a
+ * reader wants. `round` files it beside the calls and the narration of the same
+ * round.
+ *
+ * `payload` stays a record of unknowns on purpose. What may be inside it is
+ * decided by the backend's per-kind allowlist, which admits codes, numbers and
+ * one list of call ids and never a page's text; naming the fields here would
+ * claim a shape this client never checked. What reads them is the timeline that
+ * draws them, and it reads them by name.
+ */
+export interface ProgressPart {
+  seq: number
+  kind: ProgressKind
+  round: number
+  payload: Record<string, unknown>
+  /** The loop's own clock, UTC and ISO: how long a Turn sat inside one step. */
+  at: string
+}
+
+/**
+ * The four outcomes of one asking, as `agent_question.state` spells them.
+ *
+ * `pending` is what the Turn that asked wrote. The other three are ends: the
+ * reader chose, the reader declined and the work runs on stated assumptions, or
+ * the reader typed into the composer instead of touching the card and the next
+ * Turn made the question moot. A resolved question is never reopened.
+ */
+export type QuestionState = "pending" | "answered" | "skipped" | "superseded"
+
+/** One choice on a card: a stable id, a button, and at most one line under it. */
+export interface QuestionOption {
+  /** What the client posts back. A code, never the label — a wording can change. */
+  id: string
+  label: string
+  detail: string | null
+}
+
+/**
+ * One question a Turn ended by asking, and what became of it.
+ *
+ * The card itself is immutable and arrives identically by both routes: on the
+ * stream just before the terminal event, and on the stored message a reopened
+ * Thread reads. `state` and `selected_option_ids` are the half that changes
+ * after the Turn ended — the backend merges them in from the row that records
+ * the outcome, so the client draws one card rather than a card and a lookup.
+ *
+ * Answering is not resuming. The Turn is over; the reply is the next Turn.
+ */
+export interface QuestionPart {
+  question_id: string
+  prompt: string
+  options: QuestionOption[]
+  /** A property of the question rather than of the surface, from the first version. */
+  multi_select: boolean
+  skip_label: string
+  state: QuestionState
+  /** Null for every state that is not an answer — an empty list would read as a skip. */
+  selected_option_ids: string[] | null
+}
+
+/**
+ * What answering or skipping a question comes back as: what changed, and no more.
+ *
+ * The card itself is not restated. It is already in the transcript the caller is
+ * holding, and sending it back would give one payload two owners.
+ */
+export interface ResolvedQuestion {
+  id: string
+  state: QuestionState
+  selected_option_ids: string[] | null
+  resolved_at: string | null
+}
+
 export interface SnapshotData {
   through_seq: number
   status: TurnStatus
@@ -166,6 +311,24 @@ export interface SnapshotData {
   /** What was said on the way to it, by round. Never part of `text`. */
   thoughts: Thought[]
   tool_calls: ToolCall[]
+  /**
+   * Every loop event published so far, in the order it happened.
+   *
+   * Restated like the thoughts and the calls, so a reader who reconnects draws
+   * the same trail as the reader who never left. Absent from a snapshot rebuilt
+   * out of a checkpoint written before parts existed, which means that Turn
+   * reported no loop events rather than that its trail was lost.
+   */
+  progress?: ProgressPart[]
+  /**
+   * The card this Turn ended by asking for, or null.
+   *
+   * On the snapshot so that a reader whose connection dropped between the
+   * question and the terminal event is not the one reader who never sees it. It
+   * is always `pending` here: what the reader *did* with a card changes after
+   * the Turn ended, and that is read from the transcript.
+   */
+  question?: QuestionPart | null
   /** The canonical assistant message, once a terminal transaction wrote one. */
   message_id: number | null
   /**
@@ -191,6 +354,10 @@ export interface TurnEvent {
 export interface AssistantContent {
   text: string
   tool_calls: ToolCall[]
+  /** What the loop did, kept in the transcript rather than only on the stream. */
+  progress: ProgressPart[]
+  /** The card this answer ended by asking for, with its outcome merged in. */
+  question: QuestionPart | null
 }
 
 /** The user message, as the create transaction wrote it. */

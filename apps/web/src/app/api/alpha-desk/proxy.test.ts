@@ -42,6 +42,20 @@ describe("the resource allowlist", () => {
     expect(response.status).toBe(403)
   })
 
+  it("carries a question card's two writes, which resolve through the Thread", async () => {
+    const response = await POST(
+      request(`${ORIGIN}/api/alpha-desk/questions/q-1/skip`, {
+        method: "POST",
+        headers: { origin: "https://evil.example" },
+      }),
+      context(["questions", "q-1", "skip"]),
+    )
+
+    // Refused for the origin rather than for the resource, which is what shows
+    // the path itself got through the allowlist.
+    expect(response.status).toBe(403)
+  })
+
   it("refuses a path it was never meant to carry", async () => {
     // Without this, a signed-in user's token reaches every route they could
     // type — the operational ones behind the admin check included.

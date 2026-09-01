@@ -25,6 +25,7 @@ function view(): AssistantView {
     toolCalls: [],
     thoughts: [],
     followUps: [],
+    question: null,
     elapsedMs: 0,
     completed: true,
   }

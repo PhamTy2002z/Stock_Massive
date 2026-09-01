@@ -235,7 +235,16 @@ def render(context: RuntimeContext) -> str:
     return _STATIC_TEXT + "\n\n" + "\n".join(lines) + "\n"
 
 
-def cache_key(model: str, tool_signature: str, pack_identity: str) -> str:
+#: How a key spells the two shapes the system message comes in. Words rather
+#: than a bare flag, because this string is read by a person looking at a call's
+#: metadata and ``True`` at the end of a key says nothing about what it means.
+_WITH_BODY = "body"
+_WITHOUT_BODY = "no-body"
+
+
+def cache_key(
+    model: str, tool_signature: str, pack_identity: str, *, domain_body: bool
+) -> str:
     """The identity of a cacheable prefix.
 
     Model, version and the prompt hash — the hash so that a prose edit which
@@ -249,12 +258,29 @@ def cache_key(model: str, tool_signature: str, pack_identity: str) -> str:
     the point. Since the prompt came apart into a core and a domain body, two
     Turns on the same model with the same tools are *not* the same prompt when
     they run under different packs, and a default here would be a place for the
-    next caller to skip the pack without noticing. Nothing calls this at
-    runtime yet — prompt caching is off — so the strict signature costs one
-    argument today and prevents a silently wrong cache hit later.
+    next caller to skip the pack without noticing.
+
+    ``domain_body`` finishes that sentence. The pack's body is carried by the
+    Turns that reached for the domain and left out of the ones that did not, so
+    the pack alone does not say which of the two prompts went out. Both are
+    real, both are cacheable, and a key that could not tell them apart would
+    name a prefix the request does not begin with. Keyword-only and required
+    for the same reason as the pack: the caller has the answer in hand, and a
+    default would be somewhere to lose it.
+
+    Nothing calls this at runtime yet — prompt caching is off — so the strict
+    signature costs two arguments today and prevents a silently wrong cache hit
+    later.
     """
     return "|".join(
-        (model, PROMPT_VERSION, PROMPT_HASH, tool_signature, pack_identity)
+        (
+            model,
+            PROMPT_VERSION,
+            PROMPT_HASH,
+            tool_signature,
+            pack_identity,
+            _WITH_BODY if domain_body else _WITHOUT_BODY,
+        )
     )
 
 

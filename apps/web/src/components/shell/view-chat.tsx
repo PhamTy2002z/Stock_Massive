@@ -372,6 +372,8 @@ export function ChatView() {
                   onOpenSources={(messageId) =>
                     dispatch({ type: "open-sources", messageId })
                   }
+                  onAnswerQuestion={desk.answerQuestion}
+                  onSkipQuestion={desk.skipQuestion}
                 />
               )
             }
@@ -381,6 +383,8 @@ export function ChatView() {
                 key={entry.key}
                 entry={entry}
                 onRetry={desk.retry}
+                onAnswerQuestion={desk.answerQuestion}
+                onSkipQuestion={desk.skipQuestion}
               />
             )
           })}

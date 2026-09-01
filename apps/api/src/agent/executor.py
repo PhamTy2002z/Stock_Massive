@@ -19,13 +19,25 @@ issued, whatever order they executed in. The model reads its own batch back.
 
 **Every call produces exactly one result.** A blocked call, an unknown tool, a
 handler that raised, a call skipped because the Turn halted, a call this module
-itself failed to dispatch, a call past the round's ceiling — each returns a
-result carrying the reason. A tool call with no result is a conversation the
-provider will reject, so there is no path here that drops one. That includes
-this module's own failures: ``_dispatch`` guards the handler and the arguments,
-but the registry lookup, the availability check and the trace write sit outside
-those guards, and an exception there used to cancel every sibling in the
-``gather`` and take the round's gathered results with it.
+itself failed to dispatch, a call past the round's ceiling, a call the reader's
+stop tore down in flight — each returns a result carrying the reason. A tool call
+with no result is a conversation the provider will reject, so there is no path
+here that drops one. That includes this module's own failures: ``_dispatch``
+guards the handler and the arguments, but the registry lookup, the availability
+check and the trace write sit outside those guards, and an exception there used
+to cancel every sibling in the ``gather`` and take the round's gathered results
+with it.
+
+**A stop ends the reads and lets a write finish.** Given a ``cancel_event``, this
+module stops at the next segment boundary and answers everything still owed a
+result with :data:`CANCELLED_CALL`. Inside a parallel segment — reads only, by
+construction of :func:`plan_segments` — the calls still in flight are cancelled,
+and each of them reports that it *was* dispatched, because it was: the read left
+here, and whether the other side served it is not knowable from this side. A
+sequential barrier that has already started is never cancelled, which is where
+the property that no external effect happens twice is held: the one tool that
+writes runs to its end and answers with what it did, and the calls behind it are
+settled by the boundary check when it returns.
 
 **A round has two ceilings, because a round has two kinds of call.**
 :data:`MAX_EXTERNAL_CALLS_PER_ROUND` bounds the calls that leave this deployment
@@ -45,12 +57,13 @@ number that exists because a web search costs money spends the web allowance on
 evidence that costs nothing.
 
 **What a call is allowed to do, and for how long, is read off its declaration.**
-A tool whose registration says it may not run, or needs a person's agreement
-first, is refused here before its arguments are even parsed, and a call that
-outlives the bound its registration declared is given up on and answered. Both
-are typed results rather than exceptions, for the same reason as everything
-else on this page: the model is owed one result per call, and "you were not
-allowed to do that" and "that took too long" are two things it can act on.
+Arguments are parsed and checked against the declaration's frozen schema before
+its capability/resource rules are evaluated. A denied call or one that needs a
+person's agreement is refused before dispatch, and a call that outlives the
+bound its registration declared is given up on and answered. Both are typed
+results rather than exceptions, for the same reason as everything else on this
+page: the model is owed one result per call, and "you were not allowed to do
+that" and "that took too long" are two things it can act on.
 
 Concurrency is ``asyncio`` and not a thread pool: this codebase is async
 throughout, and the one case that genuinely blocks — a handler that declares
@@ -72,6 +85,15 @@ from typing import Any, Literal
 from . import registry
 from .definitions import ResolvedToolSurface
 from .guardrails import HALT_GUIDANCE, TurnGuardrails, Verdict, result_signature
+from .permissions import (
+    AuthorizationDenied,
+    PermissionDecision,
+    PermissionPolicy,
+    ToolPermission,
+    TurnPermissionState,
+)
+from .schema_validation import validate_arguments
+from .security import SecretEgressBlocked, redact_trace_value
 from .untrusted import scan_for_threats
 
 logger = logging.getLogger(__name__)
@@ -86,6 +108,15 @@ TOOL_FAILED = "tool_failed"
 #: permission rule withholds a call, because the model's move is the same in all
 #: of them: this route is closed, find another one.
 PERMISSION_DENIED = "permission_denied"
+#: Policy says a person must approve a real write, but no approval was supplied.
+#: Kept distinct from denial so a future approval surface never has to parse
+#: prose to discover which decision was missing.
+APPROVAL_REQUIRED = "approval_required"
+#: Untrusted content was already read in this Turn, so a later durable write is
+#: refused regardless of what that content asked the model to do.
+CONTENT_ESCALATION_BLOCKED = "content_escalation_blocked"
+SECRET_EGRESS_BLOCKED = "secret_egress_blocked"
+AUTHORIZATION_DENIED = "authorization_denied"
 #: The call outlived the bound its own declaration set. Distinct from
 #: ``tool_failed`` because the tool did not fail — it was still working — and the
 #: model's move is different: ask for less, not something else.
@@ -98,6 +129,12 @@ DISPATCH_FAILED = "dispatch_failed"
 #: Answered rather than dropped, and answered rather than raised: the round's
 #: ceiling is a limit on what runs, not on what the model hears back.
 ROUND_FANOUT_EXCEEDED = "round_fanout_exceeded"
+#: The reader stopped the Turn before this call could answer. Its own code, and
+#: not ``halted_turn``: a halt is this harness deciding the tool loop has gone
+#: wrong, and this is a person deciding they no longer want the answer. Nothing
+#: is wrong with the tool, and nothing about it should be retried on that
+#: account.
+CANCELLED_CALL = "cancelled"
 
 #: How many calls that leave this deployment one round dispatches. Arithmetic
 #: rather than taste: a Turn gets seven of them in total
@@ -213,7 +250,12 @@ class ToolExecutor:
 
     context: registry.ToolContext
     guardrails: TurnGuardrails = field(default_factory=TurnGuardrails)
+    permission_state: TurnPermissionState = field(default_factory=TurnPermissionState)
     trace: TraceWriter | None = None
+    #: Set when the reader stops the Turn this batch belongs to. Absent means a
+    #: batch that cannot be stopped, which is what every caller without a Turn
+    #: behind it — a test, a harness — legitimately is.
+    cancel_event: asyncio.Event | None = None
     #: The immutable lane-selected declaration snapshot for this task. When it
     #: is present, a globally registered name outside the selection is unknown
     #: to this executor and cannot dispatch.
@@ -287,22 +329,27 @@ class ToolExecutor:
             runnable = tuple(call for call in segment if call.id in admitted)
             if not runnable:
                 continue
+            if self._stopped():
+                # The boundary check, and the only place a not-yet-started call
+                # meets a cancellation. It is also what settles the tail of a
+                # batch whose barrier was allowed to finish: the write returns,
+                # this check sees the stop, and everything behind it is answered
+                # rather than dispatched into a Turn that has ended.
+                for call in runnable:
+                    results[call.id] = self._cancelled(call, dispatched=False)
+                continue
             if self.guardrails.halted:
                 for call in runnable:
                     results[call.id] = self._skipped(call)
                 continue
             completed: list[ToolResult | BaseException]
-            if mode == "parallel" and len(runnable) > 1:
-                # ``return_exceptions`` because the alternative is a sibling's
-                # failure cancelling calls that were about to succeed, and then
-                # a Turn that ends under ``turn_failed`` having thrown away
-                # everything the round had already paid for.
-                completed = list(
-                    await asyncio.gather(
-                        *(self._dispatch(call) for call in runnable),
-                        return_exceptions=True,
-                    )
-                )
+            # One call gets the concurrent path too when there is a stop to race
+            # it against: whether a read can be given up on must not depend on
+            # how many calls the model happened to put in one round.
+            if mode == "parallel" and (
+                len(runnable) > 1 or self.cancel_event is not None
+            ):
+                completed = await self._parallel(runnable)
             else:
                 completed = [await self._attempt(call) for call in runnable]
             for call, finished in zip(runnable, completed, strict=True):
@@ -322,6 +369,84 @@ class ToolExecutor:
             halted=self.guardrails.halted,
             halt_reason=halt_reason,
             guidance=guidance,
+        )
+
+    def _stopped(self) -> bool:
+        """Whether the reader has stopped the Turn this batch belongs to."""
+        return self.cancel_event is not None and self.cancel_event.is_set()
+
+    async def _parallel(
+        self, runnable: Sequence[ToolCall]
+    ) -> list[ToolResult | BaseException]:
+        """Run one parallel segment, given up on the moment the reader stops.
+
+        ``return_exceptions`` because the alternative is a sibling's failure
+        cancelling calls that were about to succeed, and then a Turn that ends
+        under ``turn_failed`` having thrown away everything the round had already
+        paid for.
+
+        The stop is raced against the batch rather than polled between calls:
+        polling would mean the reader waits out whichever read is slowest, which
+        on a page fetch is the whole reason they pressed stop. A call that had
+        already answered keeps its real result — it is paid for, and throwing it
+        away would make the trace of a cancelled Turn less true than the Turn was.
+        """
+        tasks = [asyncio.ensure_future(self._dispatch(call)) for call in runnable]
+        stop = self.cancel_event
+        if stop is None:
+            return list(await asyncio.gather(*tasks, return_exceptions=True))
+        stopped = asyncio.ensure_future(stop.wait())
+        pending: set[asyncio.Future[Any]] = {*tasks, stopped}
+        try:
+            while not stopped.done() and any(not task.done() for task in tasks):
+                _done, pending = await asyncio.wait(
+                    pending, return_when=asyncio.FIRST_COMPLETED
+                )
+        except asyncio.CancelledError:
+            # This batch's own ceiling, or the process being torn down. Neither
+            # is survivable here, and neither may leave a dispatch running with
+            # nobody waiting for it.
+            for task in tasks:
+                task.cancel()
+            raise
+        finally:
+            stopped.cancel()
+        for task in tasks:
+            # A no-op for everything that already answered, and the teardown for
+            # everything that had not.
+            task.cancel()
+        # Awaited rather than abandoned: a cancelled task nobody awaits is a
+        # warning on the event loop and a handler that never got to run its
+        # ``finally``.
+        gathered = await asyncio.gather(*tasks, return_exceptions=True)
+        return [
+            self._cancelled(call, dispatched=True)
+            if isinstance(outcome, asyncio.CancelledError)
+            else outcome
+            for call, outcome in zip(runnable, gathered, strict=True)
+        ]
+
+    def _cancelled(self, call: ToolCall, *, dispatched: bool) -> ToolResult:
+        """The reader stopped the Turn, and this call is told apart by when.
+
+        ``dispatched`` is a fact about this call rather than a policy: a call torn
+        down in flight had already been sent, and one the stop reached before its
+        segment ran had not. Neither will be read by the model — the Turn is over
+        — but the transcript, the trace and a recovered draft all will be, and a
+        record claiming a read never left when it did is the record that hides
+        whatever it did on the way.
+        """
+        return ToolResult(
+            call_id=call.id,
+            tool_name=call.name,
+            ok=False,
+            error=CANCELLED_CALL,
+            text=(
+                "The reader stopped this turn while this call was running."
+                if dispatched
+                else "The reader stopped this turn before this call ran."
+            ),
+            dispatched=dispatched,
         )
 
     async def _dispatch(self, call: ToolCall) -> ToolResult:
@@ -357,22 +482,9 @@ class ToolExecutor:
                     dispatched=False,
                 ),
             )
-        refusal = _permission_refusal(call.name, entry.permission)
-        if refusal is not None:
-            return await self._record(
-                call,
-                {},
-                ToolResult(
-                    call_id=call.id,
-                    tool_name=call.name,
-                    ok=False,
-                    error=PERMISSION_DENIED,
-                    text=refusal,
-                    dispatched=False,
-                ),
-            )
         try:
             arguments = _parse_arguments(call.arguments)
+            validate_arguments(arguments, _argument_schema(entry))
         except ValueError as exc:
             return await self._record(
                 call,
@@ -383,6 +495,46 @@ class ToolExecutor:
                     ok=False,
                     error=INVALID_ARGUMENTS,
                     text=str(exc),
+                    dispatched=False,
+                ),
+            )
+
+        resource = _permission_resource(entry, arguments)
+        permission = PermissionPolicy(entry.permission_rules).evaluate(
+            call.name, resource
+        )
+        refusal = _permission_refusal(call.name, permission)
+        if refusal is not None:
+            error, text = refusal
+            return await self._record(
+                call,
+                arguments,
+                ToolResult(
+                    call_id=call.id,
+                    tool_name=call.name,
+                    ok=False,
+                    error=error,
+                    text=text,
+                    dispatched=False,
+                ),
+            )
+        if (
+            entry.effect is not registry.ToolEffect.READ
+            and self.permission_state.untrusted_content_seen
+        ):
+            return await self._record(
+                call,
+                arguments,
+                ToolResult(
+                    call_id=call.id,
+                    tool_name=call.name,
+                    ok=False,
+                    error=CONTENT_ESCALATION_BLOCKED,
+                    text=(
+                        f"{call.name} was not run because this turn has already read "
+                        "untrusted external content. Start a clean turn for a "
+                        "deliberate durable write."
+                    ),
                     dispatched=False,
                 ),
             )
@@ -441,9 +593,18 @@ class ToolExecutor:
             if failure is None:
                 ok, error, text = True, None, _normalize(payload)
             else:
-                logger.warning("Tool %s failed: %s", call.name, failure)
-                payload, ok, error = None, False, TOOL_FAILED
-                text = f"{call.name} failed: {failure}"
+                safe_failure = str(redact_trace_value(str(failure)))
+                logger.warning("Tool %s failed: %s", call.name, safe_failure)
+                payload, ok = None, False
+                if isinstance(failure, SecretEgressBlocked):
+                    error = SECRET_EGRESS_BLOCKED
+                    text = safe_failure
+                elif isinstance(failure, AuthorizationDenied):
+                    error = AUTHORIZATION_DENIED
+                    text = safe_failure
+                else:
+                    error = TOOL_FAILED
+                    text = f"{call.name} failed: {safe_failure}"
         elapsed = int((time.perf_counter() - started) * 1000)
 
         # Scanned here, once, and deliberately not on the render path. What the
@@ -456,6 +617,12 @@ class ToolExecutor:
             if ok and self._reads_external(call.name)
             else None
         )
+        if (
+            ok
+            and entry.effect is registry.ToolEffect.READ
+            and entry.content_trust is registry.ContentTrust.UNTRUSTED
+        ):
+            self.permission_state.observe_untrusted_content()
 
         after = self.guardrails.after_call(
             call.name, arguments, ok=ok, result_hash=result_signature(text)
@@ -597,7 +764,7 @@ class ToolExecutor:
         entry = {
             "call_id": result.call_id,
             "tool": result.tool_name,
-            "arguments": dict(arguments),
+            "arguments": redact_trace_value(dict(arguments)),
             "ok": result.ok,
             "error": result.error,
             "guidance": result.guidance,
@@ -607,7 +774,7 @@ class ToolExecutor:
             # audit record of what an answer rested on. What is stored is
             # trimmed by whoever writes the row, which is the only layer that
             # knows the Turn's budget.
-            "result_text": result.text,
+            "result_text": redact_trace_value(result.text),
             "result_chars": len(result.text),
         }
         try:
@@ -619,35 +786,44 @@ class ToolExecutor:
         return result
 
 
-def _permission_refusal(
-    name: str, permission: registry.ToolPermission | None
-) -> str | None:
-    """Why this call may not be made, or ``None`` when it may.
-
-    Three answers rather than one sentence reused three times, because the model
-    can do something different with each: a denied tool is closed here for good,
-    a tool waiting on approval may open later, and a declaration carrying no
-    permission at all is this deployment's own bug.
-
-    That last case is refused rather than allowed. A registered tool cannot
-    reach it — :func:`registry.register` refuses an unset permission — so it can
-    only arrive from a declaration assembled outside the registry, which is the
-    kind of declaration least entitled to the benefit of the doubt.
-    """
-    if permission is registry.ToolPermission.ALLOW:
-        return None
-    if permission is registry.ToolPermission.DENY:
-        return f"{name} is not permitted in this deployment."
-    if permission is registry.ToolPermission.ASK:
-        return (
-            f"{name} may only run once a person has agreed to it, and there is "
-            "no way to ask for that agreement here yet, so the call was refused "
-            "rather than made on nobody's authority."
-        )
+def _argument_schema(entry: ToolDeclaration) -> Mapping[str, Any]:
     return (
-        f"{name} was declared without saying whether it may run, so it was "
-        "not run."
+        entry.schema.parameters
+        if isinstance(entry, registry.ResolvedTool)
+        else entry.schema
     )
+
+
+def _permission_resource(
+    entry: ToolDeclaration, arguments: Mapping[str, Any]
+) -> str:
+    if entry.resource_arg is None:
+        return "*"
+    value = arguments.get(entry.resource_arg)
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _permission_refusal(
+    name: str, decision: PermissionDecision
+) -> tuple[str, str] | None:
+    """Typed policy outcome; approval is not collapsed into denial."""
+
+    if decision.action is ToolPermission.ALLOW:
+        return None
+    if decision.action is ToolPermission.ASK:
+        return (
+            APPROVAL_REQUIRED,
+            f"{name} needs a person's approval for this resource, and no approval "
+            "was supplied, so the call was not run.",
+        )
+    detail = (
+        "no permission rule matched this resource"
+        if decision.reason == "no_matching_rule"
+        else "policy denies this resource"
+    )
+    return PERMISSION_DENIED, f"{name} is not permitted: {detail}."
 
 
 def _parse_arguments(raw: str | Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -686,7 +862,11 @@ def _normalize(payload: Any) -> str:
 
 
 __all__ = [
+    "APPROVAL_REQUIRED",
+    "AUTHORIZATION_DENIED",
     "BLOCKED_CALL",
+    "CANCELLED_CALL",
+    "CONTENT_ESCALATION_BLOCKED",
     "DISPATCH_FAILED",
     "HALTED_TURN",
     "INVALID_ARGUMENTS",
@@ -694,6 +874,7 @@ __all__ = [
     "MAX_STORE_CALLS_PER_ROUND",
     "PERMISSION_DENIED",
     "ROUND_FANOUT_EXCEEDED",
+    "SECRET_EGRESS_BLOCKED",
     "TOOL_CALL_TIMEOUT",
     "TOOL_FAILED",
     "TOOL_UNAVAILABLE",

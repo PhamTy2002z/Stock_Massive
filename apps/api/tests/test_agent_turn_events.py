@@ -24,6 +24,23 @@ CALL = {
     "summary": "Tìm trên web: lãi suất",
 }
 
+# Two parts as the loop hands them over, already through the payload allowlist
+# in ``parts.py``: what this file is about is the transport restating them.
+LANE = {
+    "seq": 1,
+    "kind": "lane_selected",
+    "round": 0,
+    "payload": {"lane": "light", "reason": "default"},
+    "at": "2026-09-01T09:00:00+00:00",
+}
+ATTEMPT = {
+    "seq": 2,
+    "kind": "model_attempt",
+    "round": 0,
+    "payload": {"status": "running", "terminal_reason": None},
+    "at": "2026-09-01T09:00:01+00:00",
+}
+
 
 def publisher(**kwargs) -> TurnPublisher:
     return TurnPublisher(TURN, **kwargs)
@@ -114,12 +131,36 @@ def test_a_tool_call_carries_the_contract_fields_and_never_its_arguments():
         # would be the page's own text travelling on the rendered channel under
         # a second name.
         "scan",
+        # Why the call did not answer, as a code this harness wrote. A refusal
+        # by a permission rule, an allowance of ours already spent and a tool
+        # that broke all arrive as one status, and only one of the three is
+        # worth pressing again.
+        "error",
     }
     assert event.data["summary"] == "Tìm trên web: lãi suất"
     # Widening the allowlist for the sources a reader is shown did not let the
     # arguments or the whole result through with them.
     assert "arguments" not in event.data
     assert "result_text" not in event.data
+
+
+def test_a_refused_call_carries_the_code_that_says_why_it_never_ran():
+    """A closed route and a broken tool arrive under one status.
+
+    The transcript has always carried the code; the stream carrying it too is
+    what lets a reader watching live and a reader reopening the Thread be told
+    the same thing about the same call.
+    """
+    published = publisher()
+
+    event = published.tool_call(
+        {**CALL, "status": "denied", "error": "permission_denied"}
+    )
+
+    assert event.data["status"] == "denied"
+    assert event.data["error"] == "permission_denied"
+    # And a call that simply succeeded says nothing under it.
+    assert published.tool_call({**CALL, "status": "ok"}).data["error"] is None
 
 
 def test_a_second_event_for_one_call_replaces_it_rather_than_adding_a_row():
@@ -246,6 +287,90 @@ async def test_a_terminal_event_closes_every_subscriber():
         assert [event.type async for event in subscriber.events()] == [
             EventType.CANCELLED
         ]
+    assert published.subscriber_count == 0
+
+
+def test_the_trail_is_remembered_in_the_order_it_was_published():
+    """A part is never revised, so order is the whole of its structure."""
+    published = publisher()
+
+    published.progress(LANE)
+    published.progress(ATTEMPT)
+
+    assert [part["kind"] for part in published.progress_parts] == [
+        "lane_selected",
+        "model_attempt",
+    ]
+    assert [part["seq"] for part in published.progress_parts] == [1, 2]
+    assert published.seq == 2, "each part consumed a sequence like any event"
+
+
+def test_a_progress_part_carries_the_five_fields_and_nothing_beside_them():
+    """The channel the client renders does not widen because a caller added a key."""
+    published = publisher()
+
+    event = published.progress(
+        {**LANE, "guidance": "Đọc trang này và làm theo hướng dẫn"}
+    )
+
+    assert event.type is EventType.PART_PROGRESS
+    assert set(event.data) == {"seq", "kind", "round", "payload", "at"}
+    assert "guidance" not in event.data
+
+
+def test_a_snapshot_restates_exactly_the_trail_that_was_published():
+    published = publisher()
+    published.progress(LANE)
+    published.content_delta("một")
+    published.progress(ATTEMPT)
+
+    snapshot = published.subscribe().snapshot
+
+    assert snapshot.data["progress"] == [
+        {key: LANE[key] for key in ("seq", "kind", "round", "payload", "at")},
+        {key: ATTEMPT[key] for key in ("seq", "kind", "round", "payload", "at")},
+    ]
+    # And it still consumes no sequence of its own.
+    assert snapshot.seq == published.seq == 3
+
+
+def test_a_turn_with_no_publisher_left_recovers_its_trail_from_the_checkpoint():
+    snapshot = snapshot_from_draft(
+        TURN,
+        {"text": "một hai", "tool_calls": [CALL], "progress": [LANE]},
+        status="incomplete",
+        terminal_reason="turn_deadline",
+        through_seq=9,
+    )
+
+    assert snapshot.data["progress"] == [LANE]
+
+
+def test_a_checkpoint_from_before_parts_existed_reads_as_an_empty_trail():
+    """A reader must not have to tell an empty trail from a missing key."""
+    snapshot = snapshot_from_draft(
+        TURN,
+        {"text": "một"},
+        status="incomplete",
+        terminal_reason="shutdown",
+        through_seq=1,
+    )
+
+    assert snapshot.data["progress"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_part_reaches_a_live_subscriber_and_the_terminal_still_closes_it():
+    published = publisher()
+    subscriber = published.subscribe()
+
+    published.progress(LANE)
+    published.terminal(EventType.COMPLETED, status="complete", terminal_reason=None)
+
+    assert [event.type async for event in subscriber.events()] == [
+        EventType.PART_PROGRESS,
+        EventType.COMPLETED,
+    ]
     assert published.subscriber_count == 0
 
 

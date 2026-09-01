@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy import delete
 
 from golden.run import read_case
+from src.agent import registry
 from src.agent.executor import ToolCall, ToolExecutor
 from src.agent.messages import ToolCallStatus, TurnToolCall
 from src.agent.persistence import TURN_COMPLETE, AgentPersistence
@@ -89,6 +90,9 @@ async def wire_payload(
     entry = stub_entry(
         name,
         handler=handler,
+        schema=registry.object_schema(
+            {"url": {"type": "string"}}, ("url",)
+        ),
         access=ToolAccess.NETWORK if external else ToolAccess.STORE,
         reads_external=external,
     )

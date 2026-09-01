@@ -9,8 +9,9 @@ from datetime import date, datetime, timezone
 import pytest
 from sqlalchemy import delete, select
 
-from src.agent import toolsets
-from src.agent.events import EventType
+from src.agent import registry, toolsets
+from src.agent.events import EventType, TurnPublisher, snapshot_from_draft
+from src.agent.lanes import DEEP, DEFAULT_REASON, LIGHT, LaneProfile
 from src.agent.loop import AgentLoop, ContextBudget, TurnDraft
 from src.agent.persistence import (
     TURN_COMPLETE,
@@ -20,12 +21,22 @@ from src.agent.persistence import (
     TurnPayloadConflict,
 )
 from src.agent.prompt import RuntimeContext
+from src.agent.parts import (
+    QUESTION_ANSWERED,
+    QUESTION_PENDING,
+    QUESTION_SKIPPED,
+    QUESTION_SUPERSEDED,
+    QuestionOption,
+    QuestionPart,
+)
 from src.agent.turns import (
     MAX_USER_INPUT_BYTES,
     Checkpointer,
+    RunningTurn,
     TurnService,
     UserInputTooLarge,
     assert_input_within_cap,
+    settle_orphan_calls,
 )
 from src.alpha.models import (
     AgentMessage,
@@ -114,11 +125,12 @@ def wants(name: str) -> Completion:
 def service(client, *, loop=None, **overrides) -> TurnService:
     loop_kwargs = loop or {}
 
-    def loop_factory(*, checkpoint, publisher):
+    def loop_factory(*, checkpoint, publisher, lane):
         return AgentLoop(
             client=client,
             config=config(),
             budget=ContextBudget(max_tokens=30_000),
+            lane=lane,
             checkpoint=checkpoint,
             publisher=publisher,
             **loop_kwargs,
@@ -185,6 +197,62 @@ async def test_the_user_message_and_the_turn_commit_before_execution(owner):
 
     release.set()
     await turns.running(turn_id).task
+
+
+@pytest.mark.asyncio
+async def test_the_question_picks_the_lane_once_and_the_loop_is_built_from_it(owner):
+    thread_id = await thread_for(owner)
+    built: list[LaneProfile] = []
+
+    def loop_factory(*, checkpoint, publisher, lane):
+        built.append(lane)
+        return AgentLoop(
+            client=FakeClient([answer("Xong.")]),
+            config=config(),
+            lane=lane,
+            checkpoint=checkpoint,
+            publisher=publisher,
+        )
+
+    turns = TurnService(store=store(), loop_factory=loop_factory, config=config())
+    turn_id = uuid.uuid4()
+
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="Viết memo về FPT giúp tôi.",
+        runtime=runtime(owner),
+    )
+    running = turns.running(turn_id)
+    await running.task
+
+    # Routed once, carried on the running Turn with the reason it was routed,
+    # and the loop is built from that same lane rather than a second reading of
+    # the question.
+    assert built == [DEEP]
+    assert running.lane is DEEP
+    assert running.lane_reason == "keyword:memo"
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_question_runs_on_the_lane_this_build_always_had(owner):
+    thread_id = await thread_for(owner)
+    turns = service(FakeClient([answer("Xong.")]))
+    turn_id = uuid.uuid4()
+
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="FPT thế nào?",
+        runtime=runtime(owner),
+    )
+    running = turns.running(turn_id)
+    await running.task
+
+    assert running.lane is LIGHT
+    assert running.lane_reason == DEFAULT_REASON
 
 
 @pytest.mark.asyncio
@@ -475,11 +543,55 @@ async def test_a_cancel_is_idempotent_and_dispatches_no_further_call(owner):
     await turns.running(turn_id).task
 
     assert first.cancel_requested_at == second.cancel_requested_at
-    assert finished == ["done"]  # the read-only call in flight was allowed to end
+    assert finished == ["done"]  # the barrier in flight was allowed to end
     assert len(client.requests) == 1
     record = await store().read_turn(owner, turn_id)
     assert record.status == "cancelled"
     assert record.terminal_reason == "cancelled_by_user"
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_reaches_the_work_in_flight_and_not_only_the_next_boundary(
+    owner,
+):
+    """One stop, said twice: a flag a boundary can read and an event a wait can.
+
+    The flag alone means a Turn holding a ninety-second model call keeps holding
+    it after the reader has gone. The event is what the model call and a segment
+    of read-only tools are woken by, and both are set by this one call.
+    """
+    thread_id = await thread_for(owner)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow(_context, _arguments):
+        started.set()
+        await release.wait()
+        return {"symbol": "FPT", "ok": True}
+
+    install(entry("slow", slow))
+    turns = service(FakeClient([wants("slow"), answer("Không tới đây.")]))
+    turn_id = uuid.uuid4()
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="FPT thế nào?",
+        runtime=runtime(owner),
+    )
+    await started.wait()
+    running = turns.running(turn_id)
+    assert running.cancel_event.is_set() is False
+
+    await turns.cancel(owner, turn_id)
+
+    assert running.cancel_requested is True
+    assert running.cancel_event.is_set() is True
+    release.set()
+    await running.task
+
+    record = await store().read_turn(owner, turn_id)
+    assert record.status == "cancelled"
 
 
 # --- checkpointing ---------------------------------------------------------
@@ -572,6 +684,210 @@ async def test_the_last_event_sequence_is_persisted_with_the_checkpoint(owner):
     assert record.last_event_seq > 0
 
 
+@pytest.mark.asyncio
+async def test_the_checkpoint_and_the_replayed_snapshot_carry_the_loops_trail(owner):
+    """The audit trail has to survive the process that produced it.
+
+    A reader who reconnects after the Turn ended is answered from the
+    checkpoint, so the trail on the stream and the trail in the store are the
+    same trail or one of the two readers is being told a different story.
+    """
+    thread_id = await thread_for(owner)
+    turns = service(FakeClient([wants("web_search"), answer("Kết luận.")]))
+    turn_id = uuid.uuid4()
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="FPT thế nào?",
+        runtime=runtime(owner),
+    )
+    await turns.running(turn_id).task
+
+    record = await store().read_turn(owner, turn_id)
+    trail = record.draft_content["progress"]
+    assert [part["kind"] for part in trail] == [
+        "lane_selected",
+        "model_attempt",
+        "model_attempt",
+        "tool_round",
+        "model_attempt",
+        "model_attempt",
+    ]
+    assert [part["seq"] for part in trail] == [1, 2, 3, 4, 5, 6]
+
+    subscriber = await turns.subscribe(owner, turn_id)
+    assert subscriber.snapshot.data["progress"] == trail
+
+
+@pytest.mark.asyncio
+async def test_the_canonical_message_says_which_lane_answered_and_why(owner):
+    """The transcript is the only view a reopened Thread has of the trail."""
+    thread_id = await thread_for(owner)
+    turns = service(FakeClient([answer("Xong.")]))
+    turn_id = uuid.uuid4()
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="Viết memo về FPT giúp tôi.",
+        runtime=runtime(owner),
+    )
+    await turns.running(turn_id).task
+
+    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
+    trail = assistant.content["progress"]
+    # The router's decision, carried from where it was taken to where it is
+    # read back: the loop reports the lane it was built with and the reason the
+    # Turn was routed to it, rather than re-deriving either.
+    assert trail[0]["kind"] == "lane_selected"
+    assert trail[0]["payload"] == {"lane": DEEP.name, "reason": "keyword:memo"}
+    assert [part["payload"]["status"] for part in trail[1:]] == [
+        "running",
+        "completed",
+    ]
+
+
+# --- nothing is left waiting when a Turn ends ------------------------------
+
+
+def test_settling_a_leftover_call_says_nothing_about_its_effect():
+    """Only the state changes. Whether the effect landed is not ours to invent."""
+    calls = [
+        {"id": "c1", "name": "remember_fact", "status": "pending", "dispatched": True},
+        {"id": "c2", "name": "web_search", "status": "running", "dispatched": False},
+        {"id": "c3", "name": "web_search", "status": "ok", "dispatched": True},
+        # A call that already said why it stopped keeps its own reason.
+        {
+            "id": "c4",
+            "name": "web_search",
+            "status": "running",
+            "error": "tool_call_timeout",
+        },
+    ]
+
+    settled = settle_orphan_calls(calls, "interrupted")
+
+    assert [call["status"] for call in settled] == ["error", "error", "ok", "error"]
+    assert [call.get("error") for call in settled] == [
+        "interrupted",
+        "interrupted",
+        None,
+        "tool_call_timeout",
+    ]
+    assert [call.get("dispatched") for call in settled] == [True, False, True, None]
+    # Pure: the caller's own list is untouched.
+    assert calls[0]["status"] == "pending"
+
+
+def narrating(name: str, text: str = "Đang ghi lại.") -> Completion:
+    """A round that says something and then asks for one tool call."""
+    return Completion(
+        model="gpt-5.6-terra",
+        text=text,
+        tool_calls=(
+            ToolCall(id="c1", name=name, arguments={"query": "FPT"}, output_index=0),
+        ),
+        usage=Usage(input_tokens=10, output_tokens=5),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_deadline_settles_the_write_its_checkpoint_had_written_down(owner):
+    """The intent survives the deadline, and it does not survive as a spinner.
+
+    A call that changes durable state is checkpointed before it is dispatched, so
+    a Turn the wall clock kills mid-write leaves a record of it. What that record
+    must not do is stay ``pending`` for ever: the transcript and the snapshot a
+    reconnecting reader is answered from both say the call was interrupted.
+    """
+    thread_id = await thread_for(owner)
+
+    async def sleepy(_context, _arguments):
+        await asyncio.sleep(5)
+        return {"ok": True}
+
+    registry.register(entry("remember_fact", sleepy), override=True)
+    turns = service(
+        FakeClient([narrating("remember_fact"), answer("Không tới đây.")]),
+        deadline_seconds=0.05,
+    )
+    turn_id = uuid.uuid4()
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="Ghi nhớ giúp tôi.",
+        runtime=runtime(owner),
+    )
+    await turns.running(turn_id).task
+
+    record = await store().read_turn(owner, turn_id)
+    assert record.status == TURN_INCOMPLETE
+    assert record.terminal_reason == "turn_deadline"
+    # The persisted draft, which is what a later subscriber is answered from.
+    persisted = record.draft_content["tool_calls"]
+    assert [call["id"] for call in persisted] == ["c1"]
+    assert [call["status"] for call in persisted] == ["error"]
+    assert [call["error"] for call in persisted] == ["interrupted"]
+    # And the canonical message, which is what a reopened Thread renders.
+    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
+    assert [call["status"] for call in assistant.content["tool_calls"]] == ["error"]
+    subscriber = await turns.subscribe(owner, turn_id)
+    assert [
+        call["status"] for call in subscriber.snapshot.data["tool_calls"]
+    ] == ["error"]
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_freezes_no_call_anybody_is_still_waiting_on(owner):
+    """A restart leaves calls mid-flight, and the freeze is where they settle.
+
+    The build that was answering is gone, so nothing is coming back for them:
+    frozen as they were, the transcript would draw a spinner on every one of
+    them for as long as the Thread exists.
+    """
+    thread_id = await thread_for(owner)
+    message = await store().append_message(
+        thread_id, role="user", content={"text": "FPT thế nào?"}
+    )
+    turn_id = uuid.uuid4()
+    with get_sync_db() as session:
+        session.add(
+            AgentTurn(
+                id=turn_id,
+                thread_id=thread_id,
+                request_message_id=message.id,
+                status=TURN_RUNNING,
+                last_event_seq=4,
+                started_at=datetime.now(timezone.utc),
+                draft_content={
+                    "text": "Một phần đã kịp nói.",
+                    "tool_calls": [
+                        {"id": "c1", "name": "web_search", "status": "ok"},
+                        {"id": "c2", "name": "web_search", "status": "running"},
+                        {"id": "c3", "name": "remember_fact", "status": "pending"},
+                    ],
+                    "rounds_used": 1,
+                },
+            )
+        )
+
+    await service(FakeClient([])).sweep()
+
+    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
+    frozen = assistant.content["tool_calls"]
+    # The call that had answered keeps its state; the two the restart caught are
+    # settled, and neither is left in a state the surface draws as in flight.
+    assert [call["status"] for call in frozen] == ["ok", "error", "error"]
+    # The one that had answered gains no reason of its own.
+    assert [call.get("error") for call in frozen] == [
+        None,
+        "interrupted",
+        "interrupted",
+    ]
+
+
 # --- the startup sweep -----------------------------------------------------
 
 
@@ -629,6 +945,53 @@ async def test_a_turn_left_running_by_a_restart_is_frozen_incomplete(owner):
     assert assistant.content["text"] == "Một phần đã kịp nói."
     assert assistant.content["status"] == TURN_INCOMPLETE
     assert [call["id"] for call in assistant.content["tool_calls"]] == ["c1"]
+    # A checkpoint written before parts existed reads as a Turn that reported no
+    # loop events, rather than as one whose trail was lost.
+    assert assistant.content["progress"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_swept_turn_keeps_the_trail_its_checkpoint_held(owner):
+    """The freeze knows two things — the status and the reason — and copies the rest."""
+    thread_id = await thread_for(owner)
+    message = await store().append_message(
+        thread_id, role="user", content={"text": "FPT thế nào?"}
+    )
+    trail = [
+        {
+            "seq": 1,
+            "kind": "lane_selected",
+            "round": 0,
+            "payload": {"lane": "light", "reason": "default"},
+            "at": "2026-08-14T02:00:00+00:00",
+        },
+        {
+            "seq": 2,
+            "kind": "model_attempt",
+            "round": 0,
+            "payload": {"status": "running", "terminal_reason": None},
+            "at": "2026-08-14T02:00:01+00:00",
+        },
+    ]
+    turn_id = uuid.uuid4()
+    with get_sync_db() as session:
+        session.add(
+            AgentTurn(
+                id=turn_id,
+                thread_id=thread_id,
+                request_message_id=message.id,
+                status=TURN_RUNNING,
+                last_event_seq=6,
+                started_at=datetime.now(timezone.utc),
+                draft_content={**_checkpoint_of_an_older_build(), "progress": trail},
+            )
+        )
+
+    await service(FakeClient([])).sweep()
+
+    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
+    assert assistant.content["progress"] == trail
+    assert assistant.content["status"] == TURN_INCOMPLETE
 
 
 @pytest.mark.asyncio
@@ -690,6 +1053,44 @@ async def test_shutdown_gives_an_active_turn_its_window_to_checkpoint(owner):
     assert record.terminal_reason == "shutdown"
     assert record.finished_at is not None
     assert turns.running_ids == ()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_stops_every_running_turn_the_way_a_reader_would(owner):
+    """The window is for reaching a checkpoint, not for waiting out a route.
+
+    A Turn that spends the grace period inside a model call this process will not
+    be alive to read from is a Turn that reaches no checkpoint at all, so a
+    shutdown says the same stop a reader says — to every Turn it finds running.
+    """
+    thread_id = await thread_for(owner)
+    started = asyncio.Event()
+
+    async def slow(_context, _arguments):
+        started.set()
+        await asyncio.sleep(0.05)
+        return {"symbol": "FPT", "ok": True}
+
+    install(entry("slow", slow))
+    turns = service(FakeClient([wants("slow"), answer("Kết luận cuối cùng.")]))
+    turn_id = uuid.uuid4()
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="FPT thế nào?",
+        runtime=runtime(owner),
+    )
+    await started.wait()
+    running = turns.running(turn_id)
+
+    await turns.shutdown(timeout=5.0)
+
+    assert running.shutting_down is True
+    assert running.cancel_event.is_set() is True
+    record = await store().read_turn(owner, turn_id)
+    assert record.status == TURN_INCOMPLETE
+    assert record.terminal_reason == "shutdown"
 
 
 def _reservation(user_id: int, owner_id: str, when: datetime) -> LlmCallUsage:
@@ -962,3 +1363,177 @@ async def test_the_same_id_with_different_symbols_is_also_a_conflict(owner):
             symbols=("VCB",),
             runtime=runtime(owner),
         )
+
+
+# --- ending a Turn by asking ------------------------------------------------
+
+
+def card(**overrides) -> QuestionPart:
+    fields = {
+        "question_id": str(uuid.uuid4()),
+        "prompt": "Bạn mua mới hay trung bình giá?",
+        "options": [
+            QuestionOption(id="new", label="Mua mới"),
+            QuestionOption(id="average", label="Trung bình giá", detail="Đã có vị thế"),
+        ],
+    }
+    fields.update(overrides)
+    return QuestionPart(**fields)
+
+
+async def committed_turn(owner: int, thread_id: uuid.UUID) -> RunningTurn:
+    """A Turn committed and held the way the service holds one, and nothing run.
+
+    ``settle_with_question`` is a seam for the planning that decides to ask, and
+    no production path reaches it in this build — so the Turn is created and then
+    settled directly, with no loop in between. What is under test is the terminal
+    itself: one transaction, two events, and the order they happen in.
+    """
+    creation = await store().create_turn(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=uuid.uuid4(),
+        user_text="VCB thế nào?",
+    )
+    return RunningTurn(turn=creation.turn, publisher=TurnPublisher(creation.turn.id))
+
+
+@pytest.mark.asyncio
+async def test_asking_ends_the_turn_the_way_answering_does(owner):
+    """A question is a terminal, not a suspension: nothing is left waiting."""
+    thread_id = await thread_for(owner)
+    turns = service(FakeClient([]))
+    running = await committed_turn(owner, thread_id)
+    part = card()
+
+    record = await turns.settle_with_question(
+        running, text="Tôi cần một dữ kiện trước khi kết luận.", question_part=part
+    )
+
+    assert record.status == TURN_COMPLETE
+    assert record.terminal_reason is None
+    assert record.finished_at is not None
+    assert record.response_message_id is not None
+    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
+    assert assistant.id == record.response_message_id
+    assert assistant.content["question"] == part.as_wire()
+    assert assistant.content["status"] == TURN_COMPLETE
+
+
+@pytest.mark.asyncio
+async def test_the_card_is_published_before_the_terminal_and_not_after(owner):
+    """A reader watching live is handed the card without refetching the Thread."""
+    thread_id = await thread_for(owner)
+    turns = service(FakeClient([]))
+    running = await committed_turn(owner, thread_id)
+    subscriber = running.publisher.subscribe()
+    part = card()
+
+    await turns.settle_with_question(running, text="Cần một dữ kiện.", question_part=part)
+
+    seen = [event async for event in subscriber.events()]
+    assert [event.type for event in seen] == [
+        EventType.PART_QUESTION,
+        EventType.COMPLETED,
+    ]
+    published = seen[0].data
+    assert published["question_id"] == part.question_id
+    assert published["options"] == part.as_wire()["options"]
+    assert published["multi_select"] is False
+    assert published["state"] == QUESTION_PENDING
+    assert published["selected_option_ids"] is None
+    # The persisted sequence is the terminal's, so a subscriber arriving between
+    # the commit and the publish is not told the Turn got further than it did.
+    record = await store().read_turn(owner, running.turn.id)
+    assert record.last_event_seq == seen[-1].seq
+
+
+@pytest.mark.asyncio
+async def test_a_reader_who_arrives_after_the_terminal_still_sees_the_card(owner):
+    """Restated on the snapshot, like the trail and the calls, for the same reason."""
+    thread_id = await thread_for(owner)
+    turns = service(FakeClient([]))
+    running = await committed_turn(owner, thread_id)
+    part = card()
+    # The prose reached the reader as it was written, the way a Turn's answer
+    # always does; the card is what this terminal adds to it.
+    running.publisher.content_delta("Cần một dữ kiện.")
+
+    await turns.settle_with_question(running, text="Cần một dữ kiện.", question_part=part)
+
+    snapshot = running.publisher.subscribe().snapshot
+    assert snapshot.data["status"] == TURN_COMPLETE
+    assert snapshot.data["question"]["question_id"] == part.question_id
+    assert snapshot.data["question"]["state"] == QUESTION_PENDING
+    assert snapshot.data["text"] == "Cần một dữ kiện."
+
+
+def test_a_turn_that_asked_nothing_carries_a_null_card_on_its_snapshot():
+    """One shape for both, so a client never has to ask which snapshot it holds."""
+    published = TurnPublisher(uuid.uuid4())
+    published.content_delta("Xong.")
+
+    assert published.subscribe().snapshot.data["question"] is None
+    # And the same key on the other producer of a snapshot. Always null there:
+    # what became of a card changes after the Turn ended, so a checkpoint is the
+    # one view that could show a state the reader has already left.
+    rebuilt = snapshot_from_draft(
+        uuid.uuid4(),
+        {"text": "Xong.", "tool_calls": []},
+        status=TURN_COMPLETE,
+        terminal_reason=None,
+        through_seq=2,
+    )
+    assert rebuilt.data["question"] is None
+
+
+@pytest.mark.asyncio
+async def test_each_outcome_of_a_card_survives_into_a_reopened_thread(owner):
+    """The three states the gate asks for, read back off the canonical transcript.
+
+    The store is what the reader's answer reaches and the transcript is what a
+    reload draws, so this is the round trip the card's whole lifecycle rests on:
+    settle by asking, resolve, reopen.
+    """
+    turns = service(FakeClient([]))
+    outcomes = {}
+    for outcome in (QUESTION_ANSWERED, QUESTION_SKIPPED, QUESTION_SUPERSEDED):
+        thread_id = await thread_for(owner)
+        running = await committed_turn(owner, thread_id)
+        part = card()
+        await turns.settle_with_question(
+            running, text="Cần một dữ kiện.", question_part=part
+        )
+        if outcome == QUESTION_ANSWERED:
+            await store().answer_question(owner, part.question_id, ["average"])
+        elif outcome == QUESTION_SKIPPED:
+            await store().skip_question(owner, part.question_id)
+        else:
+            # The reader typed instead of tapping, which is the next Turn.
+            await turns.create(
+                user_id=owner,
+                thread_id=thread_id,
+                turn_id=uuid.uuid4(),
+                user_text="Thôi, hỏi kiểu khác.",
+                runtime=runtime(owner),
+            )
+        view = await store().read_thread(owner, thread_id)
+        drawn = next(
+            row.content["question"]
+            for row in view.messages
+            if row.role == "assistant" and row.content.get("question")
+        )
+        outcomes[outcome] = drawn
+
+    assert [entry["state"] for entry in outcomes.values()] == [
+        QUESTION_ANSWERED,
+        QUESTION_SKIPPED,
+        QUESTION_SUPERSEDED,
+    ]
+    assert outcomes[QUESTION_ANSWERED]["selected_option_ids"] == ["average"]
+    assert outcomes[QUESTION_SKIPPED]["selected_option_ids"] is None
+    # And the card itself is unchanged in every one of them: the transcript holds
+    # what was asked, and only the outcome moves.
+    for entry in outcomes.values():
+        assert entry["prompt"] == "Bạn mua mới hay trung bình giá?"
+        assert len(entry["options"]) == 2

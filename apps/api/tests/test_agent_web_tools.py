@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any
 
 import pytest
@@ -503,3 +505,267 @@ def test_the_question_is_an_argument_the_model_fills_in_not_part_of_identity():
 
 def test_the_page_ceiling_is_unchanged_by_this_phase():
     assert web.MAX_PAGE_TEXT_CHARS == 20_000
+
+
+# -- the page this conversation has already read -----------------------------
+
+THREAD = uuid.UUID("6f1d5a3c-0e2b-4b5a-9c47-2f0a1d8e7b30")
+IN_THREAD = ToolContext(user_id=11, thread_id=THREAD)
+READ_AT = "2026-08-20T09:30:00+00:00"
+
+
+def recorded_page(
+    content: str = "Lãi suất điều hành giữ nguyên.",
+    *,
+    url: str = "https://news.example/rates",
+    **overrides: Any,
+) -> dict[str, Any]:
+    """One earlier page read, in the shape the tool itself returned it."""
+    page: dict[str, Any] = {
+        "url": url,
+        "title": "Rates hold",
+        "content": content,
+        "looking_for": None,
+        "excerpted": False,
+        "page_chars": len(content),
+        "source": "news.example",
+        "retrieved_at": READ_AT,
+        "stale": False,
+        "age_seconds": 0.0,
+        "from_record": False,
+        "reason": None,
+    }
+    page.update(overrides)
+    return page
+
+
+def records_of(*pages: Mapping[str, Any], asked: list[str] | None = None):
+    """A thread's own record of the pages it has read, keyed by URL."""
+    held = {str(page["url"]): page for page in pages}
+
+    async def read(_thread_id: Any, url: str) -> Mapping[str, Any] | None:
+        if asked is not None:
+            asked.append(url)
+        return held.get(url)
+
+    return read
+
+
+def at(moment: str):
+    return lambda: datetime.fromisoformat(moment)
+
+
+@pytest.mark.asyncio
+async def test_a_page_this_thread_already_read_needs_no_request_at_all():
+    """The gate this whole path exists for, with the cache taken away.
+
+    ``ClosedLane`` is what an evicted or missing Redis looks like, and the page
+    still comes back — from the Thread's own trace, which outlives the cache.
+    Nothing is downloaded, and nothing asks the lane to serve.
+    """
+    seen: list[tuple[Any, ...]] = []
+    tools = web.WebTools(
+        settings=settings(),
+        lane=ClosedLane(),
+        download=download_returning(200, {}, b"", seen=seen),
+        resolver=resolver_for("93.184.216.34"),
+        records=records_of(recorded_page()),
+    )
+
+    result = await tools.fetch_url(IN_THREAD, {"url": "https://news.example/rates"})
+
+    assert seen == []
+    assert result["reason"] is None
+    assert result["from_record"] is True
+    assert "Lãi suất điều hành giữ nguyên." in result["content"]
+    assert result["title"] == "Rates hold"
+
+
+@pytest.mark.asyncio
+async def test_a_served_record_keeps_the_instant_the_page_was_read():
+    """Temporal validity rests on this field and on nothing else.
+
+    Stamping the record with now would say a figure is current today because
+    the harness re-read its own notes today. So the instant travels unchanged,
+    and how old that makes the page is stated beside it under the same
+    freshness window the lane uses.
+    """
+    tools = web.WebTools(
+        settings=settings(),
+        lane=ClosedLane(),
+        resolver=resolver_for("93.184.216.34"),
+        now=at("2026-08-23T09:30:00+00:00"),
+        records=records_of(recorded_page()),
+    )
+
+    result = await tools.fetch_url(IN_THREAD, {"url": "https://news.example/rates"})
+
+    assert result["retrieved_at"] == READ_AT
+    assert result["age_seconds"] == 3 * 24 * 60 * 60
+    assert result["stale"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_url_this_thread_has_not_read_is_fetched_the_ordinary_way():
+    seen: list[tuple[Any, ...]] = []
+    asked: list[str] = []
+    tools = web.WebTools(
+        settings=settings(),
+        lane=DirectLane(),
+        download=download_returning(
+            200, {"content-type": "text/html"}, PAGE_HTML.encode(), seen=seen
+        ),
+        resolver=resolver_for("93.184.216.34"),
+        records=records_of(recorded_page(url="https://news.example/other"), asked=asked),
+    )
+
+    result = await tools.fetch_url(IN_THREAD, {"url": "https://news.example/rates"})
+
+    assert asked == ["https://news.example/rates"]
+    assert len(seen) == 1
+    assert result["from_record"] is False
+    assert "The rate was unchanged." in result["content"]
+
+
+@pytest.mark.asyncio
+async def test_outside_a_persisted_turn_there_is_no_record_to_ask_for():
+    """No Thread, no record — the case every offline harness runs in."""
+    asked: list[str] = []
+    tools = web.WebTools(
+        settings=settings(),
+        lane=DirectLane(),
+        download=download_returning(
+            200, {"content-type": "text/html"}, PAGE_HTML.encode(), seen=[]
+        ),
+        resolver=resolver_for("93.184.216.34"),
+        records=records_of(recorded_page(), asked=asked),
+    )
+
+    result = await tools.fetch_url(CONTEXT, {"url": "https://news.example/rates"})
+
+    assert asked == []
+    assert result["from_record"] is False
+
+
+@pytest.mark.asyncio
+async def test_passages_chosen_for_another_question_are_not_served_as_this_answer():
+    """A record holds what the earlier call returned, not always the page.
+
+    When that call had to excerpt, what is stored answers *its* question. A
+    different question asked of the same URL is worth a real read, because the
+    alternative is a citation pointing at text that does not answer it.
+    """
+    seen: list[tuple[Any, ...]] = []
+    excerpt = recorded_page(
+        "Lãi suất điều hành giữ nguyên.",
+        looking_for="lãi suất điều hành",
+        excerpted=True,
+        page_chars=90_000,
+    )
+    tools = web.WebTools(
+        settings=settings(),
+        lane=DirectLane(),
+        download=download_returning(
+            200, {"content-type": "text/html"}, PAGE_HTML.encode(), seen=seen
+        ),
+        resolver=resolver_for("93.184.216.34"),
+        records=records_of(excerpt),
+    )
+
+    result = await tools.fetch_url(
+        IN_THREAD,
+        {"url": "https://news.example/rates", "looking_for": "khối ngoại bán ròng"},
+    )
+
+    assert len(seen) == 1
+    assert result["from_record"] is False
+
+
+@pytest.mark.asyncio
+async def test_the_same_question_is_answered_from_the_excerpt_that_answered_it():
+    seen: list[tuple[Any, ...]] = []
+    excerpt = recorded_page(
+        "Lãi suất điều hành giữ nguyên.",
+        looking_for="lãi suất điều hành",
+        excerpted=True,
+        page_chars=90_000,
+    )
+    tools = web.WebTools(
+        settings=settings(),
+        lane=DirectLane(),
+        download=download_returning(200, {}, b"", seen=seen),
+        resolver=resolver_for("93.184.216.34"),
+        records=records_of(excerpt),
+    )
+
+    result = await tools.fetch_url(
+        IN_THREAD,
+        {"url": "https://news.example/rates", "looking_for": "lãi suất điều hành"},
+    )
+
+    assert seen == []
+    assert result["from_record"] is True
+    assert result["looking_for"] == "lãi suất điều hành"
+
+
+@pytest.mark.asyncio
+async def test_a_record_that_cannot_say_when_it_was_read_is_read_again():
+    """A page with no retrieval time is worth less than a fresh read."""
+    seen: list[tuple[Any, ...]] = []
+    tools = web.WebTools(
+        settings=settings(),
+        lane=DirectLane(),
+        download=download_returning(
+            200, {"content-type": "text/html"}, PAGE_HTML.encode(), seen=seen
+        ),
+        resolver=resolver_for("93.184.216.34"),
+        records=records_of(recorded_page(retrieved_at="")),
+    )
+
+    result = await tools.fetch_url(IN_THREAD, {"url": "https://news.example/rates"})
+
+    assert len(seen) == 1
+    assert result["from_record"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_denied_domain_stays_denied_however_often_it_was_read():
+    """Configuration decides, and it decides now rather than when the row was written."""
+    seen: list[tuple[Any, ...]] = []
+    tools = web.WebTools(
+        settings=settings(),
+        lane=DirectLane(),
+        download=download_returning(200, {}, b"", seen=seen),
+        resolver=resolver_for("93.184.216.34"),
+        records=records_of(recorded_page(url="https://evil.example/page")),
+    )
+
+    with pytest.raises(ValueError, match="denied by configuration"):
+        await tools.fetch_url(IN_THREAD, {"url": "https://evil.example/page"})
+
+    assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_a_store_that_cannot_answer_leaves_the_page_read_working():
+    """A database hiccup must not take down a capability aimed at the open web."""
+    seen: list[tuple[Any, ...]] = []
+
+    async def broken(_thread_id: Any, _url: str) -> Mapping[str, Any] | None:
+        raise RuntimeError("the connection pool is exhausted")
+
+    tools = web.WebTools(
+        settings=settings(),
+        lane=DirectLane(),
+        download=download_returning(
+            200, {"content-type": "text/html"}, PAGE_HTML.encode(), seen=seen
+        ),
+        resolver=resolver_for("93.184.216.34"),
+        records=broken,
+    )
+
+    result = await tools.fetch_url(IN_THREAD, {"url": "https://news.example/rates"})
+
+    assert len(seen) == 1
+    assert result["from_record"] is False
+    assert "The rate was unchanged." in result["content"]
