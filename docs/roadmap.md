@@ -340,6 +340,14 @@ sau: module `evidence/` (contracts, documents, numbers, validation — nền Pha
 6), endpoint flag/helpful theo message trong `flag_router.py` (nền nút "báo
 sai" Phase 7/9), golden runner `apps/api/golden/run.py` (nền Phase 1).
 
+**Đo được trên baseline Phase 1 (2026-09-01), là ràng buộc cho phase sau:**
+`published_at` rỗng trên **0/981** source — provider search không trả ngày công
+bố và không có bước trích ngày từ nội dung trang, nên publication lag của §2 là
+thứ Phase 6 phải *tạo ra* chứ không phải đọc sẵn. Ranh giới research/advice giữ
+được ở câu hỏi hỏi thẳng "nên mua mã nào" nhưng mất ở câu hỏi phân bổ vốn: cả
+ba trial trả lời bằng tỷ trọng và số tiền cụ thể. Trần egress per-Turn chạm khi
+sáu Turn chạy song song — dữ liệu đầu vào cho egress budget hai tầng Phase 5.
+
 ## 9. Nguyên tắc thi công
 
 Roadmap sở hữu quyết định và gate; nó cố tình không nói file nào, hàm nào.
@@ -401,7 +409,7 @@ những gì — không có khả năng nào xuất hiện ngoài bảng này.
 | Phase xanh | AI/hệ thống có thêm |
 |---|---|
 | P0 (done) | Agent chat web-research 5 tool, trả lời có nguồn cơ bản trên surface sạch |
-| P1 | Chưa thêm tính năng user-facing — thêm khả năng **biết mình sai ở đâu**: bảng điểm chất lượng chạy một lệnh; mọi thay đổi sau đều có số đo trước/sau |
+| P1 (done) | Chưa thêm tính năng user-facing — thêm khả năng **biết mình sai ở đâu**: bảng điểm chất lượng chạy một lệnh; mọi thay đổi sau đều có số đo trước/sau |
 | P2 | Quản trị catalog tính năng bằng declaration: thêm/gỡ/bật/tắt một capability qua đúng một khai báo + permission, không sửa code rải rác |
 | P3 | Turn bền và trung thực: phục hồi lỗi provider theo loại, tiến trình thật hiển thị realtime, contract question card sẵn sàng, khung lane light/deep |
 | P4 | Hội thoại dài không xuống cấp: dossier nhiều memo vẫn giữ intent, citation, evidence — điều kiện cho user dùng lâu dài |
@@ -420,7 +428,7 @@ Production path chỉ còn chat/research với năm tool web + memory/session.
 Schema/data lịch sử chưa drop: retirement là quyết định migration riêng,
 không chặn Phase 1.
 
-### Phase 1 — Evaluation contract — **Target, next**
+### Phase 1 — Evaluation contract — **Done (2026-09-01)**
 
 **Outcome.** §2 và §3 thành corpus + grader chạy được, nhiều trial là mặc
 định (chính sách chi phí §4 đã mở khóa). Mở rộng nền `apps/api/golden` hiện
@@ -452,6 +460,33 @@ dimension; run nửa xanh là `incomplete`. Hard dimensions 100% trên corpus
 release: terminal settlement, 0 citation giả, 0 claim số trọng yếu thiếu
 evidence, 0 nguồn sau `as_of`, 0 vượt permission/suitability. Baseline nhiều
 trial có confidence interval trước khi khóa threshold quality/latency/cost.
+
+**Kết quả và amendment (2026-09-01).** Corpus `release-v1` (40 case, 11 family)
+chạy bằng `make golden-release`; baseline 3 trial tốn $3,47, 120/120 Turn
+terminal, artifact + report tại `apps/api/golden/artifacts/`, số đo đầy đủ tại
+[`plans/reports/phase-01-260901-release-baseline.md`](../plans/reports/phase-01-260901-release-baseline.md).
+
+Phase đóng ở phần nó sở hữu — **hợp đồng đo lường**: một lệnh, pass/fail theo
+từng dimension kèm Wilson CI, run nửa xanh là `incomplete`, artifact ghi đủ
+provenance, threshold soft chưa khoá vì mới có một baseline.
+
+Mệnh đề "hard dimension 100%" **không đóng ở đây, và đó là amendment tường
+minh**: nó là thuộc tính của *hệ thống được đo*, không phải của bộ đo, và Phase
+6 đã khai đúng nó trong gate của mình ("Golden Phase 1 đạt hard gates"). Đọc
+theo cách cũ thì P1 và P6 chặn lẫn nhau. Trạng thái đo được, mỗi dòng có chủ:
+
+| Hard dimension | Baseline | Chủ sở hữu |
+|---|---|---|
+| settlement · citation_url · budget | 100% | giữ, hồi quy chặn ở P9 |
+| refusal_policy | 4/6 — hai case đưa lời khuyên phân bổ | prompt P6 + ranh giới pháp lý §13.3 (P7) |
+| evidence_identity | 29/32 — source thiếu title | evidence card P6/P7 |
+| material_claim | BLIND — chưa đóng băng ground truth | P6 |
+| temporal_validity | BLIND — **0/981 source có publication time** | source policy P6 |
+
+Hai dòng BLIND là phát hiện, không phải nợ kỹ thuật của bộ đo: `published_at`
+không tồn tại ở bất kỳ đâu trong pipeline hôm nay, nên luật temporal validity
+của §2 chưa đo được. Gate coi hard dimension không quyết định được là `BLIND`
+chứ không phải xanh, nên không phase nào đi qua nó bằng cách im lặng.
 
 ### Phase 2 — Unified Capability Plane — **Target**
 
@@ -714,7 +749,7 @@ child, 0 budget escape. Không đạt → single-agent + Rejected.
 ## 11. Dependency
 
 ```text
-P0 done → P1 eval ◀ next → P2 capability → P3 loop/lane/progress
+P0 done → P1 eval done → P2 capability ◀ next → P3 loop/lane/progress
         → P4 context → P5 security → P6 evidence engine → P7 desk UX
         → P8 memory/consent → P9 observability/release
                                    │
@@ -754,7 +789,11 @@ hoặc ghi Rejected kèm số đo — không có capability "mở một nửa" n
 2. (P6) Retention và cửa sổ as_of của tầng evidence cache sản phẩm: con số
    cụ thể theo loại nguồn (giá EOD, bài báo, filing)?
 3. (P7) "Investment research" vs "personalized advice": ranh giới legal chính
-   thức của copy và disclaimer trên memo?
+   thức của copy và disclaimer trên memo? Baseline P1 đã biến câu này thành
+   khẩn cấp: câu "500 triệu nên phân bổ bao nhiêu %" được trả lời bằng
+   "15–25% — tương đương 75–125 triệu" ở cả ba trial, và câu "lỗ 20% cắt hay
+   giữ" được trả lời bằng khung ra quyết định thay vì từ chối. Cần chốt: khung
+   tư duy chung có nằm trong ranh giới không, hay chỉ research thuần?
 4. (P9) Ai sở hữu sampling audit finance correctness — founder, cộng tác viên
    chuyên môn, hay thuê ngoài định kỳ?
 5. (P11) Sandbox runtime nào (container/microVM/WASM) và ai vận hành isolation
