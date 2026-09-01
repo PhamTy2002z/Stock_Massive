@@ -68,6 +68,24 @@ class OwnerType(str, Enum):
     ANALYSIS_RUN = "analysis_run"
     TURN_REQUEST_MESSAGE = "turn_request_message"
     CAPABILITY_PROBE = "capability_probe"
+    #: The golden harness's rubric pass. Out-of-band measurement of answers that
+    #: have already been written, so it owns neither a Turn nor a probe.
+    #:
+    #: It has an owner of its own rather than borrowing one, and each of the two
+    #: it could have borrowed says why. ``CAPABILITY_PROBE`` carries a hard
+    #: $0.25 daily allowance shared with the boot probe: a judge pass over a
+    #: forty-case corpus would exhaust it in a few calls *and* leave production
+    #: unable to probe its own route on the next restart. ``TURN_REQUEST_MESSAGE``
+    #: would put measurement spend inside the per-Turn ceilings and inside the
+    #: rows a Turn's cost is read from, so measuring the system would change the
+    #: number being measured.
+    #:
+    #: No ceiling branch below claims it: the harness enforces its own
+    #: ``--judge-ceiling-usd`` per pass, and the lane envelope is the backstop.
+    #: It rides the analysis lane, which the Phase 0 teardown left unused —
+    #: out-of-band batch work belongs there rather than in the lane serving
+    #: readers or the one held back for provider recovery.
+    GOLDEN_JUDGE = "golden_judge"
 
 
 @dataclass(frozen=True)
