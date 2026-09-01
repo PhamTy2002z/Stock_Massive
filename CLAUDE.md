@@ -101,6 +101,19 @@ installed:
 cd apps/api && pytest -q
 ```
 
+Answer quality is measured by the golden harness, never asserted. One command
+runs the release corpus, scores every dimension and returns the verdict as its
+exit code; it spends real money and refuses to start without a ceiling. Grading
+an artifact again costs nothing:
+
+```bash
+make golden-release CEILING_USD=<amount> TRIALS=<n>
+make golden-release CEILING_USD=1 RELEASE_ARGS="--grade-only golden/artifacts/<file>.json"
+```
+
+`apps/api/golden/README.md` owns the dimensions, the thresholds and the reason
+the host environment differs from the container's.
+
 Before reporting completion, run `git diff --check` and verify that production
 code has no retired Signal Desk/Study/local-analysis references outside
 explicit statements that those capabilities do not exist.
