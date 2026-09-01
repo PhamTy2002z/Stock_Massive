@@ -168,6 +168,35 @@ async def test_each_trace_survives_independently(owner):
 
 
 @pytest.mark.asyncio
+async def test_persistence_redacts_credentials_even_without_executor_projection(owner):
+    store = persistence()
+    thread = await store.create_thread(owner)
+    request = await store.append_message(
+        thread.id, role="user", content={"text": "trace boundary"}
+    )
+    secret = "sk-phase5persistsecret123456"
+
+    await store.record_tool_call(
+        {
+            "thread_id": thread.id,
+            "request_message_id": request.id,
+            "tool_name": "trace_probe",
+            "arguments": {"token": secret},
+            "result": {"nested": [{"authorization": f"Bearer {secret}"}]},
+            "status": "error",
+            "error": f"provider returned {secret}",
+        }
+    )
+
+    (trace,) = await store.traces_for_request(request.id)
+    encoded = json.dumps(
+        {"arguments": trace.arguments, "result": trace.result, "error": trace.error}
+    )
+    assert secret not in encoded
+    assert "redacted" in encoded
+
+
+@pytest.mark.asyncio
 async def test_a_traced_result_keeps_its_body_and_is_scoped_to_its_request(owner):
     """The trace is the only record of what an answer rested on.
 

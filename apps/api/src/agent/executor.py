@@ -57,12 +57,13 @@ number that exists because a web search costs money spends the web allowance on
 evidence that costs nothing.
 
 **What a call is allowed to do, and for how long, is read off its declaration.**
-A tool whose registration says it may not run, or needs a person's agreement
-first, is refused here before its arguments are even parsed, and a call that
-outlives the bound its registration declared is given up on and answered. Both
-are typed results rather than exceptions, for the same reason as everything
-else on this page: the model is owed one result per call, and "you were not
-allowed to do that" and "that took too long" are two things it can act on.
+Arguments are parsed and checked against the declaration's frozen schema before
+its capability/resource rules are evaluated. A denied call or one that needs a
+person's agreement is refused before dispatch, and a call that outlives the
+bound its registration declared is given up on and answered. Both are typed
+results rather than exceptions, for the same reason as everything else on this
+page: the model is owed one result per call, and "you were not allowed to do
+that" and "that took too long" are two things it can act on.
 
 Concurrency is ``asyncio`` and not a thread pool: this codebase is async
 throughout, and the one case that genuinely blocks — a handler that declares
@@ -91,7 +92,7 @@ from .permissions import (
     ToolPermission,
     TurnPermissionState,
 )
-from .schema_validation import ArgumentSchemaError, validate_arguments
+from .schema_validation import validate_arguments
 from .security import SecretEgressBlocked, redact_trace_value
 from .untrusted import scan_for_threats
 
@@ -484,7 +485,7 @@ class ToolExecutor:
         try:
             arguments = _parse_arguments(call.arguments)
             validate_arguments(arguments, _argument_schema(entry))
-        except (ValueError, ArgumentSchemaError) as exc:
+        except ValueError as exc:
             return await self._record(
                 call,
                 {},
@@ -518,7 +519,7 @@ class ToolExecutor:
                 ),
             )
         if (
-            entry.effect is registry.ToolEffect.WRITE
+            entry.effect is not registry.ToolEffect.READ
             and self.permission_state.untrusted_content_seen
         ):
             return await self._record(
@@ -786,7 +787,11 @@ class ToolExecutor:
 
 
 def _argument_schema(entry: ToolDeclaration) -> Mapping[str, Any]:
-    return entry.schema.parameters if isinstance(entry, registry.ResolvedTool) else entry.schema
+    return (
+        entry.schema.parameters
+        if isinstance(entry, registry.ResolvedTool)
+        else entry.schema
+    )
 
 
 def _permission_resource(

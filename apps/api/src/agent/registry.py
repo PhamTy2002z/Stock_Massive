@@ -42,11 +42,12 @@ Which *bundle* a caller selects is still what decides what a lane may call
 was called, is what came back somebody else's writing.
 
 **Permission and time are declared here too, and only here.** A registration
-says whether it may run at all (:attr:`ToolEntry.permission`) and how long one
-call of it may take (:attr:`ToolEntry.timeout_seconds`). The executor enforces
-both from this declaration rather than from a table of its own, for the reason
-every other axis lives here: a second place that knows which tools are
-permitted is a second place that can disagree with the one the model was shown.
+says which capability/resource pairs may run
+(:attr:`ToolEntry.permission_rules`) and how long one call may take
+(:attr:`ToolEntry.timeout_seconds`). The executor enforces both from this
+declaration rather than from a table of its own, for the reason every other
+axis lives here: a second place that knows which tools are permitted is a
+second place that can disagree with the one the model was shown.
 """
 
 from __future__ import annotations
@@ -381,9 +382,9 @@ class ResolvedTool:
 
     Every axis the executor, the message layer and the budget need is carried
     here, so a task decides once what a tool is and no consumer re-derives it
-    from the live registry half a round later. :attr:`permission` is one of
-    those axes and is never absent on a snapshot of a *registered* declaration,
-    because :func:`register` refuses one that leaves it unset.
+    from the live registry half a round later. :attr:`permission_rules` is one
+    of those axes and is never empty on a snapshot of a *registered*
+    declaration, because :func:`register` refuses one that leaves it unset.
     """
 
     name: str

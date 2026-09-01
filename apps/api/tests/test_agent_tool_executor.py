@@ -166,7 +166,7 @@ def test_an_unknown_tool_is_treated_as_unsafe_to_overlap():
     calls = [call("web_search", "a"), call("mcp__server__do_thing", "b")]
 
     surface = Surface()
-    surface.add("web_search", reads_external=False)
+    surface.add("web_search")
     segments = executor.plan_segments(calls, lookup=surface.entries.get)
 
     assert [mode for mode, _ in segments] == ["parallel", "sequential"]

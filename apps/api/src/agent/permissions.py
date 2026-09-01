@@ -87,11 +87,17 @@ class PermissionPolicy:
         dispatch path always evaluates the real resource again.
         """
 
-        return any(
-            rule.action is ToolPermission.ALLOW
-            and fnmatchcase(capability, rule.capability)
-            for rule in self.rules
-        )
+        # Walk in evaluation order backwards. A final all-resource rule
+        # shadows every earlier resource rule; a narrow final deny still leaves
+        # the earlier allow useful for other resources.
+        for rule in reversed(self.rules):
+            if not fnmatchcase(capability, rule.capability):
+                continue
+            if rule.resource == "*":
+                return rule.action is ToolPermission.ALLOW
+            if rule.action is ToolPermission.ALLOW:
+                return True
+        return False
 
 
 @dataclass

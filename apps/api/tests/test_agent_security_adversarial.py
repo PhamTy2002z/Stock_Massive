@@ -10,7 +10,12 @@ from typing import Any
 import pytest
 
 from src.agent import definitions, executor, registry
-from src.agent.permissions import PermissionPolicy, PermissionRule, ToolPermission
+from src.agent.permissions import (
+    AuthorizationDenied,
+    PermissionPolicy,
+    PermissionRule,
+    ToolPermission,
+)
 from src.agent.tools import web
 from src.agent.untrusted import RISK_HIGH, RISK_LOW, scan_for_threats
 from src.core.config import Settings
@@ -148,6 +153,31 @@ def test_global_deny_and_approval_only_tools_are_not_offered() -> None:
         )
 
     assert surface.offered_schemas == ()
+
+
+def test_a_final_global_deny_shadows_an_earlier_resource_allow() -> None:
+    rules = (
+        PermissionRule("fetch_url", "https://primary.example/*", ToolPermission.ALLOW),
+        PermissionRule("fetch_url", "*", ToolPermission.DENY),
+    )
+
+    assert PermissionPolicy(rules).may_allow("fetch_url") is False
+
+
+@pytest.mark.asyncio
+async def test_tenant_authorization_is_distinct_from_permission() -> None:
+    async def unauthorized(_context, _arguments):
+        raise AuthorizationDenied("trusted caller does not own this scope")
+
+    entry = _entry("recall_facts", handler=unauthorized)
+    outcome = await executor.ToolExecutor(
+        context=registry.ToolContext(),
+        lookup=lambda _name: entry,
+        availability=lambda _name: True,
+    ).run((executor.ToolCall("auth", "recall_facts", {}),))
+
+    assert outcome.results[0].error == executor.AUTHORIZATION_DENIED
+    assert outcome.results[0].dispatched is True
 
 
 @pytest.mark.asyncio
