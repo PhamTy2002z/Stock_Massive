@@ -24,10 +24,95 @@ không đủ hoặc mâu thuẫn, nói rõ khoảng trống và điều cần ki
 """.strip(),
 )
 
+#: How a Vietnamese listing is written: three to eight shouted characters,
+#: starting with a letter, bounded by something that is not one.
+#:
+#: Covers the ticker (``VNM``), the index and its futures (``VN30``,
+#: ``VN30F1M``), the listed funds (``E1VFVN30``) and the venues (``HOSE``,
+#: ``UPCOM``) with one shape rather than a table, because a table of listings is
+#: a market-data dependency and this module has none.
+#:
+#: It over-matches — ``USD``, ``CEO`` and ``PDF`` have the same shape — and that
+#: is the direction to be wrong in. A false positive costs the body's few
+#: hundred tokens; a false negative answers a market question with the domain's
+#: rules left out.
+SYMBOL_SHAPE = r"(?<![0-9A-Za-z])[A-Z][A-Z0-9]{2,7}(?![0-9A-Za-z])"
+
+#: What a reader says when the question is about this market, ticker or not.
+#:
+#: Wider than equities on purpose: rates, the currency and the bond market are
+#: what an equity question is answered against, and a reader asking about one of
+#: them is asking a question this pack's rules apply to. Both languages, because
+#: readers mix them in one sentence.
+TOPIC_MARKERS: tuple[str, ...] = (
+    "cổ phiếu",
+    "chứng khoán",
+    "thị trường",
+    "cổ tức",
+    "vốn hóa",
+    "định giá",
+    "doanh thu",
+    "lợi nhuận",
+    "báo cáo tài chính",
+    "khối ngoại",
+    "thanh khoản",
+    "trái phiếu",
+    "lãi suất",
+    "tỷ giá",
+    "đầu tư",
+    "giá",
+    "vn-index",
+    "vnindex",
+    "p/e",
+    "stock",
+    "share",
+    "market",
+    "ticker",
+    "equity",
+    "earnings",
+    "revenue",
+    "dividend",
+    "valuation",
+)
+
+#: What a reader says when the question is about the assistant instead.
+#:
+#: Short, and it stays short. This is the only evidence that withholds the
+#: playbook, so a word admitted here on a hunch is a market question answered
+#: without the domain's rules. Everything not on this list — including every
+#: question nobody anticipated — keeps the body.
+OFF_TOPIC_MARKERS: tuple[str, ...] = (
+    "bạn là ai",
+    "bạn là gì",
+    "bạn tên gì",
+    "bạn có thể làm gì",
+    "bạn làm được gì",
+    "bạn hoạt động",
+    "who are you",
+    "what are you",
+    "what can you do",
+    "how do you work",
+    "xin chào",
+    "chào bạn",
+    "hello",
+    "cảm ơn",
+    "thank you",
+)
+
 PACK = DomainPack(
     name="vn-equity",
     version=VERSION,
     prompt_sections=(WEB_FIRST_RESEARCH,),
+    symbol_shape=SYMBOL_SHAPE,
+    topic_markers=TOPIC_MARKERS,
+    off_topic_markers=OFF_TOPIC_MARKERS,
 )
 
-__all__ = ["PACK", "VERSION", "WEB_FIRST_RESEARCH"]
+__all__ = [
+    "OFF_TOPIC_MARKERS",
+    "PACK",
+    "SYMBOL_SHAPE",
+    "TOPIC_MARKERS",
+    "VERSION",
+    "WEB_FIRST_RESEARCH",
+]

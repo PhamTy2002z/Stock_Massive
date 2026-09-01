@@ -148,7 +148,7 @@ from .executor import (
 from .executor import ToolCall as ExecutorToolCall
 from .executor import ToolResult as ExecutorToolResult
 from .guardrails import TurnGuardrails
-from .lanes import DEFAULT_REASON, LIGHT, LaneProfile
+from .lanes import DEEP, DEFAULT_REASON, LIGHT, LaneProfile
 from .parts import (
     ATTEMPT_CANCELLED,
     ATTEMPT_COMPLETED,
@@ -407,6 +407,33 @@ def domain_body_note() -> str:
     boundary, and nothing here is built ahead of it.
     """
     return active_pack().body_text
+
+
+def domain_body_reason(question: str, lane: LaneProfile) -> tuple[bool, str]:
+    """Whether this Turn carries the playbook, and the reason it does or does not.
+
+    Taken once, at the top of the Turn and next to the lane, because the two
+    answer the same kind of question — what this Turn was set up to do — and
+    because a playbook that arrived in round three would make "which rules was
+    this answer written under" a question with no answer. The flag it sets is
+    read by every call of the Turn, so deciding it here is what makes all of them
+    the same conversation.
+
+    Two inputs, and each is owned by whoever knows it. The lane is this module's:
+    a Turn funded for ten rounds of evidence was routed as a memo request, and in
+    this deployment a memo is about a market — the ceiling itself is the signal,
+    and the body is a rounding error against what that lane may spend. Everything
+    else is the pack's, through :meth:`~.domain.pack.DomainPack.body_reason`,
+    because what a ticker looks like and what a reader calls a market are facts
+    about the domain rather than about the loop.
+
+    Deterministic and free: no clock, no store, no model call. The same question
+    on the same lane decides the same way every time, which is what lets the
+    decision be pinned rather than sampled.
+    """
+    if lane.name == DEEP.name:
+        return True, f"lane:{lane.name}"
+    return active_pack().body_reason(question)
 
 
 def domain_body_tokens(state: "_TurnState") -> int:
@@ -975,7 +1002,7 @@ class _TurnState:
     # that sent it: a Turn told twice about one observation has been charged
     # twice for it.
     note: str | None = None
-    # Whether this Turn has been handed the active pack's half of the prompt.
+    # Whether this Turn carries the active pack's half of the prompt.
     #
     # Per-Turn, like ``mode`` above and for the same reason: whether the reader
     # asked something about the domain is a fact about this Turn, and a flag one
@@ -983,11 +1010,11 @@ class _TurnState:
     # is built once per ``_run``, ``AgentLoop`` once per Turn, so this cannot
     # outlive the question that set it.
     #
-    # Sticky once true. A model told the playbook in round two still needs it in
-    # round three, when the tool results it has to read come back — and a rule
-    # that arrives and leaves again is worse than one that never came, because
-    # the answer is written under the version of the instructions the last call
-    # happened to carry.
+    # Written once, by ``domain_body_reason`` before the first call, and read by
+    # every call after it. A rule that arrived or left mid-Turn would be worse
+    # than one that never came: the answer would be written under whichever
+    # version of the instructions the last call happened to carry, and no reader
+    # of the transcript could say which.
     domain_body: bool = False
     #: Where the last call's input tokens went, by layer.
     #:
@@ -1230,7 +1257,20 @@ class AgentLoop:
             cancel_event=cancel_event,
         )
         system_prompt = render(request.runtime)
-        state.domain_body = True
+        state.domain_body, body_reason = domain_body_reason(
+            request.user_text, self._lane
+        )
+        if not state.domain_body:
+            # Logged on this branch alone. Carrying the playbook is the ordinary
+            # outcome and says nothing; withholding it is the decision that can
+            # be read back off an answer, so it is the one worth being able to
+            # find afterwards.
+            logger.info(
+                "Turn %s runs without the %s playbook: %s",
+                request.request_message_id,
+                active_pack().name,
+                body_reason,
+            )
         # The first thing the trail says, and the only part that is about a
         # decision taken before this Turn ran: which ceilings it got, and the
         # machine reason the router gave for them.
@@ -2609,6 +2649,7 @@ __all__ = [
     "assert_distinct_ids",
     "rounds_exhausted_note",
     "domain_body_note",
+    "domain_body_reason",
     "domain_body_tokens",
     "build_messages",
     "estimate_tokens",

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os.path
 import time
 import uuid
 from dataclasses import replace
@@ -80,6 +81,7 @@ from src.agent.loop import (
     assert_distinct_ids,
     build_messages,
     domain_body_note,
+    domain_body_reason,
     domain_body_tokens,
     estimate_tokens,
     shown_result,
@@ -2565,6 +2567,97 @@ async def test_the_first_call_carries_the_domain_body_inside_system() -> None:
     assert first[0].role is Role.SYSTEM
 
 
+@pytest.mark.asyncio
+async def test_a_question_about_the_assistant_runs_without_the_playbook() -> None:
+    """The domain's rules are what a market question is answered under."""
+    client = FakeClient([answer("Tôi là trợ lý nghiên cứu.")])
+
+    await loop(client).run(turn_request(user_text="Bạn là ai?"))
+
+    assert _bodies(client) == [0]
+
+
+@pytest.mark.asyncio
+async def test_a_question_that_names_a_listing_carries_the_playbook() -> None:
+    client = FakeClient([answer("Cần tra nguồn đã.")])
+
+    await loop(client).run(turn_request(user_text="VCB có gì mới?"))
+
+    assert _bodies(client) == [1]
+
+
+@pytest.mark.asyncio
+async def test_the_lane_a_memo_was_funded_on_carries_the_playbook_by_itself() -> None:
+    """A Turn allowed ten rounds of evidence is not a Turn about the harness."""
+    client = FakeClient([answer("Xong.")])
+
+    await loop(client, lane=DEEP).run(turn_request(user_text="Bạn là ai?"))
+
+    assert _bodies(client) == [1]
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_began_without_the_playbook_never_gains_one_mid_flight() -> None:
+    """Decided once, from the question, so every call is the same conversation.
+
+    A playbook that arrived in round two would leave the answer written under
+    whichever version of the instructions the last call happened to carry, and
+    nobody reading the transcript could say which.
+    """
+    client = FakeClient(
+        [
+            Completion(
+                model=SESSION_MODEL,
+                text="Để tôi tra.",
+                tool_calls=(
+                    ToolCall(id="c1", name="web_search", arguments={"query": "VCB"}),
+                ),
+            ),
+            answer("Tôi là trợ lý nghiên cứu."),
+        ]
+    )
+
+    await loop(client).run(turn_request(user_text="Bạn là ai?"))
+
+    assert _bodies(client) == [0, 0]
+
+
+def test_the_playbook_decision_reads_the_question_and_the_lane_and_nothing_else() -> None:
+    """Same input, same answer, and the answer says which input decided it."""
+    for _ in range(3):
+        assert domain_body_reason("Bạn là ai?", LIGHT) == (False, "off_topic:bạn là ai")
+        assert domain_body_reason("Bạn là ai?", DEEP) == (True, "lane:deep")
+        assert domain_body_reason("VCB thế nào?", LIGHT) == (True, "symbol:VCB")
+
+
+@pytest.mark.asyncio
+async def test_the_prompt_core_is_the_same_bytes_with_and_without_the_playbook() -> None:
+    """What the route caches is a prefix, so the prefix has to survive the choice.
+
+    The body sits between the core and the values rendered for this Turn, so a
+    Turn that skips it still sends byte-for-byte the same core as a Turn that
+    carries it — which is the whole reason skipping it is affordable. Compared
+    as bytes rather than by the layer accounting, because an accounting that
+    agreed while the text differed would still cost every one of these Turns a
+    cache miss.
+    """
+    quiet = FakeClient([answer()])
+    market = FakeClient([answer()])
+
+    await loop(quiet).run(turn_request(user_text="Bạn là ai?"))
+    await loop(market).run(turn_request(user_text="VCB thế nào?"))
+
+    without = quiet.requests[0].messages[0].content or ""
+    with_body = market.requests[0].messages[0].content or ""
+    core = prompt_prefix()
+    shared = os.path.commonprefix([without, with_body])
+
+    assert without.startswith(core) and with_body.startswith(core)
+    assert len(shared) >= len(core)
+    assert domain_body_note() not in without
+    assert domain_body_note() in with_body
+
+
 def _thread_history(*, memory_call: bool, then_a_plain_turn: bool = False):
     """A Thread as the router actually hands one to the loop.
 
@@ -2661,12 +2754,11 @@ def test_no_context_is_built_from_the_names() -> None:
 async def test_a_follow_up_in_a_thread_that_touched_the_domain_starts_with_it() -> None:
     """Where a regression is easiest to cause and hardest to see.
 
-    "And what about VNM?" reads as a fresh question to a loop that only watches
-    this Turn's calls, and it would be answered without the playbook the
-    previous answer was written under. The dangerous shape is the follow-up the
-    model answers with *no* tool call at all — trigger three never fires, so
-    this is the only thing standing between that answer and a prompt missing
-    half its rules.
+    "And what about VNM?" is a whole question, and the ticker in it is what
+    keeps the playbook the previous answer was written under. The dangerous
+    shape is the follow-up the model answers with *no* tool call at all:
+    nothing later in the Turn can add the body, so the question has to be
+    enough on its own.
     """
     client = FakeClient([answer("VNM thì thấp hơn.")])
 
@@ -2681,13 +2773,13 @@ async def test_a_follow_up_in_a_thread_that_touched_the_domain_starts_with_it() 
 
 
 @pytest.mark.asyncio
-async def test_a_thread_whose_last_turn_stayed_outside_the_domain_does_not() -> None:
-    """The other half of that trigger, and the reason it looks one Turn back.
+async def test_a_thank_you_at_the_end_of_a_domain_thread_goes_without_it() -> None:
+    """What the thread was about is not what this Turn is about.
 
-    Scanning the whole history would mean a thread that once mentioned a ticker
-    carries the body for every question afterwards, including the ones about the
-    weather. This thread reached the store two Turns ago and then did something
-    else; the trigger has to let it go.
+    Carrying the body because the thread once mentioned a ticker would mean
+    every question afterwards pays for the playbook, including the ones about
+    the weather. The decision reads this question, and this question is a
+    thank-you — the history it arrives with does not get a vote.
     """
     client = FakeClient([answer("Được.")])
 
@@ -2698,12 +2790,17 @@ async def test_a_thread_whose_last_turn_stayed_outside_the_domain_does_not() -> 
         )
     )
 
-    assert _bodies(client) == [1]
+    assert _bodies(client) == [0]
 
 
 @pytest.mark.asyncio
-async def test_a_thread_that_only_read_the_web_does_not_bring_the_body() -> None:
-    """And the trigger discriminates by tool, not by "there was a call"."""
+async def test_a_follow_up_with_nothing_to_read_in_it_keeps_the_body() -> None:
+    """And ambiguity resolves the way it costs least to be wrong.
+
+    "Anything else?" names no ticker and no market, and it is not a question
+    about the assistant either. Nothing in it decides, so it is carried the way
+    every unrecognised question is: with the playbook.
+    """
     client = FakeClient([answer("Được.")])
 
     await loop(client).run(
