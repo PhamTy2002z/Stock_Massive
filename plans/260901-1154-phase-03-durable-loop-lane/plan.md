@@ -1,7 +1,7 @@
 ---
 plan: 260901-1154-phase-03-durable-loop-lane
 title: "Phase 3 — Durable loop, lane và progress thật"
-status: in-progress
+status: done — gate xanh 2026-09-01, câu hỏi mở chuyển P5/P6/P7/P9
 roadmap: "docs/roadmap.md §10 Phase 3"
 branch: feat/phase-03-durable-loop-lane
 ---
@@ -302,3 +302,47 @@ theo từng việc khi hợp lý, gom gate cuối).
    site production nào đọc thẳng hằng cũ ngoài định nghĩa `LIGHT`.
 5. `git diff --check` sạch; không tham chiếu Signal Desk/Study mới; progress
    payload không chứa text web/tool (allowlist test).
+
+## Kết quả (2026-09-01)
+
+Gate **đạt**. `tests/test_agent_fault_injection.py` 14 test phủ 12 dòng ma
+trận, chạy ở mức `TurnService` trên đúng các persisted view reader chạm được;
+mutation-probe xác nhận suite chặn đúng lỗi nó sở hữu (neuter
+`settle_orphan_calls`, cho cancel cắt write barrier, cho `_complete` bỏ qua
+`cancel_event` — mỗi mutation làm rớt đúng dòng tương ứng). Toàn backend
+`pytest -q` **1283 passed** (baseline đầu phase 1144); web lint/type-check/
+test (458)/build xanh; `compileall` + `git diff --check` sạch. Bảy việc, mỗi
+việc một commit + report trong `plans/reports/fullstack-260901-1154-phase-03-task{1..7}-*.md`.
+
+Điểm kiến trúc chốt trong phase (cửa hai chiều đã dùng):
+
+- Question state replay từ row `agent_question` qua GET thread; draft/
+  checkpoint không mang state đổi-sau-terminal (view checkpoint trả
+  `question: null` — đã amend ma trận).
+- `PENDING` chỉ sống trong draft persist trước dispatch (intent), không bao
+  giờ lên live stream; `pending` vs `running` trong draft khôi phục là cách
+  phân biệt "ghi rồi chưa ai chạy" với "đã dispatch, kết quả chưa rõ".
+- `TOOL_CALL_FIELDS` mở thêm `error` (mã máy do harness viết) để stream và
+  transcript đồng ý về lý do một call bị `denied`.
+- Cancel mid-model-call bỏ reservation theo đường `usage_unknown` sẵn có của
+  ledger — trung thực "tiền đã tiêu dù answer không về".
+
+Câu hỏi mở, đúng chủ sở hữu:
+
+1. (P5) Rung `same_tool_failure_halt_after` của guardrail ladder còn ghim
+   theo trần external 7 của lane light — trên deep lane ladder chặt hơn trần
+   lane (an toàn: chấm dứt sớm có lý do), tinh chỉnh khi P5 làm policy plane.
+2. (P5/P9) Call bị cancel in-flight không ghi Tool Call Trace row — vocab
+   `agent_tool_call.status` chỉ có 4 giá trị; thêm giá trị là quyết định
+   schema. Wire/message vẫn ghi đủ (`error="cancelled"`, `dispatched` thật).
+3. (P7/P9) `dispatched` không nằm trên wire tool.call — chỉ trace giữ; nếu
+   reader cần phân biệt "bị từ chối trước khi chạy" với "chạy rồi hỏng",
+   P7 mở allowlist.
+4. (P9) Turn không nói lời nào không có assistant message — trail chỉ sống
+   trong checkpoint; observability P9 quyết có cần đường đọc riêng.
+5. (P6) Router v1 heuristic hẹp, deep lane chưa mở rộng trên production;
+   P6 sở hữu chất lượng routing và re-baseline golden trước khi nới.
+6. (Vận hành) DB dev dùng chung đã có bảng `agent_question` do test
+   `create_all` tạo (0 row, alembic chưa stamp): trước khi
+   `alembic upgrade head` trên DB đó phải `DROP TABLE agent_question` hoặc
+   `alembic stamp d3f6a1c82b47`.

@@ -516,7 +516,7 @@ không đổi. Hai câu hỏi chuyển P5: có rút tool non-allow khỏi schema
 thấy không, và số đo tần suất chạm timeout trên mạng thật. Plan và số đo:
 [`plans/260901-1130-phase-02-capability-plane/plan.md`](../plans/260901-1130-phase-02-capability-plane/plan.md).
 
-### Phase 3 — Durable loop, lane và progress thật — **Target**
+### Phase 3 — Durable loop, lane và progress thật — **Done (2026-09-01)**
 
 **Outcome.** Loop semantics Hermes trên state OpenCode; Turn phục hồi có giới
 hạn hoặc kết thúc có lý do; tiến trình hiển thị là sự thật.
@@ -543,6 +543,24 @@ hạn hoặc kết thúc có lý do; tiến trình hiển thị là sự thật.
 overflow, output cap, cancel, disconnect) settle đúng; 0 orphan tool state;
 0 duplicate external effect; replay timeline nhất quán sau disconnect; question
 card ba trạng thái sống qua replay.
+
+**Kết quả (2026-09-01).** Gate đạt bằng
+`pytest tests/test_agent_fault_injection.py …` (14 test / 12 dòng ma trận,
+mutation-probed; toàn suite 1283 passed, web 458 + build xanh). Trần
+round/deadline/external/output nay là `LaneProfile` (`agent/lanes.py`, light =
+hằng cũ, deep 10 round/1800s; intent router heuristic tất định, mặc định
+light); progress part typed phát từ 7 sự kiện thật của loop, sống qua
+stream/snapshot/checkpoint/message và không bao giờ vào context model;
+question part + bảng `agent_question` + endpoint answer/skip + supersede
+trong transaction tạo Turn — ba trạng thái replay qua GET thread (state
+đổi-sau-terminal không sống trong draft, amendment tường minh trong plan);
+tool call thêm `pending|denied` trên wire, intent persist trước write effect,
+mọi view persist 0 orphan sau terminal; cancel truyền xuống model call
+in-flight và read segment, write barrier chạy nốt đúng một lần. Câu hỏi mở
+chuyển P5 (guardrail rung theo lane, trace row cho call bị cancel), P6
+(routing quality + re-baseline golden trước khi nới deep), P7/P9
+(`dispatched` lên wire, trail của Turn câm). Plan và số đo:
+[`plans/260901-1154-phase-03-durable-loop-lane/plan.md`](../plans/260901-1154-phase-03-durable-loop-lane/plan.md).
 
 ### Phase 4 — Context Engine — **Target**
 
@@ -761,8 +779,8 @@ child, 0 budget escape. Không đạt → single-agent + Rejected.
 ## 11. Dependency
 
 ```text
-P0 done → P1 eval done → P2 capability done → P3 loop/lane ◀ next
-        → P4 context → P5 security → P6 evidence engine → P7 desk UX
+P0 done → P1 eval done → P2 capability done → P3 loop/lane done
+        → P4 context ◀ next → P5 security → P6 evidence engine → P7 desk UX
         → P8 memory/consent → P9 observability/release
                                    │
               ┌────────────────────┼──────────────────────┐
