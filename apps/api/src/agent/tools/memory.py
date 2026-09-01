@@ -45,9 +45,15 @@ from ..registry import (
     ToolEffect,
     ToolEntry,
     ToolIdempotency,
+    ToolPermission,
     object_schema,
     register,
 )
+
+#: What one call of any of these tools may take. They are single statements
+#: against this deployment's own database, so a call still running after this
+#: is not slow, it is stuck.
+STORE_TIMEOUT_SECONDS = 10.0
 
 MAX_MATCHES = 8
 MAX_FACTS = 5
@@ -104,6 +110,8 @@ class MemoryTools:
                 access=ToolAccess.STORE,
                 content_trust=ContentTrust.TRUSTED_STRUCTURED,
                 concurrency=ToolConcurrency.PARALLEL_SAFE,
+                permission=ToolPermission.ALLOW,
+                timeout_seconds=STORE_TIMEOUT_SECONDS,
                 contract_version="1",
             ),
             ToolEntry(
@@ -147,6 +155,12 @@ class MemoryTools:
                 access=ToolAccess.STORE,
                 content_trust=ContentTrust.TRUSTED_STRUCTURED,
                 concurrency=ToolConcurrency.SERIALIZED,
+                # A write, and still allowed: what it writes is this user's own
+                # note in this user's own scope, which is the thing they asked
+                # for. Permission is declared here so that judgement is a line
+                # somebody can read and change, not an absence.
+                permission=ToolPermission.ALLOW,
+                timeout_seconds=STORE_TIMEOUT_SECONDS,
                 contract_version="1",
             ),
             ToolEntry(
@@ -171,6 +185,8 @@ class MemoryTools:
                 access=ToolAccess.STORE,
                 content_trust=ContentTrust.TRUSTED_STRUCTURED,
                 concurrency=ToolConcurrency.PARALLEL_SAFE,
+                permission=ToolPermission.ALLOW,
+                timeout_seconds=STORE_TIMEOUT_SECONDS,
                 contract_version="1",
             ),
         )

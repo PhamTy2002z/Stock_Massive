@@ -58,6 +58,7 @@ from ..registry import (
     ToolEffect,
     ToolEntry,
     ToolIdempotency,
+    ToolPermission,
     object_schema,
     register,
 )
@@ -439,6 +440,12 @@ class WebTools:
                 access=ToolAccess.NETWORK,
                 content_trust=ContentTrust.UNTRUSTED,
                 concurrency=ToolConcurrency.PARALLEL_SAFE,
+                permission=ToolPermission.ALLOW,
+                # Above the one provider round trip this makes, which is already
+                # bounded at ``FETCH_TIMEOUT_SECONDS`` on the wire, and below the
+                # round's own backstop. It ends a search that is not answering
+                # rather than competing with the bound the request already has.
+                timeout_seconds=20.0,
                 contract_version="1",
                 # Both halves are required: the flag is the deployment's decision
                 # and the key is whether the call can be made at all. Offering the
@@ -487,6 +494,13 @@ class WebTools:
                 access=ToolAccess.NETWORK,
                 content_trust=ContentTrust.UNTRUSTED,
                 concurrency=ToolConcurrency.PARALLEL_SAFE,
+                permission=ToolPermission.ALLOW,
+                # The widest of the shipped bounds because this call is the one
+                # that can legitimately be several requests: ``MAX_REDIRECTS``
+                # hops, each with its own ``FETCH_TIMEOUT_SECONDS``. Cutting at
+                # the single-request bound would refuse pages that were about to
+                # arrive.
+                timeout_seconds=25.0,
                 contract_version="1",
                 check_fn=lambda: bool(self._settings.web_tools_enabled),
                 max_result_size_chars=PAGE_RESULT_CHARS,

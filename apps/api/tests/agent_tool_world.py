@@ -45,6 +45,10 @@ def stub_entry(name: str, *, toolset: str = "stub", **overrides: Any) -> registr
         # The registry refuses a registration with no reader-facing name, which
         # is the point of that field: a tool cannot reach a screen as its own id.
         "display_name": f"Stub {name}",
+        # Declared for the same reason, and stated here rather than defaulted in
+        # the registry: a stub that may run says so, and a test about a stub that
+        # may not overrides it.
+        "permission": registry.ToolPermission.ALLOW,
     }
     fields.update(overrides)
     return registry.ToolEntry(**fields)

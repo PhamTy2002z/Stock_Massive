@@ -44,6 +44,14 @@ is the shape a question about one symbol legitimately has; refusing it under a
 number that exists because a web search costs money spends the web allowance on
 evidence that costs nothing.
 
+**What a call is allowed to do, and for how long, is read off its declaration.**
+A tool whose registration says it may not run, or needs a person's agreement
+first, is refused here before its arguments are even parsed, and a call that
+outlives the bound its registration declared is given up on and answered. Both
+are typed results rather than exceptions, for the same reason as everything
+else on this page: the model is owed one result per call, and "you were not
+allowed to do that" and "that took too long" are two things it can act on.
+
 Concurrency is ``asyncio`` and not a thread pool: this codebase is async
 throughout, and the one case that genuinely blocks — a handler that declares
 ``is_async=False`` — is moved to a worker thread individually rather than making
@@ -74,6 +82,14 @@ INVALID_ARGUMENTS = "invalid_arguments"
 BLOCKED_CALL = "blocked_call"
 HALTED_TURN = "halted_turn"
 TOOL_FAILED = "tool_failed"
+#: The declaration says this call may not be made. One code for every reason a
+#: permission rule withholds a call, because the model's move is the same in all
+#: of them: this route is closed, find another one.
+PERMISSION_DENIED = "permission_denied"
+#: The call outlived the bound its own declaration set. Distinct from
+#: ``tool_failed`` because the tool did not fail — it was still working — and the
+#: model's move is different: ask for less, not something else.
+TOOL_CALL_TIMEOUT = "tool_call_timeout"
 #: This module broke, rather than the tool or the route. Its own code, so its
 #: own name: ``tool_failed`` would file a harness bug under the tool that was
 #: working, and the operational count that matters is the one nobody expects to
@@ -341,6 +357,20 @@ class ToolExecutor:
                     dispatched=False,
                 ),
             )
+        refusal = _permission_refusal(call.name, entry.permission)
+        if refusal is not None:
+            return await self._record(
+                call,
+                {},
+                ToolResult(
+                    call_id=call.id,
+                    tool_name=call.name,
+                    ok=False,
+                    error=PERMISSION_DENIED,
+                    text=refusal,
+                    dispatched=False,
+                ),
+            )
         try:
             arguments = _parse_arguments(call.arguments)
         except ValueError as exc:
@@ -375,13 +405,45 @@ class ToolExecutor:
             )
 
         started = time.perf_counter()
+
+        # The handler's own exceptions are captured *inside* the awaited
+        # coroutine, so the only ``TimeoutError`` that can escape ``wait_for``
+        # is the one ``wait_for`` itself raises at the declared bound. Without
+        # this seam the two are indistinguishable: a socket timeout is a
+        # ``TimeoutError`` too (``socket.timeout`` is the same class), and a
+        # wire that gave up after eight seconds would be reported as a call
+        # that used up its whole declared allowance, with the wrong number in
+        # the sentence the model acts on.
+        async def _attempted() -> tuple[Any, Exception | None]:
+            try:
+                return await self._invoke(entry, arguments), None
+            except Exception as exc:  # noqa: BLE001 - a tool failure is a result
+                return None, exc
+
+        failure: Exception | None = None
         try:
-            payload = await self._invoke(entry, arguments)
-            ok, error, text = True, None, _normalize(payload)
-        except Exception as exc:  # noqa: BLE001 - a tool failure is a result
-            logger.warning("Tool %s failed: %s", call.name, exc)
-            payload, ok, error = None, False, TOOL_FAILED
-            text = f"{call.name} failed: {exc}"
+            payload, failure = await asyncio.wait_for(
+                _attempted(), timeout=entry.timeout_seconds
+            )
+        except TimeoutError:
+            logger.warning(
+                "Tool %s passed its declared bound of %.1fs",
+                call.name,
+                entry.timeout_seconds,
+            )
+            payload, ok, error = None, False, TOOL_CALL_TIMEOUT
+            text = (
+                f"{call.name} was still running after the {entry.timeout_seconds:g} "
+                "seconds its declaration allows one call, so it was given up on. "
+                "Ask for something narrower, or use what the other calls returned."
+            )
+        else:
+            if failure is None:
+                ok, error, text = True, None, _normalize(payload)
+            else:
+                logger.warning("Tool %s failed: %s", call.name, failure)
+                payload, ok, error = None, False, TOOL_FAILED
+                text = f"{call.name} failed: {failure}"
         elapsed = int((time.perf_counter() - started) * 1000)
 
         # Scanned here, once, and deliberately not on the render path. What the
@@ -419,6 +481,17 @@ class ToolExecutor:
     async def _invoke(
         self, entry: ToolDeclaration, arguments: Mapping[str, Any]
     ) -> Any:
+        """Run one handler the way its declaration says it has to be run.
+
+        The caller bounds this with the declaration's own ``timeout_seconds``,
+        and for an async handler that bound also cancels the work. For a
+        declared-blocking one it does not: a thread cannot be cancelled from
+        outside, so what the bound buys is the round getting its answer back on
+        time while the thread keeps running until whatever internal limit the
+        handler set — a socket timeout, a statement timeout — ends it. That is
+        the honest trade, and it is why the bound belongs on the declaration
+        beside those internal limits rather than being invented here.
+        """
         if entry.is_async:
             outcome = entry.handler(self.context, arguments)
             if inspect.isawaitable(outcome):
@@ -546,6 +619,37 @@ class ToolExecutor:
         return result
 
 
+def _permission_refusal(
+    name: str, permission: registry.ToolPermission | None
+) -> str | None:
+    """Why this call may not be made, or ``None`` when it may.
+
+    Three answers rather than one sentence reused three times, because the model
+    can do something different with each: a denied tool is closed here for good,
+    a tool waiting on approval may open later, and a declaration carrying no
+    permission at all is this deployment's own bug.
+
+    That last case is refused rather than allowed. A registered tool cannot
+    reach it — :func:`registry.register` refuses an unset permission — so it can
+    only arrive from a declaration assembled outside the registry, which is the
+    kind of declaration least entitled to the benefit of the doubt.
+    """
+    if permission is registry.ToolPermission.ALLOW:
+        return None
+    if permission is registry.ToolPermission.DENY:
+        return f"{name} is not permitted in this deployment."
+    if permission is registry.ToolPermission.ASK:
+        return (
+            f"{name} may only run once a person has agreed to it, and there is "
+            "no way to ask for that agreement here yet, so the call was refused "
+            "rather than made on nobody's authority."
+        )
+    return (
+        f"{name} was declared without saying whether it may run, so it was "
+        "not run."
+    )
+
+
 def _parse_arguments(raw: str | Mapping[str, Any] | None) -> Mapping[str, Any]:
     """The model's arguments as a mapping, or a message saying why they are not."""
     if raw is None:
@@ -588,7 +692,9 @@ __all__ = [
     "INVALID_ARGUMENTS",
     "MAX_EXTERNAL_CALLS_PER_ROUND",
     "MAX_STORE_CALLS_PER_ROUND",
+    "PERMISSION_DENIED",
     "ROUND_FANOUT_EXCEEDED",
+    "TOOL_CALL_TIMEOUT",
     "TOOL_FAILED",
     "TOOL_UNAVAILABLE",
     "UNKNOWN_TOOL",

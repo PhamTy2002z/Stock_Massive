@@ -83,7 +83,7 @@ class ResolvedToolSurface:
     def identity_payload(self) -> dict[str, Any]:
         """Deterministic policy identity with no callables, secrets, or expiry."""
         return {
-            "resolver_version": "resolved-tool-surface@1",
+            "resolver_version": "resolved-tool-surface@2",
             "expanded_names": list(self.expanded_names),
             "tools": [
                 {
@@ -101,6 +101,8 @@ class ResolvedToolSurface:
                     "access": tool.access.value,
                     "content_trust": tool.content_trust.value,
                     "concurrency": tool.concurrency.value,
+                    "permission": tool.permission.value,
+                    "timeout_seconds": tool.timeout_seconds,
                     "contract_version": tool.contract_version,
                     "handler_identity": tool.handler_identity,
                     "is_async": tool.is_async,

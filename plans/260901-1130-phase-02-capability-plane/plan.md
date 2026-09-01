@@ -1,7 +1,7 @@
 ---
 plan: 260901-1130-phase-02-capability-plane
 title: "Phase 2 — Unified Capability Plane"
-status: in-progress
+status: done — gate xanh 2026-09-01, hai câu hỏi mở chuyển P5
 roadmap: "docs/roadmap.md §10 Phase 2"
 branch: feat/phase-02-capability-plane
 ---
@@ -179,3 +179,25 @@ tường minh); không capability ngoài catalog; không đụng hợp đồng s
 3. Unknown/invalid/denied/timeout/handler-error settle một typed result;
    parallelism giữ stable order — test số 2, 3.
 4. `git diff --check` sạch; không tham chiếu Signal Desk/Study nào mới.
+
+## Kết quả (2026-09-01)
+
+Gate **đạt**: 84 test gate xanh (`test_agent_capability_contract.py` + ba file
+executor/registry/definitions), toàn suite 1144 passed (baseline trước phase
+1136), compileall và `git diff --check` sạch. Hành vi runtime 5 tool ship
+không đổi. Report thi công:
+[`plans/reports/fullstack-260901-1130-phase-02-capability-plane.md`](../reports/fullstack-260901-1130-phase-02-capability-plane.md).
+
+Một defect bắt được khi nghiệm thu và đã sửa kèm regression test:
+`socket.timeout` là alias của `TimeoutError`, nên wire timeout 8s bên trong
+`fetch_url` sẽ bị nhãn nhầm thành `tool_call_timeout` kèm câu văn sai số giây;
+executor nay bắt exception của handler **bên trong** coroutine được `wait_for`
+bọc, để `TimeoutError` thoát ra chỉ có thể là bound khai trên declaration.
+
+Hai câu hỏi mở, đúng chủ sở hữu là **Phase 5** (policy plane):
+
+1. Tool `deny`/`ask` hiện vẫn nằm trong `offered_schemas` — chỉ availability
+   lọc surface. Có rút tool non-allow khỏi schema model thấy hay không là
+   quyết định của policy plane, không phải của declaration.
+2. Timeout khai (25/20/10s) chưa có số đo tần suất chạm trên mạng thật —
+   theo dõi qua log `passed its declared bound` trước khi P5 tinh chỉnh.

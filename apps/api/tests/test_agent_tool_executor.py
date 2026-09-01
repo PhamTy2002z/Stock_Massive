@@ -41,6 +41,8 @@ class Surface:
         fails: bool = False,
         is_async: bool = True,
         reads_external: bool = True,
+        permission: registry.ToolPermission = registry.ToolPermission.ALLOW,
+        timeout_seconds: float = registry.DEFAULT_TOOL_TIMEOUT_SECONDS,
     ) -> None:
         async def handler(_context: registry.ToolContext, arguments: Mapping[str, Any]) -> Any:
             self.running += 1
@@ -88,6 +90,8 @@ class Surface:
                 if name in {"remember_fact", "forget_fact"}
                 else registry.ToolConcurrency.PARALLEL_SAFE
             ),
+            permission=permission,
+            timeout_seconds=timeout_seconds,
         )
 
     def executor(self, **kwargs: Any) -> executor.ToolExecutor:
