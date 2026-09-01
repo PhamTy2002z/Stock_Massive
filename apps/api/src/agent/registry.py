@@ -152,17 +152,12 @@ class ToolShadowError(ValueError):
 class ToolContext:
     """Trusted facts handed to a handler out of band.
 
-    Never part of a tool schema: the model must not be able to name a user, a
-    thread, a symbol or a Trading Day it was not given, so identity arrives here
-    and arguments arrive from the model, and the two are never merged.
+    Never part of a tool schema: the model must not be able to choose trusted
+    identity or scope, so those arrive here and arguments arrive from the model.
 
-    **Every field is optional because the callers are not one kind of caller.**
-    A Turn is owned by a user and belongs to a Thread; an Analysis is owned by
-    neither. An Analysis is keyed by ``(symbol, trading_day)`` and shared
-    system-wide (``src/alpha/watchlist.py``), so ``user_id`` on it would be a
-    number invented to fill a field. A handler that genuinely needs one refuses
-    when it is absent, in the same spirit as ``requires_env``: the condition is
-    stated where the handler is rather than assumed by its type.
+    Every field is optional because tests and offline harnesses may execute a
+    capability without a persisted Turn. A handler that needs one refuses when
+    it is absent, in the same spirit as ``requires_env``.
     """
 
     user_id: int | None = None
@@ -170,16 +165,11 @@ class ToolContext:
     #: The Turn this call belongs to, where there is one. A handler that writes
     #: a row a reader will re-open needs to say which answer it belongs to, and
     #: an *argument* naming a Turn would be a route to attaching a picture to
-    #: somebody else's conversation. ``None`` outside a Turn — an Analysis, a
-    #: smoke run — and the row is then reachable by its own id alone.
+    #: somebody else's conversation. ``None`` outside a persisted Turn.
     turn_id: uuid.UUID | None = None
-    #: The symbol one Analysis is being produced for. Trusted rather than an
-    #: argument for the reason above: an argument naming a symbol is a route to
-    #: reading a symbol this call was not opened for.
+    #: Reserved trusted domain scope; current web and memory tools do not use it.
     symbol: str | None = None
-    #: The Trading Day that Analysis is keyed by. Trusted for the same reason,
-    #: and for one more: an argument naming a day is a route to a session that
-    #: has not closed yet.
+    #: Reserved trusted temporal scope; current tools do not use it.
     trading_day: date | None = None
     #: The caller's clock. Injected so a handler that stamps a row and a test
     #: that asserts the stamp read the same instant.
@@ -203,9 +193,9 @@ class ToolEntry:
     #: **Every tool carries two names and they are for different audiences.**
     #: ``name`` is the identifier the model calls and the trace records;
     #: ``display_name`` is the phrase a person reads on the rail of what a Turn
-    #: did. They are never the same string: a rail row saying ``get_field`` tells
+    #: did. They are never the same string: a raw function name tells
     #: a reader nothing about what was looked up, and a model asked to call
-    #: "Đọc chỉ báo" has nothing to call.
+    #: a display label with no handler has nothing to call.
     #:
     #: Required — :func:`register` refuses a blank one. That refusal is the whole
     #: mechanism: the alternative is a table of display names kept somewhere else,
@@ -218,7 +208,7 @@ class ToolEntry:
     #: a reader would recognise.
     summary_detail_arg: str | None = None
     #: A tool that composes its own rail row, when one argument cannot say what
-    #: the call was for. ``get_field`` needs a field and a symbol and a curated
+    #: the call was for. Some tools need several arguments and a curated
     #: label for the field, so it builds the sentence itself. Takes the model's
     #: arguments and returns the whole row, :attr:`display_name` included.
     summarise: Callable[[Mapping[str, Any]], str] | None = None
@@ -403,7 +393,7 @@ def register(entry: ToolEntry, *, override: bool = False) -> ToolEntry:
         raise ValueError(f"tool {entry.name!r} needs a description the model can read")
     if not entry.display_name.strip():
         # Refused rather than defaulted to the tool's own name. A default here
-        # would put `get_field` on a reader's screen and look deliberate, which
+        # would put a raw function name on a reader's screen and look deliberate,
         # is exactly what happened before this field existed.
         raise ValueError(
             f"tool {entry.name!r} needs a display_name a person can read; the "

@@ -26,7 +26,7 @@ import { UPSTREAM_UNREACHABLE } from "@/lib/connection-status"
  *
  * ## Two directions, three body shapes, and the request side must be buffered
  *
- * Response side: `watchlist` and `analyses` answer with JSON, and reading it
+ * Response side: JSON resources are buffered, and reading them
  * here is what lets the handler retry after a refresh. **A Turn's event stream
  * cannot be read to the end before it is returned** — the end is up to ten
  * minutes away, and the whole point is that the first block arrives long
@@ -50,24 +50,19 @@ import { UPSTREAM_UNREACHABLE } from "@/lib/connection-status"
  * would corrupt the boundary and any binary part inside it.
  */
 
-// The resources this proxy will carry. Most are matched on the first segment;
-// Market Monitor is the sole stocks subtree admitted because its browser reads
-// require the same httpOnly-cookie-to-bearer bridge.
-// `threads` and `turns` are the Alpha Desk transport (ADR-0013); `watchlist` and
-// `analyses` are the rail and the Analyses behind it. `messages` is the flag
-// action of ADR-0016 and nothing else: upstream mounts `POST` and `DELETE` on
+// The resources this proxy will carry, matched on the first segment.
+// `threads` and `turns` are the chat transport. `messages` is the flag action
+// and nothing else: upstream mounts `POST` and `DELETE` on
 // `/messages/{id}/flag` alone, and both resolve ownership through the Thread, so
 // the same argument covers it. `assets` is the favicon fetch-and-cache: the
 // browser must never reach a search result's domain directly to load its
 // icon — that would tell the domain, and the network path to it, which page a
 // signed-in user is reading and from what IP — so the API fetches it and this
-// allowlist is what lets the browser reach that endpoint at all. `artifacts` is
-// the desk view fetch: upstream mounts a single `GET /artifacts/{id}` that resolves
-// ownership through the Thread the Study ran in, so the same argument as
-// `messages` covers it. `attachments` is the composer's file and image upload:
+// allowlist is what lets the browser reach that endpoint at all. `attachments`
+// is the composer's file and image upload:
 // upstream mounts `POST /attachments` and `GET /attachments/{id}`, and both
-// resolve ownership the same way `read_artifact` does — through the account
-// that stored the row, not through anything the request itself asserts — so a
+// resolve ownership through the account that stored the row, not through
+// anything the request itself asserts — so a
 // wider proxy grant here still cannot reach another account's upload.
 // `usage` is this account's own allowance: upstream mounts
 // a single `GET /usage` that takes no parameters and reads the user id from the
@@ -77,12 +72,9 @@ import { UPSTREAM_UNREACHABLE } from "@/lib/connection-status"
 // takes no parameters and answers the same for every caller, so nothing
 // account-specific is reachable through it.
 const FORWARDED_RESOURCES = new Set([
-  "watchlist",
-  "analyses",
   "threads",
   "turns",
   "messages",
-  "artifacts",
   "attachments",
   "assets",
   "usage",
@@ -90,10 +82,7 @@ const FORWARDED_RESOURCES = new Set([
 ])
 
 function isForwardedPath(path: string[]): boolean {
-  return (
-    (path.length > 0 && FORWARDED_RESOURCES.has(path[0])) ||
-    (path[0] === "stocks" && path[1] === "market-monitor")
-  )
+  return path.length > 0 && FORWARDED_RESOURCES.has(path[0])
 }
 
 const EVENT_STREAM = "text/event-stream"
@@ -144,7 +133,8 @@ const configuredOrigins = (): string[] =>
  * behind a reverse proxy reports `http://localhost:3000` for a request the
  * browser made to `https://app.example.com`, so an `Origin` check against it
  * refuses every write the moment a proxy is put in front — which is precisely
- * the deployment ADR-0013 asks for. That failure is invisible to a unit test on
+ * the deployment this product asks for. That failure is invisible to a unit
+ * test on
  * either side of the proxy and is why the end-to-end acceptance exists.
  *
  * `X-Forwarded-Host` and `Host` are safe to compare an `Origin` against because
@@ -225,7 +215,7 @@ async function forward(request: NextRequest, path: string[]): Promise<NextRespon
 
   // Awaited *before* anything is returned. A streaming response that went out
   // and only then discovered it had no token would have to report the failure
-  // inside the stream, which is the shape ADR-0013 exists to avoid.
+  // inside the stream, which is the shape the two-request transport avoids.
   let token = await currentAccessToken()
   let response = await send(request, target, token, body, requestContentType)
 

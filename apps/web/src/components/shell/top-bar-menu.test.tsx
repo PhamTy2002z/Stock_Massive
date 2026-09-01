@@ -34,7 +34,6 @@ const dispatch = vi.fn()
 const state = {
   view: "chat",
   sidebarOpen: true,
-  signalDesk: false,
   inspector: null as string | null,
   overlay: null as string | null,
 }
@@ -72,7 +71,6 @@ beforeEach(() => {
   desk.threadId = THREAD_ID
   threads.data = { threads: [thread()] }
   state.overlay = null
-  state.signalDesk = false
 })
 
 describe("the name", () => {

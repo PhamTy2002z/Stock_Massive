@@ -23,7 +23,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 
 import type { Usage } from "@/lib/alpha-desk/types"
 
@@ -37,8 +37,6 @@ vi.mock("@/hooks/use-auth", () => ({
     isPending: false,
   }),
 }))
-
-import { readPreferences, writePreferences } from "@/lib/alpha-desk/preferences"
 
 import { SettingsDialog } from "./settings-dialog"
 
@@ -99,9 +97,8 @@ describe("the rail", () => {
   it("no longer offers a pane of compile-time constants", () => {
     open()
 
-    // The display timezone and the exchange list moved to where the numbers
-    // are, which is the provenance strip under each Signal Desk. There is no
-    // pane for them, and the rail is the only place a pane can be reached from.
+    // Runtime configuration is not editable from this dialog, so there is no
+    // pane for it and the rail is the only place a pane can be reached from.
     const rail = screen.getByRole("navigation", { name: "Mục cài đặt" })
     const labels = Array.from(rail.querySelectorAll("button")).map(
       (button) => button.textContent,
@@ -176,51 +173,6 @@ describe("the allowance", () => {
     expect(
       await screen.findByRole("button", { name: "Thử lại" }),
     ).toBeInTheDocument()
-  })
-})
-
-const DEFAULT_DESK = "Signal Desk là chế độ mặc định"
-
-describe("how a new conversation opens", () => {
-  it("starts from what the browser last chose", () => {
-    writePreferences({ signalDeskByDefault: true })
-    open()
-    goTo("Hội thoại")
-
-    expect(screen.getByRole("switch", { name: DEFAULT_DESK })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    )
-  })
-
-  it("writes the default without touching anything else", async () => {
-    writePreferences({ signalDeskByDefault: false, chatWidth: 640 })
-    open()
-    goTo("Hội thoại")
-
-    fireEvent.click(screen.getByRole("switch", { name: DEFAULT_DESK }))
-
-    await waitFor(() => {
-      expect(readPreferences().signalDeskByDefault).toBe(true)
-    })
-    // The shell's own remembered width is a different caller's field.
-    expect(readPreferences().chatWidth).toBe(640)
-  })
-
-  it("is the one live control on its pane", () => {
-    writePreferences({ signalDeskByDefault: false })
-    open()
-    goTo("Hội thoại")
-
-    // Follow-up suggestions, auto-naming and the completion sound are drawn but
-    // have no reader in the agent. A switch there that accepted a click would
-    // persist an opinion nothing consults.
-    const live = screen
-      .getAllByRole("switch")
-      .filter((toggle) => !(toggle as HTMLButtonElement).disabled)
-
-    expect(live).toHaveLength(1)
-    expect(live[0]).toHaveAccessibleName(DEFAULT_DESK)
   })
 })
 

@@ -1,0 +1,39 @@
+{
+  "schema": "golden.thresholds@1",
+  "why": "No threshold before a distribution. Every soft bar below is null until a multi-trial baseline of the release corpus exists and somebody has looked at the spread. Hard dimensions are not listed here at all: they are fixed at 100% in gate.py and are not tunable by editing a file.",
+  "locked_from": null,
+  "soft": {
+    "multi_source_label": null,
+    "distinct_domains": null,
+    "read_depth": null,
+    "parallel_rate": null,
+    "uncited_external_number": null
+  },
+  "never_gating": {
+    "uncited_external_number": "Measured on the previous corpus: four of five flagged figures were honest answers doing a unit conversion or an arithmetic step over covered numbers. The grader asks whether a figure appears verbatim in the evidence; the criterion asks whether it is supported by the evidence. Those separate the moment an answer does arithmetic, which is what the conflict and synthesis families ask for. Full numbers in golden/README.md."
+  },
+  "signals_not_gates": {
+    "latency_p50": "A median of forty latencies moves with the Internet. Reported with a range; a rise over 20% is explained, not auto-failed.",
+    "cost_per_turn_p50": "Reported under the run's own ceiling; roadmap §4 makes cost a pricing clock, not a brake.",
+    "judge_axes": "The five rubric axes of §3 are reported per case until a baseline says what a normal distribution of them looks like."
+  },
+  "observed": {
+    "from": "release-v1-baseline (2026-09-01, 40 cases x 3 trials, git 9dbf2731)",
+    "why_not_locked": "One baseline. The intervals are wide at n=33 and three of these dimensions measure a Phase 6 capability that does not exist yet, so a bar set here would be set on an exam sat once.",
+    "case_pass_rate": {
+      "multi_source_label": 0.61,
+      "distinct_domains": 0.58,
+      "read_depth": 0.5,
+      "uncited_external_number": 0.82
+    },
+    "latency_ms_p50": 26430,
+    "cost_micro_usd_p50": 24265,
+    "judge_axis_mean": {
+      "uncertainty": 4.65,
+      "structure_for_intent": 4.46,
+      "decision_utility": 4.03,
+      "synthesis": 3.97,
+      "counterargument": 3.73
+    }
+  }
+}

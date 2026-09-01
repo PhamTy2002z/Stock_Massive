@@ -1,8 +1,8 @@
 /**
  * What the create call sends, and what a refusal comes back as.
  *
- * Two properties of ADR-0013 live in this one small module, and neither is
- * visible from a component test.
+ * Two properties of the chat transport live in this one small module, and
+ * neither is visible from a component test.
  *
  * **The browser owns the Turn id.** It is generated before the `POST` and sent
  * *in* it, which is what makes a retried admission safe on a flaky network: a
@@ -78,28 +78,12 @@ describe("the Turn id", () => {
     expect(keys).toEqual([turnId, turnId])
   })
 
-  it("carries the mode the reader switched to, so the desk is asked for", async () => {
-    fetchMock.mockResolvedValue(json({ id: "t-1", created: true }))
-
-    await createTurn({
-      threadId: "thread-1",
-      turnId: newTurnId(),
-      text: "VCB thế nào?",
-      signalDesk: true,
-    })
-
-    expect(sentBody().mode).toBe("signal_desk")
-  })
-
-  it("says chat rather than saying nothing, because the mode is part of the key", async () => {
-    // Omitted, the server would default it — and two Turns asked in two
-    // different modes under one id would resolve to each other. The value is
-    // stated so the idempotency payload can tell them apart.
+  it("sends no retired mode field", async () => {
     fetchMock.mockResolvedValue(json({ id: "t-1", created: true }))
 
     await createTurn({ threadId: "thread-1", turnId: newTurnId(), text: "VCB?" })
 
-    expect(sentBody().mode).toBe("chat")
+    expect(sentBody()).not.toHaveProperty("mode")
   })
 
   it("sends no analysis lens, because nothing behind the request reads one", async () => {

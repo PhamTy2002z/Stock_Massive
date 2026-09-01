@@ -30,8 +30,9 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
+from enum import Enum
 
 from .sections import PROMPT_VERSION, SECTIONS, PromptSection
 
@@ -63,11 +64,57 @@ def sanitise_name(raw: str) -> str | None:
     return cleaned[:MAX_NAME_CHARS].strip() or None
 
 
+class MarketPhase(str, Enum):
+    """Whether the Vietnamese equity market trades on a given calendar day.
+
+    ``UNKNOWN`` is a first-class answer rather than a failure. The holiday table
+    behind it covers named years, and a phase that quietly degraded to "open"
+    outside them would reintroduce exactly the confident wrong label this value
+    exists to prevent.
+    """
+
+    OPEN = "open"
+    CLOSED_WEEKEND = "closed_weekend"
+    CLOSED_HOLIDAY = "closed_holiday"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class MarketDay:
+    """One day's trading status, as the harness will state it to the model.
+
+    ``holiday`` names the occasion and is set only for
+    :attr:`MarketPhase.CLOSED_HOLIDAY`. ``previous_trading_day`` is the session
+    the price boards are actually showing while the market is shut — the single
+    fact whose absence let a stale board be narrated as today — and is left
+    ``None`` whenever it cannot be derived with certainty.
+
+    Both are harness constants rather than user or web input, so neither goes
+    through :func:`sanitise_name`; :func:`render` still keeps them on their own
+    lines so the shape of the tail cannot be broken by a value.
+    """
+
+    phase: MarketPhase
+    holiday: str | None = None
+    previous_trading_day: date | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.phase, MarketPhase):
+            raise TypeError("phase must be a MarketPhase")
+        if self.holiday is not None and self.phase is not MarketPhase.CLOSED_HOLIDAY:
+            raise ValueError("only a holiday closure names a holiday")
+        if self.phase is MarketPhase.OPEN and self.previous_trading_day is not None:
+            raise ValueError(
+                "an open day has no previous session to point at: the boards it "
+                "shows are its own, and naming yesterday here would relabel them"
+            )
+
+
 @dataclass(frozen=True)
 class RuntimeContext:
     """The complete set of what may be injected, and nothing else.
 
-    Two values, and each is here because no tool can supply it.
+    Three values, and each is here because no tool can supply it.
 
     ``today`` is the calendar date in the user's own timezone. Without it the
     model cannot resolve the word "today" in a question, and it cannot tell
@@ -77,6 +124,14 @@ class RuntimeContext:
     Turn and void the cacheable prefix, and it would invite precision about a
     minute that nothing behind the answer has.
 
+    ``market`` is whether ``today`` is a session at all. It belongs beside the
+    date for the same reason the date does — nothing the model can call will
+    tell it — and it is carried as a value rather than looked up here so that
+    this module keeps rendering text and knows no calendar. It defaults to
+    :attr:`MarketPhase.UNKNOWN` rather than to ``None``: a caller who forgets it
+    makes the model verify the session, which is the safe direction, and there
+    is no silent state in which the prompt simply says nothing about trading.
+
     ``user_name`` is what to call the reader, when the account carries a name.
     Optional because most do not, and sanitised because it is the one field a
     user writes.
@@ -84,10 +139,13 @@ class RuntimeContext:
 
     today: date
     user_name: str | None = None
+    market: MarketDay = field(default_factory=lambda: MarketDay(MarketPhase.UNKNOWN))
 
     def __post_init__(self) -> None:
         if not isinstance(self.today, date):
             raise TypeError("today must be a date")
+        if not isinstance(self.market, MarketDay):
+            raise TypeError("market must be a MarketDay")
         if self.user_name is not None:
             if not isinstance(self.user_name, str):
                 raise TypeError("user_name must be a string when present")
@@ -160,7 +218,18 @@ def render(context: RuntimeContext) -> str:
     """
     if not isinstance(context, RuntimeContext):
         raise TypeError("the system prompt renders only a RuntimeContext")
-    lines = [f"- today: {context.today.isoformat()}"]
+    market = context.market
+    phase = market.phase.value
+    if market.holiday:
+        phase = f"{phase} ({market.holiday})"
+    lines = [
+        f"- today: {context.today.isoformat()}",
+        f"- market_today: {phase}",
+    ]
+    if market.previous_trading_day is not None:
+        lines.append(
+            f"- previous_trading_day: {market.previous_trading_day.isoformat()}"
+        )
     if context.user_name:
         lines.append(f"- user_name: {context.user_name}")
     return _STATIC_TEXT + "\n\n" + "\n".join(lines) + "\n"

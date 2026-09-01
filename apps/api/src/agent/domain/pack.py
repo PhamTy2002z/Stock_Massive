@@ -9,13 +9,11 @@ rather than a second pass over every table that happens to name a stock.
 
 Two properties of this module are load-bearing rather than stylistic.
 
-**It imports no domain.** No ``stocks``, no ``studies``, no ``toolsets``. A
+**It imports no domain runtime or toolsets.** A
 frame that knew the shape of the thing it frames would have to be edited to hold
 the next one, which is the whole failure this file exists to prevent. That is
-also why :attr:`DomainPack.universe` is typed as a plain callable: naming its
-argument and return types would mean importing them, and they belong to a
-domain. The pack carries the callable; only the domain's own module knows what
-it is.
+The pack carries prose and toolset names only; executable capabilities stay in
+the harness registry.
 
 **It reads nothing.** No settings, no session, no environment. A declaration
 that consulted its environment would answer differently in a test than in
@@ -26,9 +24,7 @@ machine it ran on.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from ..prompt.contract import assert_no_formatting_hole
 from ..prompt.sections import PromptSection
@@ -67,7 +63,7 @@ class DomainPack:
     #: Toolset *names*, not tools. Whether a name is registered is
     #: ``toolsets``' question, not this module's — a pack that could check would
     #: be a pack that imports the table it is meant to be independent of.
-    toolsets: tuple[str, ...]
+    toolsets: tuple[str, ...] = ()
 
     #: How the domain's tools are used and how their refusals read: the half of
     #: the prompt only a Turn that reaches for this domain pays for. The other
@@ -76,22 +72,6 @@ class DomainPack:
     #: Turn. Optional because a pack may be declared before its prose is written,
     #: not because a pack is expected to stay wordless.
     prompt_sections: tuple[PromptSection, ...] = ()
-
-    #: The callable that answers "which symbols does this system collect" — the
-    #: same one the domain's tools call, held by identity rather than copied.
-    #: A pack holding a list of tickers is a pack that lies the first time
-    #: anyone changes a configuration variable.
-    universe: Callable[..., Any] | None = None
-
-    #: Names of the analysis recipes this domain offers. Written out rather than
-    #: read from the registry: written out is what a reviewer reads, and a
-    #: contract test is what keeps it from drifting. A pack generated from the
-    #: registry would be correct even about a Study registered by mistake.
-    study_names: tuple[str, ...] = ()
-
-    #: Every code this domain can refuse a figure with. Declared, not owned —
-    #: the closed set lives with the domain's own signals module.
-    refusal_vocabulary: frozenset[str] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -104,27 +84,12 @@ class DomainPack:
                 f"pack {self.name!r} needs a version; without one a prose change "
                 "cannot be told apart from the prose before it"
             )
-        if not self.toolsets:
-            raise DomainPackInvalid(
-                f"pack {self.name!r} declares no toolsets; a domain that adds no "
-                "tools to the core is a domain with no way to answer anything "
-                "about itself"
-            )
         # The same gate the core prose passes at import (``prompt/contract``).
         # A pack's body reaches the model in the same conversation as the core,
         # so a brace in it is the same hole in the same wall — and refusing it
         # here means a malformed body cannot be shipped, rather than cannot be
         # noticed.
         assert_no_formatting_hole(self.prompt_sections)
-        duplicates = sorted(
-            {name for name in self.study_names if self.study_names.count(name) > 1}
-        )
-        if duplicates:
-            raise DomainPackInvalid(
-                f"pack {self.name!r} names {', '.join(duplicates)} more than once "
-                "in study_names; the duplicate hides nothing but does make the "
-                "catalog a model reads disagree with itself"
-            )
 
     @property
     def body_text(self) -> str:
@@ -185,11 +150,6 @@ class DomainPack:
             self.name,
             self.version,
             "\x1f".join(self.toolsets),
-            "\x1f".join(self.study_names),
-            # Sorted, not iterated: a frozenset's order is a function of hash
-            # seed, and an identity that moved between processes would key a
-            # cache that never hits.
-            "\x1f".join(sorted(self.refusal_vocabulary)),
             self.body_text,
         ):
             digest.update(part.encode("utf-8"))

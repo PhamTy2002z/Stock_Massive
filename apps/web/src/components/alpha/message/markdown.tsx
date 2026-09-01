@@ -1,11 +1,13 @@
 "use client"
 
-import type { ComponentPropsWithoutRef } from "react"
+import { useRef, type ComponentPropsWithoutRef } from "react"
 import ReactMarkdown, { type Options } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { rehypeWordCadence } from "@/lib/alpha-desk/word-cadence"
 import { cn } from "@/lib/utils"
+
+import { MarkdownCopyButton } from "./markdown-copy-button"
 
 /**
  * An answer's prose, rendered as the Markdown it is.
@@ -51,20 +53,20 @@ export function Markdown({
   return (
     <div
       className={cn(
-        "text-[0.95rem] leading-[1.62] [&>*+*]:mt-3",
+        "text-[0.9375rem] leading-[1.62] [&>*+*]:mt-3",
         // Headings inside an answer are section labels, not page titles: one
         // step of weight and none of size, so a bolded line cannot start
         // competing with the question above it.
-        "[&_h1]:text-[1.05rem] [&_h1]:font-semibold [&_h2]:text-[1rem] [&_h2]:font-semibold",
-        "[&_h3]:text-[0.95rem] [&_h3]:font-semibold [&_h4]:text-[0.95rem] [&_h4]:font-semibold",
+        "[&_h1]:text-balance [&_h1]:text-[1.05rem] [&_h1]:font-semibold [&_h2]:text-balance [&_h2]:font-semibold",
+        "[&_h3]:font-semibold [&_h4]:font-semibold",
+        "[&_p]:text-pretty",
         "[&_strong]:font-semibold [&_strong]:text-ink-display",
         "[&_em]:italic",
         "[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5",
         "[&_li]:mt-1 [&_li>ul]:mt-1 [&_li>ol]:mt-1",
         "[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-ink-3",
         "[&_code]:rounded [&_code]:bg-surface-raised [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-micro",
-        "[&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-surface-raised [&_pre]:p-3",
-        "[&_pre_code]:bg-transparent [&_pre_code]:p-0",
+        "[&_pre_code]:rounded-none [&_pre_code]:bg-transparent [&_pre_code]:p-0",
         "[&_hr]:border-border",
         className,
       )}
@@ -76,16 +78,10 @@ export function Markdown({
         rehypePlugins={rehypePlugins}
         components={{
           a: Anchor,
+          pre: CodeBlock,
           table: Table,
-          th: ({ node: _node, ...props }) => (
-            <th
-              {...props}
-              className="border border-border px-2.5 py-1.5 text-left font-semibold"
-            />
-          ),
-          td: ({ node: _node, ...props }) => (
-            <td {...props} className="border border-border px-2.5 py-1.5 align-top" />
-          ),
+          th: TableHeader,
+          td: TableCell,
         }}
       >
         {text}
@@ -101,7 +97,46 @@ export function Markdown({
  */
 type WithNode<T> = T & { node?: unknown }
 type TableProps = WithNode<ComponentPropsWithoutRef<"table">>
+type TableHeaderProps = WithNode<ComponentPropsWithoutRef<"th">>
+type TableCellProps = WithNode<ComponentPropsWithoutRef<"td">>
+type PreProps = WithNode<ComponentPropsWithoutRef<"pre">>
 type AnchorProps = WithNode<ComponentPropsWithoutRef<"a">>
+
+function TableHeader({ node: _node, align, style, ...props }: TableHeaderProps) {
+  return (
+    <th
+      {...props}
+      align={align}
+      style={style}
+      className={cn(
+        "border-b border-hairline px-3 py-3 font-semibold text-foreground first:pl-0 last:pr-12",
+        cellAlignment(style?.textAlign ?? align),
+      )}
+    />
+  )
+}
+
+function TableCell({ node: _node, align, style, ...props }: TableCellProps) {
+  return (
+    <td
+      {...props}
+      align={align}
+      style={style}
+      className={cn(
+        "border-b border-hairline px-3 py-3 align-top text-ink-2 first:pl-0 last:pr-0",
+        cellAlignment(style?.textAlign ?? align),
+      )}
+    />
+  )
+}
+
+function cellAlignment(
+  align: TableHeaderProps["align"] | NonNullable<TableHeaderProps["style"]>["textAlign"],
+) {
+  if (align === "center") return "text-center"
+  if (align === "right") return "text-right"
+  return "text-left"
+}
 
 /**
  * A table wide enough to need scrolling, scrolling inside its own box.
@@ -111,9 +146,68 @@ type AnchorProps = WithNode<ComponentPropsWithoutRef<"a">>
  * it, so the overflow is the table's own problem to hold.
  */
 function Table({ node: _node, ...props }: TableProps) {
+  const tableRef = useRef<HTMLTableElement>(null)
+
+  function tableText() {
+    const rows = tableRef.current?.rows
+    if (!rows) return ""
+
+    return Array.from(rows)
+      .map((row) =>
+        Array.from(row.cells)
+          .map((cell) => cell.textContent?.trim() ?? "")
+          .join("\t"),
+      )
+      .join("\n")
+  }
+
   return (
-    <div className="overflow-x-auto">
-      <table {...props} className="w-full border-collapse text-meta" />
+    <div className="relative">
+      <div
+        role="region"
+        aria-label="Bảng trong câu trả lời"
+        tabIndex={0}
+        className="overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        <table
+          {...props}
+          ref={tableRef}
+          className="w-full min-w-[32rem] border-separate border-spacing-0 text-row [font-variant-numeric:tabular-nums]"
+        />
+      </div>
+      <MarkdownCopyButton
+        getText={tableText}
+        label="Sao chép bảng"
+        copiedLabel="Đã sao chép bảng"
+        className="absolute right-0 top-0 bg-background sm:bg-transparent"
+      />
+    </div>
+  )
+}
+
+/** Code and ASCII diagrams share one calm, copyable reading surface. */
+function CodeBlock({ node: _node, className, ...props }: PreProps) {
+  const preRef = useRef<HTMLPreElement>(null)
+
+  return (
+    <div className="relative overflow-hidden rounded-card bg-surface-raised">
+      <pre
+        {...props}
+        ref={preRef}
+        tabIndex={0}
+        aria-label="Khối mã"
+        className={cn(
+          "overflow-x-auto px-4 py-4 pr-14 font-mono text-row leading-6 text-ink-1",
+          "[font-variant-numeric:tabular-nums] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+          className,
+        )}
+      />
+      <MarkdownCopyButton
+        getText={() => preRef.current?.textContent?.replace(/\n$/, "") ?? ""}
+        label="Sao chép khối mã"
+        copiedLabel="Đã sao chép khối mã"
+        className="absolute right-0 top-0"
+      />
     </div>
   )
 }

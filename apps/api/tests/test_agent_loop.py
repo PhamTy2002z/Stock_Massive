@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import uuid
 from dataclasses import replace
 from datetime import date, datetime, timezone
@@ -32,15 +31,11 @@ from src.alpha.models import (
     TOOL_CALL_TOOL_ERROR,
     TOOL_CALL_UNKNOWN_TOOL,
 )
-from src.core.config import get_settings
 from src.agent.loop import (
     ANSWER,
     ANSWER_TRUNCATED,
-    ASKED_LIMIT,
-    ASKED_LIMIT_OUTSIDE_DEBUG,
     AUTH_UNAVAILABLE,
     CANCELLED_BY_USER,
-    CATALOG_TOOL,
     CONTENT_POLICY_BLOCKED,
     CONTEXT_OVERFLOW,
     DEADLINE_EXPIRED,
@@ -61,11 +56,7 @@ from src.agent.loop import (
     ROUNDS_EXHAUSTED_NOTE,
     ROUTE_ERROR,
     ROUTE_RATE_LIMITED,
-    RUN_TOOL,
     SCHEMA_REJECTED,
-    NO_SIGNAL_DESK_TOOL_CALLED,
-    SIGNAL_DESK_MODE,
-    SIGNAL_DESK_NOTE,
     SYSTEM_NOTE_TOKENS,
     THOUGHT,
     TOOL_TIMEOUT,
@@ -270,7 +261,6 @@ DISPLAY: dict[str, tuple[str, str | None]] = {
     "session_search": ("Tìm trong hội thoại trước", "query"),
     "remember_fact": ("Ghi nhớ", "title"),
     "recall_facts": ("Đọc lại ghi chú", "query"),
-    "get_field": ("Đọc chỉ báo", None),
 }
 
 
@@ -321,11 +311,6 @@ def install(*entries: registry.ToolEntry) -> None:
         entry("session_search"),
         entry("recall_facts"),
         entry("remember_fact"),
-        # This system's own store, offered to a conversation as of the reversal
-        # in ``tools/signals.py``. Present here because two ceilings and one
-        # wrapper all branch on where a tool reads, and a stub surface without it
-        # would let those branches go untested.
-        entry("get_field", toolset="signals"),
         entry("broken", _boom),
         entry("slow", _slow),
     ):
@@ -930,7 +915,7 @@ async def test_a_store_read_is_not_charged_to_the_external_budget() -> None:
     spending the web allowance on it would buy nothing and cost the evidence."""
     client = FakeClient(
         [
-            wants("get_field", prefix=f"s{index}", query=f"q{index}")
+            wants("session_search", prefix=f"s{index}", query=f"q{index}")
             for index in range(MAX_TOOL_ROUNDS)
         ]
     )
@@ -953,10 +938,10 @@ def test_a_store_read_is_not_wrapped_while_a_web_read_beside_it_is() -> None:
     )
     figure = TurnToolCall(
         id="c2",
-        name="get_field",
-        arguments={"symbol": "HPG", "field_id": "indicator_pack.rsi_14"},
+        name="session_search",
+        arguments={"query": "HPG"},
         status=ToolCallStatus.OK,
-        result_text='{"fieldId": "indicator_pack.rsi_14", "value": 54.2}' * 4,
+        result_text='{"matches": [{"text": "HPG"}]}' * 4,
     )
 
     assert shown_result(page).startswith("<untrusted_tool_result")
@@ -1471,9 +1456,6 @@ def test_the_wire_payload_is_exactly_the_fields_of_the_contract() -> None:
         # a read of this store the way it draws a stranger's page. External for
         # an unregistered name, conservatively, the same way the wrapper reads it.
         "kind": "external",
-        # Whether the call answered, which ``status`` cannot say. ``None`` for a
-        # web search: it has no figure that could be missing.
-        "outcome": None,
         # The advisory threat scan's verdict. ``None`` for a call that has not
         # come back: there is no result to have looked at yet.
         "scan": None,
@@ -1537,7 +1519,7 @@ def test_the_wire_says_which_kind_of_evidence_a_call_went_and_got() -> None:
     with isolated_registry():
         register_all()
         page = TurnToolCall(id="c1", name="fetch_url").as_wire()
-        figure = TurnToolCall(id="c2", name="get_field").as_wire()
+        figure = TurnToolCall(id="c2", name="session_search").as_wire()
 
     assert page["kind"] == "external"
     assert figure["kind"] == "store"
@@ -1560,10 +1542,9 @@ def test_the_row_a_reader_gets_is_the_registration_s_own_words() -> None:
         assert summarise_call("web_search", {"query": "lãi suất"}) == (
             "Tìm trên web: lãi suất"
         )
-        assert summarise_call("get_field", {"field_id": "indicator_pack.rsi_14"}) == (
-            "Đọc chỉ báo: RSI (14)"
+        assert summarise_call("session_search", {"query": "FPT"}) == (
+            "Tìm trong hội thoại trước: FPT"
         )
-        assert summarise_call("list_fields", {}) == "Xem danh mục chỉ báo"
 
 
 def test_one_message_is_charged_deterministically() -> None:
@@ -1674,7 +1655,7 @@ def test_the_system_notes_fit_the_reservation_they_are_priced_at() -> None:
     # sentence somebody lengthens later has to fail here rather than in a Turn.
     from src.agent.loop import SYSTEM_NOTE_TOKENS
 
-    for note in (ROUNDS_EXHAUSTED_NOTE, HALT_GUIDANCE, SIGNAL_DESK_NOTE):
+    for note in (ROUNDS_EXHAUSTED_NOTE, HALT_GUIDANCE):
         assert (
             estimate_tokens(Message(role=Role.SYSTEM, content=note))
             <= SYSTEM_NOTE_TOKENS
@@ -1715,134 +1696,7 @@ async def test_a_round_whose_tools_never_answer_ends_the_turn_and_settles_them()
     assert [event["status"] for event in publisher.calls] == ["running", "error"]
 
 
-# -- what a Turn leaves behind when the library had no recipe -----------------
-#
-# The one signal that says a reader wanted an analysis nobody has written yet.
-# A model with a Study for the question runs it; a model that reads the whole
-# catalog and then answers in prose has looked and not found, and the question
-# it was answering is what the next Study should be chosen against.
-
-
-@pytest.fixture
-def study_tools():
-    """Both study tools on the stub surface, restored afterwards."""
-    original = toolsets.TOOLSETS["memory"]
-    toolsets.TOOLSETS["memory"] = {
-        **original,
-        "tools": (*original.get("tools", ()), CATALOG_TOOL, RUN_TOOL),
-    }
-    toolsets.clear_memo()
-    install(entry(CATALOG_TOOL), entry(RUN_TOOL))
-    try:
-        yield
-    finally:
-        toolsets.TOOLSETS["memory"] = original
-        toolsets.clear_memo()
-
-
-def misses(caplog) -> list[logging.LogRecord]:
-    return [
-        record
-        for record in caplog.records
-        if getattr(record, "study_catalog_miss", False)
-    ]
-
-
-ASKED = "Mức giá được mua nhiều nhất của VCB trong phiên hôm nay là?"
-
-
-@pytest.mark.asyncio
-async def test_reading_the_catalog_and_running_nothing_records_the_question(
-    study_tools, caplog
-) -> None:
-    client = FakeClient([wants(CATALOG_TOOL), answer("Chưa có phân tích cho câu này.")])
-
-    with caplog.at_level(logging.INFO, logger="src.agent.loop"):
-        outcome = await loop(client).run(
-            turn_request(
-                user_text=ASKED,
-                turn_id="22222222-2222-2222-2222-222222222222",
-            )
-        )
-
-    assert outcome.status is TurnStatus.COMPLETE
-    recorded = misses(caplog)
-    assert len(recorded) == 1
-    assert recorded[0].question == ASKED
-    assert recorded[0].turn_id == "22222222-2222-2222-2222-222222222222"
-    assert recorded[0].thread_id == "11111111-1111-1111-1111-111111111111"
-
-
-@pytest.mark.asyncio
-async def test_a_turn_that_ran_a_study_is_not_a_miss(study_tools, caplog) -> None:
-    client = FakeClient([wants(CATALOG_TOOL, RUN_TOOL), answer("Đây rồi.")])
-
-    with caplog.at_level(logging.INFO, logger="src.agent.loop"):
-        await loop(client).run(turn_request(user_text=ASKED))
-
-    assert misses(caplog) == []
-
-
-@pytest.mark.asyncio
-async def test_a_turn_that_never_opened_the_catalog_is_not_a_miss(
-    study_tools, caplog
-) -> None:
-    client = FakeClient([wants("web_search"), answer("Khoảng 6,5%.")])
-
-    with caplog.at_level(logging.INFO, logger="src.agent.loop"):
-        await loop(client).run(turn_request(user_text=ASKED))
-
-    assert misses(caplog) == []
-
-
-@pytest.mark.asyncio
-async def test_a_pasted_wall_of_text_is_cut_to_something_a_list_stays_readable_at(
-    study_tools, caplog, monkeypatch
-) -> None:
-    monkeypatch.setenv("DEBUG", "true")
-    get_settings.cache_clear()
-    try:
-        client = FakeClient([wants(CATALOG_TOOL), answer("Chưa có.")])
-
-        with caplog.at_level(logging.INFO, logger="src.agent.loop"):
-            await loop(client).run(turn_request(user_text="VCB " * 400))
-    finally:
-        get_settings.cache_clear()
-
-    recorded = misses(caplog)
-    assert len(recorded[0].question) == ASKED_LIMIT
-    assert recorded[0].question.endswith("…")
-
-
-@pytest.mark.asyncio
-async def test_outside_development_the_log_keeps_only_the_shape_of_the_question(
-    study_tools, caplog, monkeypatch
-) -> None:
-    """A reader's question is theirs: production logs keep sixty characters."""
-    monkeypatch.setenv("DEBUG", "false")
-    get_settings.cache_clear()
-    try:
-        client = FakeClient([wants(CATALOG_TOOL), answer("Chưa có.")])
-
-        with caplog.at_level(logging.INFO, logger="src.agent.loop"):
-            await loop(client).run(turn_request(user_text="VCB " * 400))
-    finally:
-        get_settings.cache_clear()
-
-    recorded = misses(caplog)
-    assert len(recorded[0].question) == ASKED_LIMIT_OUTSIDE_DEBUG
-    assert recorded[0].question.endswith("…")
-
-
-# -- the pack's half of the prompt, and which Turns pay for it ----------------
-#
-# The prompt is rendered once per Turn, before any call, so "load the domain
-# playbook only when the domain is asked about" cannot be a section of it. It is
-# a system note, sent with every call from the moment the Turn earns it — the
-# same shape ``SIGNAL_DESK_NOTE`` already has, and for the same reason.
-#
-# Four situations, one test each, because the failure they guard against is not
-# a crash: it is a Turn quietly running with the wrong half of the instructions.
+# -- the stock-domain half of the prompt --------------------------------------
 
 
 def _bodies(client: FakeClient) -> list[int]:
@@ -1862,13 +1716,7 @@ def _bodies(client: FakeClient) -> list[int]:
 
 
 @pytest.mark.asyncio
-async def test_a_turn_that_never_reaches_the_domain_never_sees_its_body() -> None:
-    """The saving, stated as an absence.
-
-    A question about deposit rates is answered out of the web, and the store
-    playbook has nothing to say about it. If the body shows up here anyway, the
-    whole change has bought a longer prompt and nothing else.
-    """
+async def test_every_turn_carries_the_web_first_domain_body() -> None:
     client = FakeClient(
         [
             Completion(
@@ -1884,26 +1732,18 @@ async def test_a_turn_that_never_reaches_the_domain_never_sees_its_body() -> Non
 
     await loop(client).run(turn_request())
 
-    assert _bodies(client) == [0, 0]
+    assert _bodies(client) == [1, 1]
 
 
 @pytest.mark.asyncio
-async def test_reaching_for_a_domain_tool_brings_the_body_to_the_next_call() -> None:
-    """The ordinary path, and the one round of latency it deliberately accepts.
-
-    The trigger is what the model *asked* to call, read before dispatch: the
-    call it wants is the intent, and a failing call is still a Turn that went
-    looking at the domain. The body cannot reach the call that asked — that
-    request was built and sent before the ask existed — so it lands on the call
-    that has to read the result, which is where the playbook is actually needed.
-    """
+async def test_web_tool_round_keeps_the_domain_body() -> None:
     client = FakeClient(
         [
             Completion(
                 model=SESSION_MODEL,
-                text="Để tôi đọc store.",
+                text="Để tôi tra nguồn.",
                 tool_calls=(
-                    ToolCall(id="c1", name="get_field", arguments={"query": "VCB"}),
+                    ToolCall(id="c1", name="web_search", arguments={"query": "VCB"}),
                 ),
             ),
             answer("Thanh khoản phiên gần nhất ở mức trung bình."),
@@ -1912,24 +1752,18 @@ async def test_reaching_for_a_domain_tool_brings_the_body_to_the_next_call() -> 
 
     await loop(client).run(turn_request(user_text="VCB thanh khoản thế nào?"))
 
-    assert _bodies(client) == [0, 1]
+    assert _bodies(client) == [1, 1]
 
 
 @pytest.mark.asyncio
-async def test_the_body_is_sticky_for_the_rest_of_the_turn() -> None:
-    """Once carried, carried to the end.
-
-    A playbook that lasted one round would be gone by the round that writes the
-    answer, and the answer would be written under whichever instructions the
-    last call happened to hold.
-    """
+async def test_the_body_stays_on_every_call_of_a_multi_round_turn() -> None:
     client = FakeClient(
         [
             Completion(
                 model=SESSION_MODEL,
-                text="Đọc store trước.",
+                text="Tìm nguồn trước.",
                 tool_calls=(
-                    ToolCall(id="c1", name="get_field", arguments={"query": "VCB"}),
+                    ToolCall(id="c1", name="web_search", arguments={"query": "VCB"}),
                 ),
             ),
             Completion(
@@ -1945,34 +1779,22 @@ async def test_the_body_is_sticky_for_the_rest_of_the_turn() -> None:
 
     await loop(client).run(turn_request(user_text="VCB thế nào?"))
 
-    assert _bodies(client) == [0, 1, 1]
+    assert _bodies(client) == [1, 1, 1]
 
 
 @pytest.mark.asyncio
-async def test_a_signal_desk_turn_carries_the_body_from_its_first_call() -> None:
-    """The mode is a promise, so the body does not wait to be earned.
+async def test_the_first_call_carries_the_domain_body_inside_system() -> None:
+    client = FakeClient([answer("Đã rõ.")])
 
-    A ``signal_desk`` Turn either produces a desk or says why it could not, and
-    a desk comes from a domain tool — so the round spent discovering that would
-    be a round spent without the playbook for no gain.
-    """
-    client = FakeClient([answer("Đây là bức tranh.")])
+    await loop(client).run(turn_request())
 
-    await loop(client).run(turn_request(mode=SIGNAL_DESK_MODE))
-
-    assert _bodies(client) == [1]
-    # And the mode note is still its own message while the body is not: one says
-    # which Turn this is and changes call by call, the other says what the
-    # domain's rules are and is identical under one pack. Merging them would
-    # make a sentence true of one Turn into a rule true of every Turn — and it
-    # would put a per-Turn string inside the block a cache is keyed on.
     first = client.requests[0].messages
-    assert any(message.content == SIGNAL_DESK_NOTE for message in first)
+    assert _bodies(client) == [1]
     assert domain_body_note() in (first[0].content or "")
     assert first[0].role is Role.SYSTEM
 
 
-def _thread_history(*, domain_call: bool, then_a_plain_turn: bool = False):
+def _thread_history(*, memory_call: bool, then_a_plain_turn: bool = False):
     """A Thread as the router actually hands one to the loop.
 
     Built through ``history_of`` on ``MessageRecord``s written by
@@ -1991,8 +1813,8 @@ def _thread_history(*, domain_call: bool, then_a_plain_turn: bool = False):
     moment = datetime(2026, 8, 22, tzinfo=timezone.utc)
     thread = uuid.UUID("11111111-1111-1111-1111-111111111111")
     calls = (
-        [{"id": "h1", "name": "get_field", "arguments": {"symbol": "VCB"}}]
-        if domain_call
+        [{"id": "h1", "name": "session_search", "arguments": {"query": "VCB"}}]
+        if memory_call
         else [{"id": "h1", "name": "web_search", "arguments": {"query": "x"}}]
     )
     rows = [
@@ -2030,9 +1852,9 @@ def test_the_transcript_a_thread_hands_back_carries_the_names_and_not_the_calls(
     because they are already on the row being read, and because a name is the
     whole of what a later Turn needs to know.
     """
-    history = _thread_history(domain_call=True)
+    history = _thread_history(memory_call=True)
 
-    assert history[-1].tool_names == ("get_field",)
+    assert history[-1].tool_names == ("session_search",)
     assert history[-1].tool_calls == ()
 
 
@@ -2043,7 +1865,7 @@ def test_no_context_is_built_from_the_names() -> None:
     sees, which is what leaving ``tool_calls`` empty was protecting in the first
     place. Same transcript, names and no names, byte-identical messages.
     """
-    with_names = _thread_history(domain_call=True)
+    with_names = _thread_history(memory_call=True)
     without = tuple(
         TranscriptTurn(
             user_text=turn.user_text,
@@ -2080,7 +1902,7 @@ async def test_a_follow_up_in_a_thread_that_touched_the_domain_starts_with_it() 
     await loop(client).run(
         turn_request(
             user_text="Còn VNM thì sao?",
-            history=_thread_history(domain_call=True),
+            history=_thread_history(memory_call=True),
         )
     )
 
@@ -2101,11 +1923,11 @@ async def test_a_thread_whose_last_turn_stayed_outside_the_domain_does_not() -> 
     await loop(client).run(
         turn_request(
             user_text="Cảm ơn.",
-            history=_thread_history(domain_call=True, then_a_plain_turn=True),
+            history=_thread_history(memory_call=True, then_a_plain_turn=True),
         )
     )
 
-    assert _bodies(client) == [0]
+    assert _bodies(client) == [1]
 
 
 @pytest.mark.asyncio
@@ -2114,28 +1936,21 @@ async def test_a_thread_that_only_read_the_web_does_not_bring_the_body() -> None
     client = FakeClient([answer("Được.")])
 
     await loop(client).run(
-        turn_request(user_text="Còn gì nữa không?", history=_thread_history(domain_call=False))
+        turn_request(user_text="Còn gì nữa không?", history=_thread_history(memory_call=False))
     )
 
-    assert _bodies(client) == [0]
+    assert _bodies(client) == [1]
 
 
 @pytest.mark.asyncio
-async def test_the_call_that_carries_the_body_is_charged_for_it() -> None:
-    """The reservation and the message have to be the same size.
-
-    ``_construct`` trims the transcript against a ceiling minus what is about to
-    be appended; if that reservation is a note's worth and the message is a
-    playbook's worth, the context is built believing it has room it does not and
-    the request goes out over the ceiling it was trimmed against.
-    """
+async def test_every_call_that_carries_the_body_is_charged_for_it() -> None:
     client = FakeClient(
         [
             Completion(
                 model=SESSION_MODEL,
                 text="Đọc store.",
                 tool_calls=(
-                    ToolCall(id="c1", name="get_field", arguments={"query": "VCB"}),
+                    ToolCall(id="c1", name="session_search", arguments={"query": "VCB"}),
                 ),
             ),
             answer("Xong."),
@@ -2146,11 +1961,12 @@ async def test_the_call_that_carries_the_body_is_charged_for_it() -> None:
 
     from src.agent.domain import active_pack
 
-    without, with_body = client.spends
-    # The body's own measured cost, not ``SYSTEM_NOTE_TOKENS``: hundreds of
-    # tokens rather than a hundred and sixty.
+    # The body is part of every call's constructed context and therefore every
+    # reservation, rather than a conditional note charged only after a tool.
     assert active_pack().body_tokens > SYSTEM_NOTE_TOKENS
-    assert with_body.input_tokens - without.input_tokens >= active_pack().body_tokens
+    assert all(
+        spend.input_tokens >= active_pack().body_tokens for spend in client.spends
+    )
 
 
 def test_what_the_body_costs_is_written_down_in_one_place() -> None:
@@ -2358,15 +2174,15 @@ def test_a_collapsed_call_with_no_results_names_itself_and_says_it_was_recorded(
     """
     call = TurnToolCall(
         id="c1",
-        name="get_field",
-        arguments={"field": "price.close", "symbol": "VCB"},
+        name="session_search",
+        arguments={"query": "VCB"},
         status=ToolCallStatus.OK,
         result_text="…",
     )
 
     assert _collapsed_result(call) == (
-        f"{TRACE_HANDLE_PREFIX} get_field with arguments "
-        '{"field":"price.close","symbol":"VCB"}'
+        f"{TRACE_HANDLE_PREFIX} session_search with arguments "
+        '{"query":"VCB"}'
     )
     # And it does not offer something the model could ask for: there is no
     # retrieval tool in this deployment, and a sentence implying one would spend
@@ -2466,13 +2282,6 @@ def _composed(**overrides: Any) -> ConstructedContext:
                         status=ToolCallStatus.OK,
                         result_text="p" * 600,
                     ),
-                    TurnToolCall(
-                        id="study",
-                        name="run_study",
-                        arguments={"study": "intraday_liquidity_profile"},
-                        status=ToolCallStatus.OK,
-                        result_text="Thanh khoản dồn về phiên chiều.",
-                    ),
                 ),
             ),
         ),
@@ -2502,7 +2311,7 @@ def test_every_rung_of_the_ladder_keeps_the_layers_summing_to_the_total() -> Non
 
     seen_dropped = False
     seen_collapsed = False
-    for ceiling in (200_000, 20_000, 12_000, 9_000, 7_000):
+    for ceiling in (200_000, 20_000, 12_000, 9_000, 7_000, 6_000):
         context = build_messages(transcript, ContextBudget(max_tokens=ceiling))
         assert context.composition.total == context.estimated_tokens
         seen_dropped = seen_dropped or context.turns_dropped > 0
@@ -2515,46 +2324,20 @@ def test_each_layer_is_charged_the_thing_it_is_named_after() -> None:
     """The eight names are not decoration: each one holds its own content."""
     layers = _composed().composition
 
-    # The cacheable prefix is the whole prompt but the two rendered lines.
+    # The cacheable prefix is the whole prompt but the rendered value lines.
     assert layers.system_core == estimate_tokens(
         Message(role=Role.SYSTEM, content=prompt_prefix())
     )
-    assert 0 < layers.system_dynamic < 20
+    # Those values are today's date, the trading status, the previous session
+    # when the market is shut, and the reader's name: a handful of short lines,
+    # and the point of the bound is that this layer stays a handful.
+    assert 0 < layers.system_dynamic < 40
     # The older Turn — question, exchange and answer — is history; the newest
     # question is intent and its results are evidence.
     assert layers.history > layers.user_intent > 0
-    assert layers.tool_results > layers.study_headlines > 0
+    assert layers.tool_results > 0
     assert layers.attachments == 0
     assert layers.domain_body == 0
-
-
-def test_a_study_headline_is_not_charged_to_the_page_layer() -> None:
-    """A capped sentence about a picture is not the layer prune is aimed at."""
-    def one(name: str) -> ConstructedContext:
-        return build_messages(
-            Transcript(
-                system_prompt="s",
-                turns=(
-                    TranscriptTurn(
-                        user_text="q",
-                        tool_calls=(
-                            TurnToolCall(
-                                id="c",
-                                name=name,
-                                arguments={},
-                                status=ToolCallStatus.OK,
-                                result_text="w" * 300,
-                            ),
-                        ),
-                    ),
-                ),
-            )
-        )
-
-    assert one("run_study").composition.study_headlines > 0
-    assert one("run_study").composition.tool_results == 0
-    assert one("web_search").composition.tool_results > 0
-    assert one("web_search").composition.study_headlines == 0
 
 
 def test_an_attachment_is_charged_apart_from_the_words_it_came_with() -> None:
@@ -2612,15 +2395,14 @@ def test_a_composition_serialises_every_layer_in_a_fixed_order() -> None:
 async def test_what_funds_a_call_is_exactly_what_explains_it() -> None:
     """The reservation is the composition's own arithmetic, not a second one.
 
-    Exercised on the call that carries all four appended messages at once —
-    domain body, mode note, rounds-exhausted note and a nudge — because that is
-    where two hand-copied expressions would first disagree.
+    Exercised on the call carrying both the rounds-exhausted note and the empty
+    reply nudge, where hand-copied token expressions would first disagree.
     """
     install()
     client = FakeClient(
         [
             *(
-                wants("get_field", prefix=f"r{index}", query=f"q{index}")
+                wants("web_search", prefix=f"r{index}", query=f"q{index}")
                 for index in range(MAX_TOOL_ROUNDS)
             ),
             Completion(model=SESSION_MODEL, text=""),
@@ -2628,12 +2410,11 @@ async def test_what_funds_a_call_is_exactly_what_explains_it() -> None:
         ]
     )
 
-    await loop(client).run(turn_request(mode=SIGNAL_DESK_MODE))
+    await loop(client).run(turn_request())
 
     request = client.requests[-1]
-    appended = request.messages[-3:]
+    appended = request.messages[-2:]
     assert [message.content for message in appended] == [
-        SIGNAL_DESK_NOTE,
         ROUNDS_EXHAUSTED_NOTE,
         EMPTY_AFTER_TOOLS_NOTE,
     ]
@@ -2643,9 +2424,9 @@ async def test_what_funds_a_call_is_exactly_what_explains_it() -> None:
 
     # What the call was reserved for is the constructed context plus exactly
     # the price of what was appended to it, and nothing rounded twice.
-    reserved = 3 * SYSTEM_NOTE_TOKENS
+    reserved = 2 * SYSTEM_NOTE_TOKENS
     constructed = sum(
-        estimate_tokens(message) for message in request.messages[:-3]
+        estimate_tokens(message) for message in request.messages[:-2]
     )
     assert client.spends[-1].input_tokens == constructed + reserved
 
@@ -2816,7 +2597,7 @@ def test_a_call_with_no_projection_reads_exactly_as_it_always_did() -> None:
     """Every caller written before the field gets the string it always got."""
     call = TurnToolCall(
         id="c1",
-        name="get_field",
+        name="session_search",
         arguments={"symbol": "VCB"},
         status=ToolCallStatus.OK,
         result_text="6,5%",
@@ -2932,7 +2713,7 @@ def test_a_result_is_never_a_handle_on_the_call_that_first_reads_it() -> None:
     pruning — it is the Turn never having searched. The first draft of this rung
     did exactly that, and the test that caught it is this one.
     """
-    for tool in ("web_search", "fetch_url", "get_field"):
+    for tool in ("web_search", "fetch_url", "session_search"):
         turn = _turn_at(1, tool)
 
         assert aged_results(turn) == frozenset()
@@ -3146,16 +2927,15 @@ async def test_nothing_about_one_turn_reaches_the_identity_of_its_head() -> None
             user_id=9,
             request_message_id=2,
             runtime=RuntimeContext(today=date(2027, 1, 1), user_name="Khác"),
-            mode=SIGNAL_DESK_MODE,
         )
     )
 
-    # Two Turns sharing nothing — different reader, question, day and mode —
+    # Two Turns sharing nothing — different reader, question and day —
     # and one identity. That equality is the assertion; the substring checks
     # below only name what would have broken it.
     identity = client.requests[0].metadata["cache_identity"]
     assert identity == other.requests[0].metadata["cache_identity"]
-    for leak in ("VCB", "2027-01-01", "Khác", "signal_desk"):
+    for leak in ("VCB", "2027-01-01", "Khác"):
         assert leak not in identity
 
 
@@ -3170,85 +2950,3 @@ async def test_the_identity_stays_in_this_process_and_off_the_wire() -> None:
 
     assert "cache_identity" not in json.dumps(body, default=str)
     assert "metadata" not in body
-
-
-# -- the board a signal_desk Turn ends with ---------------------------------
-
-
-@pytest.mark.asyncio
-async def test_a_signal_desk_turn_that_drew_nothing_draws_what_it_gathered() -> None:
-    """The one hook, and the failure it closes.
-
-    A ``signal_desk`` Turn ending in prose is what the mode exists to prevent,
-    and it has two shapes that look identical from the loop: the model never
-    reached for a board, or it reached and broke the grammar twice. Either way
-    the frames are on disk, so the server draws them and stamps it.
-    """
-    client = FakeClient([answer("Đây là câu trả lời bằng chữ.")])
-    drawn: list[tuple[Any, Any]] = []
-
-    def compose(turn_id: Any, thread_id: Any):
-        drawn.append((turn_id, thread_id))
-        return {
-            "artifactId": "9f8e7d6c-5b4a-3928-1706-0f1e2d3c4b5a",
-            "studyName": "composed_signal_desk",
-            "title": "Số liệu đã tính",
-            "blockCount": 2,
-            "autoComposed": True,
-            "provenance": {"asOf": "2026-08-30T00:00:00+00:00"},
-        }
-
-    outcome = await loop(client, auto_compose=compose).run(
-        turn_request(mode=SIGNAL_DESK_MODE)
-    )
-
-    assert len(drawn) == 1
-    assert len(outcome.signal_desks) == 1
-    assert outcome.signal_desks[0]["autoComposed"] is True
-    # A Turn that ended with a board owes no account of why it did not.
-    assert outcome.signal_desk_absence is None
-
-
-@pytest.mark.asyncio
-async def test_a_turn_with_nothing_gathered_still_says_why_it_drew_nothing() -> None:
-    client = FakeClient([answer("Không có số nào.")])
-
-    outcome = await loop(client, auto_compose=lambda *_args: None).run(
-        turn_request(mode=SIGNAL_DESK_MODE)
-    )
-
-    assert outcome.signal_desks == ()
-    assert outcome.signal_desk_absence == NO_SIGNAL_DESK_TOOL_CALLED
-
-
-@pytest.mark.asyncio
-async def test_a_chat_turn_is_never_drawn_for() -> None:
-    """The hook is the mode's, not the loop's. A question answered in prose was
-    answered."""
-    client = FakeClient([answer("Trả lời thường.")])
-    called: list[int] = []
-
-    outcome = await loop(
-        client, auto_compose=lambda *_args: called.append(1)
-    ).run(turn_request())
-
-    assert called == []
-    assert outcome.signal_desk_absence is None
-
-
-@pytest.mark.asyncio
-async def test_a_compose_that_breaks_does_not_break_the_answer() -> None:
-    """A board is worth having and it is not worth failing a finished Turn for."""
-
-    def explode(*_args: Any):
-        raise RuntimeError("the store is down")
-
-    client = FakeClient([answer("Câu trả lời vẫn còn đây.")])
-
-    outcome = await loop(client, auto_compose=explode).run(
-        turn_request(mode=SIGNAL_DESK_MODE)
-    )
-
-    assert outcome.answer == "Câu trả lời vẫn còn đây."
-    assert outcome.signal_desks == ()
-    assert outcome.signal_desk_absence == NO_SIGNAL_DESK_TOOL_CALLED

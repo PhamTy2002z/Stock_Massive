@@ -169,7 +169,7 @@ class TestAToolNamesItselfTwice:
     Kept as a refusal in ``register`` rather than as a table somewhere else,
     because a table is a list somebody has to remember to extend and the tool
     that gets forgotten is the newest one. A real Turn showed fourteen rows
-    reading ``get_field`` for exactly that reason.
+    reading a local memory tool for exactly that reason.
     """
 
     def test_a_registration_with_no_reader_facing_name_is_refused(self):
@@ -202,6 +202,6 @@ class TestAToolNamesItselfTwice:
             for item in entries:
                 assert item.display_name.strip(), item.name
                 # The two are for two audiences and are never the same string:
-                # a rail row saying `get_field` tells a reader nothing, and a
-                # model asked to call "Đọc chỉ báo" has nothing to call.
+                # a rail row showing a raw function name tells a reader nothing, and a
+                # a model asked to call a translated display label has nothing to call.
                 assert item.display_name != item.name, item.name

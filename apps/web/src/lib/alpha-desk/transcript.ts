@@ -13,10 +13,9 @@
  */
 
 import type { LivePhase, LiveTurn } from "./live-turn"
-import { readDeskViews, readStrings, readThoughts, readToolCalls } from "./read-content"
+import { readStrings, readThoughts, readToolCalls } from "./read-content"
 import type {
   Attachment,
-  SignalDeskAnnouncement,
   FlagReason,
   Thought,
   ThreadMessage,
@@ -55,14 +54,6 @@ export interface AssistantView {
   toolCalls: ToolCall[]
   /** What the Turn said on the way to the answer. Empty on most answers. */
   thoughts: Thought[]
-  /**
-   * The pictures this answer was written about. Empty on most answers.
-   *
-   * Ids and titles only. The numbers behind one are fetched by the panel that
-   * draws it, so a transcript scrolled past a dozen answers carries no heatmaps
-   * with it.
-   */
-  deskViews: SignalDeskAnnouncement[]
   /**
    * Questions the model offered as sensible next steps, or none.
    *
@@ -131,45 +122,12 @@ export interface DraftEntry {
   working: boolean
   toolCalls: ToolCall[]
   thoughts: Thought[]
-  /** The desk views announced so far, as the stream has reported them. */
-  deskViews: SignalDeskAnnouncement[]
   elapsedMs: number
   phase: LivePhase
   terminalReason: string | null
 }
 
-/**
- * One Analysis the user opened, sitting where they opened it.
- *
- * An Analysis is an artifact rather than a page, so opening one puts a row in
- * the transcript instead of navigating away from it. The row carries only the
- * pair that identifies the Analysis; the artifact reads itself, because a
- * payload threaded through this projection would be a second copy of a resource
- * TanStack Query already owns.
- */
-export interface AnalysisEntry {
-  kind: "analysis"
-  key: string
-  symbol: string
-  tradingDay: string
-}
-
-export type TranscriptEntry = UserEntry | AssistantEntry | DraftEntry | AnalysisEntry
-
-/** An Analysis the user opened, and where in the conversation they were. */
-export interface OpenedAnalysis {
-  symbol: string
-  tradingDay: string
-  /**
-   * The `seq` of the newest message when it was opened; 0 for an empty Thread.
-   *
-   * An artifact opened before a question belongs above that question, and one
-   * opened after the answer belongs under it. Anchoring to a sequence is what
-   * keeps that true as the Thread grows underneath — appending them all at the
-   * end would reorder the evening's reading every time an answer landed.
-   */
-  afterSeq: number
-}
+export type TranscriptEntry = UserEntry | AssistantEntry | DraftEntry
 
 export interface TranscriptInput {
   /** The Thread on screen. A draft belonging to another one is not shown. */
@@ -183,8 +141,6 @@ export interface TranscriptInput {
    * returns. Empty for every question with nothing attached.
    */
   pendingAttachments?: Attachment[]
-  /** Analyses opened into this Thread, in the order they were opened. */
-  openedAnalyses?: OpenedAnalysis[]
   /**
    * How much of the live Turn is on screen, when something is pacing it.
    *
@@ -213,64 +169,16 @@ export interface DraftReveal {
   handedOver: boolean
 }
 
-/**
- * Every desk view a stored Thread has ever produced, oldest first.
- *
- * The tab strip is per-conversation state, and until now it was only ever
- * *written* by a Turn running in this tab: reopening a Thread cleared the strip
- * and nothing put it back, so a picture the reader had made an hour earlier was
- * reachable only by scrolling the transcript until the card that opened it went
- * past. The announcements were in the messages the whole time — this is the
- * reader for them, beside the one `buildTranscript` uses, so both learn about a
- * new field in the stored shape at the same moment.
- *
- * Deduplicated on `artifactId` keeping first position: one run is one tab, and
- * an announcement repeated across a retried Turn is the same picture.
- */
-export function storedDeskViews(messages: ThreadMessage[]): SignalDeskAnnouncement[] {
-  const ordered = [...messages].sort((left, right) => left.seq - right.seq)
-  const seen = new Set<string>()
-  const deskViews: SignalDeskAnnouncement[] = []
-  for (const message of ordered) {
-    if (message.role !== "assistant") continue
-    const content = message.content
-    for (const deskView of readDeskViews(content.signal_desks ?? content.canvases)) {
-      if (seen.has(deskView.artifactId)) continue
-      seen.add(deskView.artifactId)
-      deskViews.push(deskView)
-    }
-  }
-  return deskViews
-}
-
 export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
   const ordered = [...input.messages].sort((left, right) => left.seq - right.seq)
   const entries: TranscriptEntry[] = []
-  const pendingArtifacts = [...(input.openedAnalyses ?? [])]
   const reveal = input.reveal ?? received(input.live)
   const drafting = showsDraft(input, ordered, reveal)
   // The one message the draft is still standing in for. Skipped rather than
   // drawn, because the draft below is the same answer still arriving.
   const heldBack = drafting && !reveal.handedOver ? input.live.messageId : null
 
-  /** Every artifact anchored at or before this point in the conversation. */
-  function flushArtifactsBefore(seq: number | null): void {
-    while (
-      pendingArtifacts.length > 0 &&
-      (seq === null || pendingArtifacts[0].afterSeq < seq)
-    ) {
-      const opened = pendingArtifacts.shift()!
-      entries.push({
-        kind: "analysis",
-        key: `analysis-${opened.symbol}-${opened.tradingDay}`,
-        symbol: opened.symbol,
-        tradingDay: opened.tradingDay,
-      })
-    }
-  }
-
   for (const message of ordered) {
-    flushArtifactsBefore(message.seq)
     if (message.role === "user") {
       entries.push({
         kind: "user",
@@ -293,8 +201,6 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
     }
   }
 
-  flushArtifactsBefore(null)
-
   const last = ordered[ordered.length - 1]
   const committed =
     last !== undefined && last.role === "user" && textOf(last) === input.pendingUserText
@@ -316,7 +222,6 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
       working: reveal.working,
       toolCalls: input.live.toolCalls,
       thoughts: input.live.thoughts,
-      deskViews: input.live.deskViews,
       elapsedMs: input.live.elapsedMs,
       phase: input.live.phase,
       terminalReason: input.live.terminalReason,
@@ -404,10 +309,6 @@ function assistantView(message: ThreadMessage): AssistantView {
     // A stored call cannot still be running: the Turn that made it is over.
     toolCalls: readToolCalls(content.tool_calls, "ok"),
     thoughts: readThoughts(content.thoughts),
-    // The JSONB contract stays snake_case. `canvases` keeps Threads written
-    // before the Signal Desk rename readable without teaching the renderer two
-    // names for the same in-memory value.
-    deskViews: readDeskViews(content.signal_desks ?? content.canvases),
     followUps: readStrings(content.follow_ups),
     elapsedMs:
       typeof content.elapsed_ms === "number" && Number.isFinite(content.elapsed_ms)

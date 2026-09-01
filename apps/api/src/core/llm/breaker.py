@@ -1,26 +1,17 @@
 """One Redis arbiter over the LLM route's rate limit, and it fails **open**.
 
-``core/quota.py`` solved this shape once for vnstock, and its opening sentence is
-the reason it exists: *"Before this module there were three pacers and none of
-them was the quota."* The LLM route has the same arrangement one layer up. The
-Collector's nightly lane and an interactive Turn share one route allowance, they
-run in separate processes whenever a second worktree is up, and neither can see
-the 429 the other just received — so both keep asking, and
-each answer costs a paid request to be told *not now*.
+Multiple API processes can share one upstream route allowance while none can see
+the 429 another process just received. Without a shared hold they keep asking,
+and each answer costs a paid request to be told *not now*.
 
 So a 429 is written once, to Redis, keyed by route and model, and every caller
 reads it before dispatch.
 
-**Where this deliberately departs from** ``quota.py``: that module fails
-**closed**, and it is right to. Its subject is a paid account allowance whose
-exhaustion makes vnstock call ``sys.exit()``, so a call nothing is counting is a
-call that must not happen. This breaker's subject is different in both directions.
 The route enforces its own limit server-side — the breaker only saves the paid
 request that would have been refused anyway — and the cost of getting it wrong is
 not an overspend but a blank answer on a screen somebody is watching. A Redis
 outage must not be able to stop every Turn, so every failure in here admits the
-call and says so in the log. That is the same direction ``ADR-0021`` chose for the
-Recommendation Validator, for the same reason.
+call and says so in the log.
 
 Two consequences of failing open, stated so neither is a surprise:
 

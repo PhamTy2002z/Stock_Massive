@@ -152,7 +152,7 @@ class TestTheJsonParseInvariant:
 
     def test_a_tool_with_no_parameters_is_not_a_parse_failure(self):
         assembler = StreamAssembler()
-        assembler.add_tool_call_fragment(fragment(0, id="call_a", name="get_watchlist"))
+        assembler.add_tool_call_fragment(fragment(0, id="call_a", name="recall_facts"))
 
         (call,) = assembler.tool_calls()
         assert call.arguments == {}

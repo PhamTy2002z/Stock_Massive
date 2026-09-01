@@ -1,4 +1,21 @@
-"""Boot-time proof that the configured route honours the LLM contract."""
+"""Boot-time proof that the configured route honours the LLM contract.
+
+A check has three outcomes, not two, and the third is why this module is not a
+plain list of booleans. **A check that could not be run has not failed.** A rate
+limit, a gateway timeout and a dead credential are all the route working exactly
+as configured while refusing *this* call: nothing was learned about whether it
+honours forced tool choice, so recording that as a failure would be recording a
+measurement nobody took. The distinction has a cost when it is missing — the
+route running out of its monthly allowance stopped the API from booting at all,
+which is an outage caused by the check rather than by the thing it checks.
+
+So the enforcement below blocks startup on a *conclusive* failure only: the
+route answered, and the answer was wrong. An unmeasured check is logged loudly
+and startup continues, because a deployment that cannot reach its route has a
+problem the operator already knows about and an API that refuses to start makes
+it worse. An unmeasured result is also not cached, so the next process to ask
+runs the checks again instead of inheriting a verdict that was never reached.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +33,7 @@ from .admission import (
     SpendRequest,
 )
 from .config import Workload
+from .errors import AuthUnavailable, GatewayTimeout, RouteRateLimited
 from .protocol import (
     Completion,
     CompletionRequest,
@@ -28,6 +46,12 @@ from .protocol import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Route conditions under which a check learns nothing about the contract.
+#: ``DeadlineExpired`` rides in on ``GatewayTimeout``. Every other class in the
+#: taxonomy is an answer from the route — a rejected schema, an unserved model,
+#: a blocked request — and an answer is a measurement, so it stays a failure.
+UNMEASURABLE_ROUTE_ERRORS = (RouteRateLimited, GatewayTimeout, AuthUnavailable)
 
 PROBE_INPUT_TOKENS = 1_000
 PROBE_OUTPUT_TOKENS = 256
@@ -77,6 +101,10 @@ STRICT_FORMAT = JsonSchemaFormat(
 class ProbeCheck:
     passed: bool
     response: str
+    #: ``False`` when the call never reached a verdict — the route refused it
+    #: for a reason unrelated to the capability. Such a check is neither a pass
+    #: nor a failure, and only :attr:`ProbeResult.failures` may block a boot.
+    measured: bool = True
 
 
 @dataclass(frozen=True)
@@ -87,15 +115,32 @@ class ProbeResult:
     def ok(self) -> bool:
         return all(check.passed for check in self.checks.values())
 
+    @property
+    def failures(self) -> dict[str, ProbeCheck]:
+        """Checks the route answered, wrongly. These are the blocking ones."""
+        return {
+            name: check
+            for name, check in self.checks.items()
+            if check.measured and not check.passed
+        }
+
+    @property
+    def unmeasured(self) -> dict[str, ProbeCheck]:
+        """Checks that never ran. Reported, never blocking."""
+        return {
+            name: check for name, check in self.checks.items() if not check.measured
+        }
+
+
+def _describe(checks: Mapping[str, ProbeCheck]) -> str:
+    return "; ".join(
+        f"{name}: received {check.response}" for name, check in checks.items()
+    )
+
 
 class CapabilityProbeError(RuntimeError):
     def __init__(self, result: ProbeResult) -> None:
-        failures = [
-            f"{name}: received {check.response}"
-            for name, check in result.checks.items()
-            if not check.passed
-        ]
-        super().__init__("Capability Probe failed — " + "; ".join(failures))
+        super().__init__("Capability Probe failed — " + _describe(result.failures))
         self.result = result
 
 
@@ -141,8 +186,14 @@ class CapabilityProbe:
         checks["prompt_cache_control"] = await self._check(
             "prompt_cache_control", self._prompt_cache_breakpoint
         )
-        _cached_result = ProbeResult(checks=checks)
-        return _cached_result
+        result = ProbeResult(checks=checks)
+        # A verdict is cached; a non-verdict is not. Caching an unmeasured run
+        # would freeze "we could not tell" for the life of the process, and the
+        # condition that caused it — an allowance, a timeout, a credential — is
+        # exactly the kind that clears on its own.
+        if not result.unmeasured:
+            _cached_result = result
+        return result
 
     async def _check(
         self,
@@ -156,6 +207,16 @@ class CapabilityProbe:
             if exc.reason == "probe_budget_exhausted":
                 raise
             return ProbeCheck(False, f"{exc.reason}: {exc}")
+        except UNMEASURABLE_ROUTE_ERRORS as exc:
+            logger.warning(
+                "Capability Probe could not measure %s: %s: %s",
+                name,
+                type(exc).__name__,
+                exc,
+            )
+            return ProbeCheck(
+                False, f"{type(exc).__name__}: {exc}", measured=False
+            )
         except Exception as exc:
             return ProbeCheck(False, f"{type(exc).__name__}: {exc}")
 
@@ -332,10 +393,26 @@ def enforce_capability_probe(
             "Capability Probe passed all %d route checks", len(result.checks)
         )
         return result
-    error = CapabilityProbeError(result)
-    if alpha_desk_enabled:
-        raise error
-    logger.warning("%s (Alpha Desk is disabled, so startup continues)", error)
+
+    failures = result.failures
+    if failures:
+        error = CapabilityProbeError(result)
+        if alpha_desk_enabled:
+            raise error
+        logger.warning("%s (Alpha Desk is disabled, so startup continues)", error)
+        return result
+
+    # Nothing the route answered was wrong; some of it went unanswered. That is
+    # an operator condition, not a contract violation, so it is said loudly and
+    # startup continues — refusing to boot here would turn a passing outage into
+    # a longer one.
+    logger.warning(
+        "Capability Probe left %d of %d route check(s) unmeasured, and none "
+        "failed — %s",
+        len(result.unmeasured),
+        len(result.checks),
+        _describe(result.unmeasured),
+    )
     return result
 
 

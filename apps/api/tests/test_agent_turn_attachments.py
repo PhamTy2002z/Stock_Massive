@@ -48,7 +48,6 @@ from src.agent.router import (
 )
 from src.agent.turns import MAX_USER_INPUT_BYTES
 from src.alpha.models import (
-    AgentArtifact,
     AgentAttachment,
     AgentMessage,
     AgentThread,
@@ -331,7 +330,6 @@ def schema():
             AgentMessage.__table__,
             AgentToolCall.__table__,
             AgentTurn.__table__,
-            AgentArtifact.__table__,
             AgentAttachment.__table__,
             LlmCallUsage.__table__,
         ],

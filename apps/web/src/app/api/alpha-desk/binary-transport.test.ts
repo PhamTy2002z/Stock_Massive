@@ -205,12 +205,12 @@ describe("the JSON path, unchanged", () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ cap: 10 }), { status: 200 }))
 
     await POST(
-      request(`${ORIGIN}/api/alpha-desk/watchlist`, {
+      request(`${ORIGIN}/api/alpha-desk/threads`, {
         method: "POST",
         headers: { origin: ORIGIN, "Content-Type": "application/json" },
         body: payload,
       }),
-      context(["watchlist"]),
+      context(["threads"]),
     )
 
     const [, init] = fetchMock.mock.calls[0]
@@ -227,7 +227,7 @@ describe("the JSON path, unchanged", () => {
       }),
     )
 
-    const response = await GET(request(`${ORIGIN}/api/alpha-desk/watchlist/rail`), context(["watchlist", "rail"]))
+    const response = await GET(request(`${ORIGIN}/api/alpha-desk/threads`), context(["threads"]))
 
     expect(response.headers.get("Cache-Control")).toBe("no-store")
     expect(await response.json()).toEqual({ cap: 10, count: 1, entries: [] })

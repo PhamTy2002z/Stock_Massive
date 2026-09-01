@@ -13,7 +13,7 @@ What the hand-rolling buys, concretely:
 
 **This transport never changes the model it was given.** A different model has
 different prices, so swapping one in under a reservation made for another spends
-against a ceiling that was never checked (``docs/adr/0014``). Failover exists one
+against a ceiling that was never checked. Failover exists one
 layer up, in ``client.py``, precisely because a reservation can be made there:
 the client asks admission again, for the other model and under the workload that
 model is priced in, and ``SpendAdmission.reserve`` refuses the pair if they do

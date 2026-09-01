@@ -2,20 +2,20 @@
 /**
  * How the sources panel draws the two kinds of evidence apart.
  *
- * A real Turn analysing SSI put fourteen rows on this panel, every one reading
- * `get_field`, every one with a globe icon and a `0` beside it. Three separate
+ * A local-memory Turn once put many rows on this panel, every one with a globe
+ * icon and a `0` beside it. Three separate
  * lies in one row: the raw tool name told the reader nothing, the globe said a
- * figure out of our own Postgres came off the open web, and the `0` beside a
+ * result out of our own Postgres came off the open web, and the `0` beside a
  * call that had succeeded read as "found nothing".
  *
  * The backend fixed the sentence. What is tested here is the rest of it:
  *
  * *A count belongs only where results are what came back.* A search has pages
  * and their number is the reader's first question. A store read answers with one
- * figure and no sources.
+ * local result and no sources.
  *
  * *A dozen reads of the same kind are one row.* They differ only in which figure
- * was named, so a dozen rows is a panel scrolled past rather than read — but the
+ * query was named, so a dozen rows is a panel scrolled past rather than read — but the
  * names are still there one click away, because the reader opened this to check.
  *
  * *A search is never folded in with them.* Each one has its own pages behind it,
@@ -68,7 +68,7 @@ function call(overrides: Partial<ToolCall> = {}): ToolCall {
 function storeCall(index: number, summary: string): ToolCall {
   return call({
     id: `store-${index}`,
-    name: "get_field",
+    name: "session_search",
     summary,
     result_count: 0,
     kind: "store",
@@ -91,7 +91,7 @@ describe("the count beside a row", () => {
   })
 
   it("is not shown for a store read, which has no results to count", () => {
-    show([storeCall(1, "Đọc chỉ báo: RSI (14) — SSI")])
+    show([storeCall(1, "Tìm trong hội thoại trước: SSI")])
 
     // The bug this replaces: a `0` beside a call that succeeded.
     expect(screen.queryByText("0")).not.toBeInTheDocument()
@@ -100,16 +100,16 @@ describe("the count beside a row", () => {
 
 describe("a run of store reads", () => {
   const reads = [
-    storeCall(1, "Đọc chỉ báo: RSI (14) — SSI"),
-    storeCall(2, "Đọc chỉ báo: Sharpe (năm hoá) — SSI"),
-    storeCall(3, "Đọc chỉ báo: Giá trị giao dịch bình quân — SSI"),
+    storeCall(1, "Tìm trong hội thoại trước: SSI"),
+    storeCall(2, "Đọc lại ghi chú: SSI"),
+    storeCall(3, "Ghi nhớ: khẩu vị rủi ro"),
   ]
 
   it("collapses to one row saying how many", () => {
     show(reads)
 
-    expect(screen.getByText("Đọc 3 chỉ báo từ dữ liệu hệ thống")).toBeInTheDocument()
-    expect(screen.queryByText("Đọc chỉ báo: RSI (14) — SSI")).not.toBeInTheDocument()
+    expect(screen.getByText("Đã chạy 3 công cụ nội bộ")).toBeInTheDocument()
+    expect(screen.queryByText("Tìm trong hội thoại trước: SSI")).not.toBeInTheDocument()
   })
 
   it("lists every figure it read once it is opened", () => {
@@ -123,16 +123,16 @@ describe("a run of store reads", () => {
   })
 
   it("stays a plain row when there was only one read", () => {
-    show([storeCall(1, "Đọc chỉ báo: RSI (14) — SSI")])
+    show([storeCall(1, "Tìm trong hội thoại trước: SSI")])
 
-    expect(screen.getByText("Đọc chỉ báo: RSI (14) — SSI")).toBeInTheDocument()
-    expect(screen.queryByText(/chỉ báo từ dữ liệu hệ thống/)).not.toBeInTheDocument()
+    expect(screen.getByText("Tìm trong hội thoại trước: SSI")).toBeInTheDocument()
+    expect(screen.queryByText(/công cụ nội bộ/)).not.toBeInTheDocument()
   })
 
   it("never swallows a search that happened beside it", () => {
     show([...reads, call({ id: "web-1", summary: "Tìm trên web: SSI quý 2" })])
 
-    expect(screen.getByText("Đọc 3 chỉ báo từ dữ liệu hệ thống")).toBeInTheDocument()
+    expect(screen.getByText("Đã chạy 3 công cụ nội bộ")).toBeInTheDocument()
     expect(screen.getByText("Tìm trên web: SSI quý 2")).toBeInTheDocument()
   })
 
@@ -141,16 +141,16 @@ describe("a run of store reads", () => {
        it into "all reads then all searches" would describe work that did not
        happen. */
     show([
-      storeCall(1, "Đọc chỉ báo: RSI (14) — SSI"),
-      storeCall(2, "Đọc chỉ báo: Sharpe (năm hoá) — SSI"),
+      storeCall(1, "Tìm trong hội thoại trước: SSI"),
+      storeCall(2, "Đọc lại ghi chú: SSI"),
       call({ id: "web-1", summary: "Tìm trên web: SSI quý 2" }),
-      storeCall(3, "Đọc chỉ báo: Beta so chỉ số thị trường — SSI"),
+      storeCall(3, "Ghi nhớ: SSI"),
     ])
 
-    expect(screen.getByText("Đọc 2 chỉ báo từ dữ liệu hệ thống")).toBeInTheDocument()
+    expect(screen.getByText("Đã chạy 2 công cụ nội bộ")).toBeInTheDocument()
     // The single read after the search is its own row, not folded backwards.
     expect(
-      screen.getByText("Đọc chỉ báo: Beta so chỉ số thị trường — SSI"),
+      screen.getByText("Ghi nhớ: SSI"),
     ).toBeInTheDocument()
   })
 })

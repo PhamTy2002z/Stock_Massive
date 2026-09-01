@@ -26,13 +26,9 @@ from .protocol import Usage
 
 logger = logging.getLogger(__name__)
 
-# What one call inside an Analysis may reserve, and what the whole Analysis may
-# cost. The two per-call bounds are deliberately as large as the whole
-# Analysis's token allowance: the Analysis lane is a *loop* now
-# (``src/alpha/analysis_loop.py``), and the thing that actually bounds it across
-# calls is ``ANALYSIS_COST_MICRO_USD`` below, checked against everything this
-# owner has already been charged. Two token ceilings per call as well would be a
-# second, weaker answer to a question the cost ceiling already answers exactly.
+# The historical ``analysis`` owner and lane names are reserved for offline
+# batch/evaluation work. They remain stable ledger vocabulary until a dedicated
+# compatibility change renames them; current chat execution uses the Turn lane.
 #
 # They are not unbounded, and that matters: an envelope that grew past what one
 # generation can carry still arrives here reserved at its real size and is
@@ -72,6 +68,24 @@ class OwnerType(str, Enum):
     ANALYSIS_RUN = "analysis_run"
     TURN_REQUEST_MESSAGE = "turn_request_message"
     CAPABILITY_PROBE = "capability_probe"
+    #: The golden harness's rubric pass. Out-of-band measurement of answers that
+    #: have already been written, so it owns neither a Turn nor a probe.
+    #:
+    #: It has an owner of its own rather than borrowing one, and each of the two
+    #: it could have borrowed says why. ``CAPABILITY_PROBE`` carries a hard
+    #: $0.25 daily allowance shared with the boot probe: a judge pass over a
+    #: forty-case corpus would exhaust it in a few calls *and* leave production
+    #: unable to probe its own route on the next restart. ``TURN_REQUEST_MESSAGE``
+    #: would put measurement spend inside the per-Turn ceilings and inside the
+    #: rows a Turn's cost is read from, so measuring the system would change the
+    #: number being measured.
+    #:
+    #: No ceiling branch below claims it: the harness enforces its own
+    #: ``--judge-ceiling-usd`` per pass, and the lane envelope is the backstop.
+    #: It rides the analysis lane, which the Phase 0 teardown left unused —
+    #: out-of-band batch work belongs there rather than in the lane serving
+    #: readers or the one held back for provider recovery.
+    GOLDEN_JUDGE = "golden_judge"
 
 
 @dataclass(frozen=True)
@@ -380,14 +394,14 @@ class SpendAdmission:
         Read-only, writes nothing, and takes no advisory lock. That is not an
         oversight — it is the difference between this and :meth:`reserve`. A
         reservation row is written immediately before the network call and its
-        existence *is* the fact that a Turn dispatched (ADR-0015), so answering
+        existence *is* the fact that a Turn dispatched, so answering
         a ``POST`` from one would charge a start to the very Turn it is about to
         refuse.
 
         :meth:`reserve` stays the authority. This is the same set of ceilings
-        asked early enough to be an ordinary HTTP status, which is what
-        ``docs/adr/0013`` requires of admission: a refusal must be decided
-        before any stream opens, never delivered as an in-band event.
+        asked early enough to be an ordinary HTTP status, which is what the
+        transport requires of admission: a refusal must be decided before any
+        stream opens, never delivered as an in-band event.
 
         The headroom checked is one call at the Turn's own per-call ceiling —
         exactly what the loop's first :meth:`reserve` will ask for at worst.
@@ -548,7 +562,7 @@ def _assert_user_ceilings(
     day_reset: datetime,
     pending: int,
 ) -> None:
-    """The five per-user ceilings of ``docs/adr/0014``, in one place.
+    """The five per-user spend ceilings, in one place.
 
     Asked twice with one difference. At admission no ``agent_turn`` row exists
     yet, so the prospective Turn has to be added to the two active counts;
@@ -878,7 +892,7 @@ def _read_turn_state(
 ) -> TurnState:
     """Read current Turn counts inside the same locked admission transaction.
 
-    **The start allowance is consumed at dispatch, not at admission** (ADR-0015):
+    **The start allowance is consumed at dispatch, not at admission:**
     refusals, provider model refusals and incomplete Turns count because they
     consumed resources, while authentication, schema, origin, body-size and
     admission failures rejected *before* dispatch do not.

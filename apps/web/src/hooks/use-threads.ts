@@ -27,7 +27,7 @@ import { queryKeys } from "@/lib/query-keys"
  * The canonical half of the conversation.
  *
  * Threads and their messages are TanStack Query resources; the Turn in flight
- * is not (ADR-0013). Nothing here is polled: a Thread changes only when a Turn
+ * is not. Nothing here is polled: a Thread changes only when a Turn
  * this browser started ends, and `useLiveTurn` already invalidates it at the
  * terminal event. Polling on top of that would be a request a minute asking
  * whether something this tab did has happened yet.

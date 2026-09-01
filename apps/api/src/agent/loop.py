@@ -1,4 +1,4 @@
-"""The hand-rolled agent loop over ``LLMClient`` (``docs/adr/0008``).
+"""The hand-rolled agent loop over ``LLMClient``.
 
 No framework: not LangGraph, not pydantic-ai, not the Agents SDK, not
 ``tool_runner``. There is no graph to orchestrate — five tools are plain
@@ -11,7 +11,7 @@ What the loop does, and nothing more: render the prompt, ask the model, run the
 tools it asked for, show it what came back, and stop. It does not decide what an
 answer is allowed to say. The harness this replaced did, and the machinery for
 it — an evidence manifest, a recommendation validator, labelled blocks, a widget
-protocol — is gone with the tools that fed it (``docs/adr/0026``).
+protocol — is gone with the tools that fed it.
 
 Five properties are worth reading the code for.
 
@@ -71,7 +71,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 from src.alpha.models import (
     TOOL_CALL_OK,
@@ -130,7 +130,6 @@ from .messages import (
     DOMAIN_BODY,
     MAX_SUMMARY_CHARS,
     MESSAGE_OVERHEAD_TOKENS,
-    NO_SIGNAL_DESK_TOOL_CALLED,
     SUMMARY_LABEL,
     SYSTEM_DYNAMIC,
     THOUGHT,
@@ -145,17 +144,14 @@ from .messages import (
     TurnToolCall,
     build_messages,
     context_projection,
-    signal_desk_absence,
-    signal_desk_of,
     display_results,
     estimate_tokens,
-    outcome_of,
     shown_result,
     summarise_call,
 )
 from .prompt import RuntimeContext, cache_key, prefix as prompt_prefix, render
 from .domain import active_pack
-from .toolsets import CHAT_TOOLSETS, CORE_TOOLS, resolve_toolset
+from .toolsets import CHAT_TOOLSETS
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +164,7 @@ logger = logging.getLogger(__name__)
 # lowering the other spends a budget nothing has validated.
 MAX_TOOL_ROUNDS = 4
 
-# ``docs/adr/0008``: in-process is correct because uvicorn runs a single worker.
+# In-process is correct because uvicorn runs a single worker.
 #
 # The default only. ``service.py`` wires the semaphore from the same configured
 # ceiling the ledger checks, because the two enforce one number from opposite
@@ -329,54 +325,15 @@ EXTERNAL_TOOL_EXHAUSTED_MESSAGE = (
     "already been gathered, and say what you could not look up."
 )
 
-# How the Turn was asked, as the surface the reader pressed the switch on.
-#
-# One type, named here rather than in the transport's schema, because the loop
-# is what has to behave differently: the wire shape is a restatement of this and
-# imports it, so the two cannot come to disagree about what a mode is called.
-#
-# ``chat`` is the default and means the reader asked a question. ``signal_desk``
-# means they asked it with the switch that draws thrown, and the difference is a
-# promise rather than a layout: the Turn either produces a Signal Desk or says in a
-# named code why it could not.
-TurnMode = Literal["chat", "signal_desk"]
-CHAT_MODE: TurnMode = "chat"
-SIGNAL_DESK_MODE: TurnMode = "signal_desk"
-
-#: How a ``signal_desk`` Turn draws what it gathered when the model drew nothing.
-#:
-#: Two ids in, the same announcement payload ``render_signal_desk`` returns out,
-#: or ``None`` when the Turn gathered no frame at all. A callable rather than an
-#: import because it reads rows: the default is
-#: ``agent/tools/studies.py::auto_compose_for_turn``, resolved at the one call
-#: site below so this module's imports stay free of the store.
-AutoComposer = Callable[[Any, Any], Mapping[str, Any] | None]
-
-# What a ``signal_desk`` Turn is told, on every call rather than once.
-#
-# A system note rather than a section of the prompt, because the prompt is
-# identical for every Turn — that is what makes it a cacheable prefix — and the
-# mode is a fact about this one. The *rule* is in the prompt
-# (``prompt/sections.py``); this says which Turn it applies to.
-#
-# Sent with every call of the Turn, like the rounds-exhausted note and unlike
-# ``state.note``: a mode holds for the whole Turn, and a model told once in
-# round one has to remember it through three more rounds of tool results.
-SIGNAL_DESK_NOTE = (
-    "This turn was asked from the Signal Desk, the surface that draws. Every "
-    "question that gets numbers becomes a board: gather frames with query, "
-    "compute or run_study, then render_signal_desk. When nothing can be drawn, "
-    "say plainly what could not be — the server will compose a board from the "
-    "frames you already have, and a poor board beats a paragraph."
-)
+# The only remaining conversation surface is chat.
+CHAT_MODE = "chat"
 
 def domain_body_note() -> str:
     """The active pack's own half of the prompt, for a Turn that reached for it.
 
-    A system note rather than a section of the rendered prompt, for the reason
-    ``SIGNAL_DESK_NOTE`` is one: the prompt is rendered once per Turn and is
-    identical across Turns, which is what makes it a cacheable prefix, and
-    whether *this* Turn touched the domain is not known when it is rendered.
+    A system note rather than a section of the rendered prompt: the prompt is
+    rendered once per Turn and is identical across Turns, which makes it a
+    cacheable prefix.
     Sent with every remaining call once it is on, like the mode note and unlike
     ``state.note``, because a playbook that lasted one round is a playbook the
     model has forgotten by the time the tool results come back.
@@ -411,21 +368,6 @@ def domain_body_tokens(state: "_TurnState") -> int:
     and because it is the one place that answer is written down.
     """
     return active_pack().body_tokens if state.domain_body else 0
-
-
-def domain_tool_names() -> frozenset[str]:
-    """Every tool that means "this Turn is asking about the domain".
-
-    Derived from the pack rather than listed here. That derivation is the whole
-    acceptance test of the pack idea: the moment this function spells a tool
-    name, swapping the domain means editing the loop that runs every domain.
-
-    ``CORE_TOOLS`` is empty, so what comes back is the pack's tools and nothing
-    else — but the subtraction is written anyway, because a core tool added
-    later would otherwise turn ``web_search`` into a domain trigger and load the
-    body into every Turn that reads a page.
-    """
-    return frozenset(resolve_toolset(active_pack().toolsets)) - frozenset(CORE_TOOLS)
 
 
 ROUNDS_EXHAUSTED_NOTE = (
@@ -585,8 +527,8 @@ UNMAPPED_ADMISSION_STATUS = 503
 class TurnRefused(AlphaRefusal):
     """A Turn refused at admission, before a row or a stream existed.
 
-    ``docs/adr/0013``'s two-request transport rests on one property: an
-    admission failure never opens a stream. Folding admission into the stream
+    The two-request transport rests on one property: an admission failure
+    never opens a stream. Folding admission into the stream
     would turn a refusal into an in-band event the client has to parse, and it
     would make the idempotency key arrive at the same moment as the work.
     """
@@ -626,7 +568,7 @@ class TurnPreflight(Protocol):
 class TurnAdmission:
     """The one question the ``POST`` asks before it creates anything.
 
-    The ceilings are not this class's. They belong to ``docs/adr/0014`` and to
+    The ceilings are not this class's. They belong to
     ``core/llm/admission.py``, which is also the authority that enforces them at
     dispatch. What is here is the part the ledger cannot own: the in-process
     semaphore, and the mapping from a stable reason onto a status code.
@@ -701,19 +643,9 @@ class TurnRequest:
     summarised_turns: int = 0
     #: The Turn's own id, where the caller has one.
     #:
-    #: Optional because the loop has always been runnable without one — a test
-    #: drives it directly, and nothing in answering a question needs it. What
-    #: needs it is a tool that writes a row a reader will re-open: an artifact
-    #: has to say which answer it belongs to, and the model must not be the one
-    #: to say, so it travels here and into ``ToolContext`` rather than into a
-    #: schema.
+    #: Optional because unit tests and offline harnesses may run without a
+    #: persisted Turn row.
     turn_id: uuid.UUID | str | None = None
-    #: Which surface asked this Turn, and what it is owed in return.
-    #:
-    #: Defaulted, so every caller written before the Signal Desk existed — a
-    #: test driving the loop, the transport before the switch was added — asks
-    #: for exactly the Turn it always asked for.
-    mode: TurnMode = CHAT_MODE
     #: What the reader attached to *this* question, payload included.
     #:
     #: Only this Turn's. The earlier Turns arrive through ``history`` carrying
@@ -726,8 +658,8 @@ class TurnRequest:
 class TurnDraft:
     """What has been produced so far, for checkpointing.
 
-    ``boundary`` says this checkpoint is one of the moments ``docs/adr/0013``
-    names — a tool call, a cancellation, a terminal state — rather than ordinary
+    ``boundary`` says this checkpoint is one of the named moments — a tool
+    call, a cancellation, a terminal state — rather than ordinary
     progress. The rate limiter that keeps checkpoints to at most one a second
     reads it, and nothing else does.
     """
@@ -742,10 +674,6 @@ class TurnDraft:
     #: drew — a reader who reconnected must not lose the timeline.
     answer: str | None = None
     thoughts: tuple[Mapping[str, Any], ...] = ()
-    #: The Signal Desks produced so far, as the ``signal_desk.ready`` events announced
-    #: them. Checkpointed for the same reason the thoughts are: a snapshot built
-    #: from a checkpoint has to say everything the stream already said.
-    signal_desks: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -765,17 +693,6 @@ class TurnOutcome:
     #: from, and these two are what a screen draws.
     answer: str | None = None
     thoughts: tuple[Mapping[str, Any], ...] = ()
-    #: The Signal Desks this Turn produced, so the canonical message can name them.
-    signal_desks: tuple[Mapping[str, Any], ...] = ()
-    #: Why a ``signal_desk`` Turn drew nothing, and ``None`` whenever that
-    #: question does not arise — a Turn that drew something, or one asked as
-    #: ordinary chat.
-    #:
-    #: The switch the reader pressed is a promise, so the Turn has to account
-    #: for it: either a Signal Desk was announced or this names, in a stable code,
-    #: what stopped one. A ``signal_desk`` Turn that ended in prose with nothing
-    #: here would be the silence the mode exists to prevent.
-    signal_desk_absence: str | None = None
     #: Wall-clock milliseconds this Turn took, for the line that says so.
     elapsed_ms: int = 0
     #: The route's id for the last call it answered, so a disputed answer can be
@@ -792,11 +709,7 @@ class TurnPublisher(Protocol):
     observe, and the SSE layer is free to add events of its own that the loop
     knows nothing about.
 
-    ``signal_desk_ready`` is reached through :func:`getattr` rather than called
-    outright, so a transport written before Studies existed — a test double, an
-    older surface — still streams a Turn that produced one instead of failing on
-    the announcement. The artifact is committed either way; what such a reader
-    loses is the prompt to open it, not the picture.
+    A protocol rather than an import keeps the loop independent of transport.
     """
 
     def content_delta(self, text: str) -> Any:
@@ -804,9 +717,6 @@ class TurnPublisher(Protocol):
 
     def tool_call(self, payload: Mapping[str, Any]) -> Any:
         """One tool call's current state: ``id``, ``name``, ``status``, ``summary``."""
-
-    def signal_desk_ready(self, payload: Mapping[str, Any]) -> Any:
-        """One Signal Desk a Study produced: the id to fetch it by, and its shape."""
 
 
 Checkpoint = Callable[[TurnDraft], Awaitable[None] | None]
@@ -863,11 +773,7 @@ class _TurnState:
     #: read it: :meth:`AgentLoop._ended` is reached from a dozen call sites and
     #: threading the request through all of them to answer one question is how
     #: one of them comes to be forgotten.
-    mode: TurnMode = CHAT_MODE
-    #: Which Turn this is, which conversation it belongs to, and what was asked —
-    #: copied here for the same reason ``mode`` is, and read by exactly one thing:
-    #: the record a Turn leaves when it went looking for an analysis recipe and
-    #: found none it could run.
+    #: Which Turn this is, which conversation it belongs to, and what was asked.
     turn_id: str | None = None
     thread_id: str | None = None
     question: str = ""
@@ -879,11 +785,6 @@ class _TurnState:
     answer: str | None = None
     #: Prose written in a round that went on to call tools, keyed by that round.
     thoughts: dict[int, str] = field(default_factory=dict)
-    #: The Signal Desks this Turn's tools produced, keyed by artifact id and in the
-    #: order they were announced. Held so a checkpoint carries them: a reader
-    #: rebuilding from one has to be told a picture exists, and the numbers it
-    #: draws are in a row this loop never sees.
-    signal_desks: dict[str, Mapping[str, Any]] = field(default_factory=dict)
     tool_rounds: int = 0
     usage: Usage = field(default_factory=Usage)
     calls: list[TurnToolCall] = field(default_factory=list)
@@ -986,7 +887,6 @@ class _TurnState:
             thoughts=self.narration(),
             rounds_used=self.tool_rounds,
             tool_calls=tuple(self.calls),
-            signal_desks=tuple(self.signal_desks.values()),
             boundary=boundary,
         )
 
@@ -1010,7 +910,6 @@ class AgentLoop:
         tool_timeout_seconds: float = TOOL_TIMEOUT_SECONDS,
         deadline_seconds: float | None = TURN_DEADLINE_SECONDS,
         clock: Callable[[], datetime] | None = None,
-        auto_compose: AutoComposer | None = None,
     ) -> None:
         self._client = client
         # A conversation's selection, never "every bundle this build registered".
@@ -1028,12 +927,8 @@ class AgentLoop:
         self._tool_timeout = tool_timeout_seconds
         self._deadline = deadline_seconds
         self._clock = clock or (lambda: datetime.now(timezone.utc))
-        # How a ``signal_desk`` Turn gets a board when the model composed none.
-        # Injected rather than imported at the top for one reason: this module
-        # opens no sessions and knows no tables, and the default reaches both.
-        self._auto_compose = auto_compose
-        # Resolved once, here. ``docs/adr/0008``: models split by workload and
-        # never inside the loop, because an in-loop cheap-router split adds a
+        # Resolved once, here. Models split by workload and never inside the
+        # loop, because an in-loop cheap-router split adds a
         # decision point whose quality nothing measures.
         self._model = config.model_for(Workload.SESSION)
         # Read once from the route, here, and carried into every constructed
@@ -1062,7 +957,6 @@ class AgentLoop:
 
     async def _run(self, request: TurnRequest, cancelled: Cancelled) -> TurnOutcome:
         state = _TurnState(
-            mode=request.mode,
             turn_id=str(request.turn_id) if request.turn_id is not None else None,
             thread_id=str(request.thread_id),
             question=_asked(request.user_text),
@@ -1101,26 +995,7 @@ class AgentLoop:
             surface=surface,
         )
         system_prompt = render(request.runtime)
-        # Two of the three ways a Turn earns the domain body, both readable
-        # before a single model call and neither costing one.
-        #
-        # The mode, because it is a promise the Turn will produce a Signal Desk
-        # and a Signal Desk comes from a domain tool: the body is certain to be
-        # needed, so waiting for the call that proves it would just spend the
-        # first round without it.
-        #
-        # The thread, because "and what about VNM?" is where a follow-up loses
-        # the playbook the previous answer was written under, and that is the
-        # cheapest regression to cause and the hardest to see. One Turn back and
-        # no further, deliberately: scanning the whole history would mean a
-        # thread that once mentioned a ticker carries the body forever.
-        if request.mode == SIGNAL_DESK_MODE:
-            state.domain_body = True
-        elif request.history:
-            domain_tools = domain_tool_names()
-            state.domain_body = any(
-                name in domain_tools for name in request.history[-1].tool_names
-            )
+        state.domain_body = True
 
         for round_index in range(MAX_TOOL_ROUNDS + 1):
             if cancelled():
@@ -1249,17 +1124,6 @@ class AgentLoop:
                     state, TurnStatus.COMPLETE, None, rounds_exhausted=exhausted
                 )
 
-            # The third trigger: what the model asked to call, read before it is
-            # dispatched rather than after it returns. The *request* is the
-            # intent — a call that fails is still a Turn that went looking at
-            # the domain — and reading it here means the body is in place for
-            # the call that has to make sense of the result.
-            if not state.domain_body:
-                domain_tools = domain_tool_names()
-                state.domain_body = any(
-                    call.name in domain_tools for call in completion.tool_calls
-                )
-
             assert_distinct_ids(completion.tool_calls)
             failed = await self._round(
                 completion.tool_calls, state, turn_budget, executor
@@ -1301,14 +1165,6 @@ class AgentLoop:
         reserved room for it here as well would be paying for it twice.
         """
         appended: list[tuple[Message, str, int]] = []
-        if request.mode == SIGNAL_DESK_MODE:
-            appended.append(
-                (
-                    Message(role=Role.SYSTEM, content=SIGNAL_DESK_NOTE),
-                    SYSTEM_DYNAMIC,
-                    SYSTEM_NOTE_TOKENS,
-                )
-            )
         if exhausted:
             appended.append(
                 (
@@ -1354,10 +1210,7 @@ class AgentLoop:
         # Room for whatever is appended after the context is built, read off
         # the same list ``_call`` appends, so the ceiling the transcript is
         # trimmed against and the request that actually goes out cannot
-        # disagree. Every call of a ``signal_desk`` Turn carries the mode note,
-        # and a Turn that has earned the domain body carries it at its own
-        # measured size rather than a note's; both facts live in ``_appended``
-        # and neither is restated here.
+        # disagree. Dynamic notes live in ``_appended`` and are not restated here.
         reserved = sum(
             tokens for _, _, tokens in self._appended(request, state, exhausted)
         )
@@ -1443,8 +1296,7 @@ class AgentLoop:
         """
         output_tokens = self._output_tokens(state)
         spend = SpendRequest(
-            # ``docs/adr/0014``: every provider call names a durable owner with
-            # a non-null id, and for this loop that owner is always the user's
+            # Every provider call names a durable owner with a non-null id, and for this loop that owner is always the user's
             # request message.
             owner=CallOwner(
                 type=OwnerType.TURN_REQUEST_MESSAGE,
@@ -1830,11 +1682,6 @@ class AgentLoop:
                             result.payload,
                             seen=state.shown_sources,
                         ),
-                        # Read off the same payload, for the same reason, and
-                        # answering the question ``status`` cannot: whether this
-                        # call came back with a number or with the reason there
-                        # is none.
-                        outcome=outcome_of(result.tool_name, result.payload),
                         # The advisory scan's verdict, carried from where the
                         # result first existed. Never merged into ``guidance``:
                         # guidance is the harness talking to the model, and this
@@ -1874,16 +1721,6 @@ class AgentLoop:
 
         for position in range(offset, len(state.calls)):
             self._publish_call(state.calls[position])
-
-        # After the calls, because a reader watches the row that produced the
-        # picture settle and then the picture arrive. Read off the structured
-        # payload rather than the result text, for the reason ``outcome`` above
-        # is: the executor is holding the object.
-        if outcome is not None:
-            for result in outcome.results:
-                signal_desk = signal_desk_of(result.tool_name, result.payload)
-                if signal_desk is not None:
-                    self._publish_signal_desk(state, signal_desk)
 
         if timed_out:
             return TOOL_TIMEOUT
@@ -1947,7 +1784,6 @@ class AgentLoop:
                         ),
                     ),
                     "error": entry.get("error"),
-                    "outcome": entry.get("outcome"),
                     "latency_ms": entry.get("duration_ms"),
                 }
             )
@@ -2000,52 +1836,6 @@ class AgentLoop:
         if self._publisher is not None:
             self._publisher.tool_call(call.as_wire())
 
-    def _publish_signal_desk(self, state: _TurnState, signal_desk: Mapping[str, Any]) -> None:
-        """Remember one Signal Desk and announce it, in that order.
-
-        Remembered first because the checkpoint is what a reconnecting browser
-        rebuilds from, and a picture announced but not written down would be
-        lost to exactly the reader who most needs to be told about it.
-        """
-        payload = {**signal_desk, "round": state.tool_rounds}
-        state.signal_desks[str(payload["artifactId"])] = payload
-        announce = getattr(self._publisher, "signal_desk_ready", None)
-        if announce is not None:
-            announce(payload)
-
-    async def _compose_what_is_left(self, state: _TurnState) -> None:
-        """Draw the Turn's own frames, once, when it is about to end with none.
-
-        A ``signal_desk`` Turn that ends in prose is the one failure the mode
-        exists to prevent, and it has two shapes that look identical from here:
-        the model never reached for a board, or it reached twice and broke the
-        grammar both times. Either way the frames are on disk and a reader asked
-        for a picture, so the server draws one and stamps it ``autoComposed``.
-
-        **It never raises into a terminal path.** This runs from
-        :meth:`_ended`, which every way a Turn can finish passes through —
-        including the ones that finished badly. A board is worth having and it is
-        not worth turning a completed answer into a failed one, so a broken
-        compose is logged and the Turn ends the way it was going to.
-        """
-        composer = self._auto_compose
-        if composer is None:
-            from .tools.studies import auto_compose_for_turn
-
-            composer = auto_compose_for_turn
-        try:
-            payload = await asyncio.to_thread(
-                composer, _as_uuid(state.turn_id), _as_uuid(state.thread_id)
-            )
-        except Exception:  # pragma: no cover - defended, not expected
-            logger.exception(
-                "Turn %s could not compose a board from its own frames",
-                state.turn_id or "unidentified",
-            )
-            return
-        if payload:
-            self._publish_signal_desk(state, payload)
-
     async def _save(self, state: _TurnState, *, boundary: bool = False) -> None:
         if self._checkpoint is None:
             return
@@ -2090,32 +1880,17 @@ class AgentLoop:
         Every terminal path runs through here, including the ones that end
         badly. A Turn that ran out of budget, lost its credential or was
         cancelled still produced prose, and prose is what makes an ``incomplete``
-        useful rather than empty — the difference ``docs/adr/0013`` draws between
-        ``incomplete`` and ``failed``.
+        useful rather than empty — the difference between ``incomplete`` and
+        ``failed``.
 
-        It is also where a ``signal_desk`` Turn settles its account. Every way a
-        Turn can end passes through here, including the ones that end badly, so
-        a Turn that was asked for a picture and has none names the reason on
-        exactly the paths where it is most likely to be missed — a route
-        failure, a deadline, a cancellation.
         """
         await self._save(state, boundary=True)
-        _log_catalog_without_a_run(state)
-        if state.mode == SIGNAL_DESK_MODE and not state.signal_desks:
-            await self._compose_what_is_left(state)
-        absent = (
-            signal_desk_absence(state.calls)
-            if state.mode == SIGNAL_DESK_MODE and not state.signal_desks
-            else None
-        )
         return TurnOutcome(
             status=status,
             terminal_reason=terminal_reason,
             text=state.text,
             answer=state.answer,
             thoughts=state.narration(),
-            signal_desks=tuple(state.signal_desks.values()),
-            signal_desk_absence=absent,
             elapsed_ms=int((time.monotonic() - state.started) * 1000),
             rounds_used=state.tool_rounds,
             rounds_exhausted=rounds_exhausted,
@@ -2152,8 +1927,6 @@ ASKED_LIMIT = 200
 ASKED_LIMIT_OUTSIDE_DEBUG = 60
 
 #: The two calls whose pairing this looks for.
-CATALOG_TOOL = "list_studies"
-RUN_TOOL = "run_study"
 
 
 def _asked(text: str) -> str:
@@ -2163,36 +1936,6 @@ def _asked(text: str) -> str:
     if len(asked) <= limit:
         return asked
     return asked[: limit - 1] + "…"
-
-
-def _log_catalog_without_a_run(state: _TurnState) -> None:
-    """Record a Turn that read the analysis catalog and ran nothing from it.
-
-    This is the one signal that says *the library is missing a recipe somebody
-    wanted*. A model that has a Study for the question calls it; a model that
-    reads the whole catalog and then answers in prose has looked for one and not
-    found it, and the question it was answering is the thing worth collecting.
-
-    A log line rather than a row. The questions are wanted in aggregate, by
-    whoever is deciding which Study to write next, and a column added for that
-    would be a schema change owned by nobody. ``extra`` carries the fields so a
-    collector can group them without parsing the sentence.
-    """
-    names = {call.name for call in state.calls}
-    if CATALOG_TOOL not in names or RUN_TOOL in names:
-        return
-    question = state.question or ""
-    logger.info(
-        "Turn %s read the analysis catalog and ran no study for: %s",
-        state.turn_id or "unidentified",
-        question,
-        extra={
-            "study_catalog_miss": True,
-            "turn_id": state.turn_id,
-            "thread_id": state.thread_id,
-            "question": question,
-        },
-    )
 
 
 def _as_uuid(identifier: uuid.UUID | str | None) -> uuid.UUID | None:
@@ -2219,7 +1962,6 @@ __all__ = [
     "ASKED_LIMIT",
     "AUTH_UNAVAILABLE",
     "CANCELLED_BY_USER",
-    "CATALOG_TOOL",
     "CHARS_PER_TOKEN",
     "CHAT_MODE",
     "CONTENT_POLICY_BLOCKED",
@@ -2240,18 +1982,14 @@ __all__ = [
     "MIN_OUTPUT_TOKENS",
     "MODEL_REFUSAL",
     "MODEL_UNAVAILABLE",
-    "NO_SIGNAL_DESK_TOOL_CALLED",
     "OUTPUT_CAP_EXCEEDED",
     "OUTPUT_TOKENS_REDUCTION_FACTOR",
     "ROUNDS_EXHAUSTED_NOTE",
     "ROUND_TIMEOUT_MULTIPLE",
     "ROUTE_ERROR",
     "ROUTE_RATE_LIMITED",
-    "RUN_TOOL",
     "SCHEMA_REJECTED",
     "SESSION_CONCURRENCY",
-    "SIGNAL_DESK_MODE",
-    "SIGNAL_DESK_NOTE",
     "SUMMARY_LABEL",
     "SYSTEM_NOTE_TOKENS",
     "TOOL_TIMEOUT",
@@ -2273,7 +2011,6 @@ __all__ = [
     "TurnAttachment",
     "TurnDraft",
     "TurnAdmission",
-    "TurnMode",
     "TurnOutcome",
     "TurnPreflight",
     "TurnPublisher",
@@ -2284,10 +2021,7 @@ __all__ = [
     "assert_distinct_ids",
     "domain_body_note",
     "domain_body_tokens",
-    "domain_tool_names",
     "build_messages",
-    "AutoComposer",
-    "signal_desk_absence",
     "estimate_tokens",
     "shown_result",
     "summarise_call",

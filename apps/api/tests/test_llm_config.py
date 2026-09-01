@@ -43,6 +43,15 @@ def _settings(**overrides) -> Settings:
         llm_price_session_cached_input_usd_per_mtok=0.2,
         llm_price_session_cache_write_usd_per_mtok=2.5,
         llm_price_session_output_usd_per_mtok=10.0,
+        llm_budget_monthly_usd=45.0,
+        llm_budget_analysis_usd=10.0,
+        llm_budget_turn_usd=30.0,
+        llm_budget_emergency_usd=5.0,
+        llm_user_turn_starts_per_day=20,
+        llm_user_active_turns=1,
+        llm_system_active_turns=3,
+        llm_user_daily_usd=3.0,
+        llm_user_rolling_30d_usd=15.0,
     )
     base.update(overrides)
     return Settings(**base)

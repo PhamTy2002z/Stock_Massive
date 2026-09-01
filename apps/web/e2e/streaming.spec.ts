@@ -106,6 +106,71 @@ test("the first delta and a heartbeat arrive before the Turn completes", async (
   expect(during.released).toBe(false)
 })
 
+test("streamed tables and code blocks stay stable and fit the transcript", async ({
+  page,
+  request,
+}) => {
+  const answer = page.getByLabel(ANSWER_LABEL)
+
+  await ask(page, request, "Các vùng giá của STB?")
+  await say(request, "| Vùng giá | Vai trò |\n| --- | --- |\n| 76.000–76.600 | Kháng cự gần |")
+
+  const header = answer.getByRole("columnheader", { name: "Vùng giá" })
+  await expect(header).toBeVisible()
+  await header.evaluate((cell) => {
+    ;(window as typeof window & { __streamedTableCell?: Element }).__streamedTableCell = cell
+  })
+
+  await say(request, "\n\nCách đọc cho tháng tới:")
+  await expect(answer).toContainText("Cách đọc cho tháng tới:")
+
+  expect(
+    await header.evaluate((cell) =>
+      (window as typeof window & { __streamedTableCell?: Element }).__streamedTableCell?.isSameNode(
+        cell,
+      ),
+    ),
+  ).toBe(true)
+
+  const tableStyle = await header.evaluate((cell) => {
+    const style = getComputedStyle(cell)
+    return {
+      borderBottomWidth: style.borderBottomWidth,
+      borderLeftWidth: style.borderLeftWidth,
+      borderRightWidth: style.borderRightWidth,
+    }
+  })
+  expect(tableStyle.borderBottomWidth).not.toBe("0px")
+  expect(tableStyle.borderLeftWidth).toBe("0px")
+  expect(tableStyle.borderRightWidth).toBe("0px")
+  await expect(answer.getByRole("button", { name: "Sao chép bảng" })).toBeVisible()
+
+  await say(request, "\n\n```text\nFinancial Data\n  ↓\nAI Intent\n```")
+  const codeBlock = answer.getByLabel("Khối mã", { exact: true })
+  await expect(codeBlock).toBeVisible()
+  await expect(codeBlock).toContainText("Financial Data")
+  const codeStyle = await codeBlock.evaluate((pre) => {
+    const surface = getComputedStyle(pre.parentElement!)
+    return { backgroundColor: surface.backgroundColor, borderRadius: surface.borderRadius }
+  })
+  expect(codeStyle.backgroundColor).not.toBe("rgba(0, 0, 0, 0)")
+  expect(codeStyle.borderRadius).not.toBe("0px")
+  await expect(answer.getByRole("button", { name: "Sao chép khối mã" })).toBeVisible()
+  await page.setViewportSize({ width: 375, height: 812 })
+  await expect(header).toBeVisible()
+  await expect(codeBlock).toBeVisible()
+  expect(
+    await answer.getByRole("region", { name: "Bảng trong câu trả lời" }).evaluate(
+      (region) => region.scrollWidth > region.clientWidth,
+    ),
+  ).toBe(true)
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+  ).toBe(true)
+})
+
 test("a mid-Turn reconnect resumes from an ordered snapshot, with no duplicate and no gap", async ({
   page,
   request,

@@ -2,8 +2,8 @@
 
 Two things live here and nowhere else.
 
-**Every attempt is its own reservation.** ``docs/adr/0014``: the worst case is
-committed before dispatch and reconciled after, so a retry is a second
+**Every attempt is its own reservation.** The worst case is committed before
+dispatch and reconciled after, so a retry is a second
 reservation rather than a second call against the first one. That is also what
 makes failover legitimate at this layer and illegitimate one layer down — the
 transport cannot ask admission anything, so a model it swapped in would be spent
@@ -173,8 +173,7 @@ class ReservedLLMClient:
 
         Exposed for one caller: the transport's ``POST`` has to ask the same
         ledger the same ceiling questions *before* a Turn exists, and a second
-        ledger built beside this one could read a different configuration
-        (``docs/adr/0013``, ``docs/adr/0014``).
+        ledger built beside this one could read a different configuration.
         """
         return self._admission
 
@@ -204,7 +203,7 @@ class ReservedLLMClient:
             await self._refuse_while_rate_limited(request.model)
             # The first attempt is funded from the lane the caller named; every
             # attempt after it is a retry, and a retry is what the emergency lane
-            # is for (``docs/adr/0014``).
+            # is for.
             candidate = spend if attempt == 1 else replace(spend, lane=BudgetLane.EMERGENCY)
             reservation = await asyncio.to_thread(
                 self._admission.reserve, candidate, request.model

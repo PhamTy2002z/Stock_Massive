@@ -1,7 +1,7 @@
 """The one protocol the rest of the system may depend on.
 
-``docs/adr/0008`` keeps the agent loop hand-rolled over this, and the reason is
-in the shape of these types rather than in the transport behind them: a
+The agent loop is hand-rolled over this rather than run inside a framework,
+and the reason is in the shape of these types rather than in the transport behind them: a
 ``ToolCall`` here carries *parsed* arguments, never a string, so no caller can
 be handed text that was never valid JSON. The transport is what makes that
 promise; the protocol is what states it.
@@ -205,7 +205,7 @@ class ContentSegment:
     """One piece of a message's text, and whether a cache ends after it.
 
     The System Prompt Contract is one artifact with a stable prefix and five
-    values appended (``docs/adr/0015``), and only the prefix is worth caching.
+    values appended, and only the prefix is worth caching.
     Expressing that needs a boundary *inside* one message, which a plain string
     cannot carry — so a caller that knows where the stable part ends says so
     here, and the transport turns it into content blocks only for a route that
@@ -393,7 +393,7 @@ class Usage:
 
     ``output_tokens`` excludes ``reasoning_tokens`` so nothing is counted twice,
     and reasoning is billed at the output price — which is why it is carried
-    separately rather than folded in (``docs/adr/0014``).
+    separately rather than folded in.
     """
 
     input_tokens: int = 0
@@ -457,7 +457,7 @@ class Completion:
     # all-zero Usage: absence may not refund a committed reservation.
     usage: Usage | None = None
     finish_reason: str = "stop"
-    # The route's own id for this call, recorded in the Evidence Manifest so a
+    # The route's own id for this call, carried out on the Turn's outcome so a
     # disputed answer can be traced back at the provider. ``None`` when the
     # route supplied none: the entire value of the field is that somebody can
     # look it up, so a synthesized id would be worse than an absent one.

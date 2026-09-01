@@ -1,6 +1,6 @@
 """Budget Validation: arithmetic that has to hold before the first request.
 
-``docs/adr/0014`` reserves a worst case *before* every call, so the ceilings it
+Admission reserves a worst case *before* every call, so the ceilings it
 enforces are only enforceable if the configured prices can fund them at all. A
 route priced above the per-Analysis or per-Turn ceiling does not fail at
 startup on its own — it fails on the first real Turn, halfway through an answer
@@ -13,8 +13,8 @@ which is why it can run inside ``lifespan`` before anything else starts.
 
 **The dev lane still declares prices.** CLIProxyAPI on a personal subscription
 publishes none, and dev traffic produces no cost figures at all — a ~300-token
-CLI system prompt rides on every request and there is no cache control
-(``docs/specs/0003`` §3). What is configured there is therefore the *production*
+CLI system prompt rides on every request and there is no cache control.
+What is configured there is therefore the *production*
 price table the dev route stands in for, which is the same table the budget is
 computed from analytically. Accepting a zero price instead would let a route
 boot whose every call costs nothing on paper, and the ceilings this file exists
@@ -30,23 +30,13 @@ from .config import LLMConfig, TokenPrices, Workload
 
 logger = logging.getLogger(__name__)
 
-# The ceilings of ``docs/adr/0014``. These are the contract, not the route, so
+# The spend ceilings. These are the contract, not the route, so
 # they are constants: a deployment that wants different ceilings is changing
 # what the product promises, not which model it talks to.
 #
-# **What one Analysis may spend, not what one call may.** They were the same
-# number while an Analysis was one call. It is now a bounded loop
-# (``src/alpha/analysis_loop.py``): six tool rounds that read the store, then one
-# call with no tools that returns the fragment. The arithmetic behind the two
-# figures is written where the loop is, and the measured six-round worst case
-# with prompt caching off is 23,005 input and 2,700 output tokens.
-#
-# Raising them is raising what the product promises to spend, and it was priced:
-# at the configured batch table this is $0.015 an Analysis, so an internal cohort
-# of thirty symbols over a month of sessions costs about $9.45 against the $10
-# Analysis lane. Prompt caching is what buys the headroom back — roughly 80% of
-# the loop's input is a prefix it re-sends every round — and it is a
-# before-production task rather than a way to make these numbers smaller.
+# The historical ``analysis`` names now denote the reserved batch/evaluation
+# lane. They remain stable config and ledger vocabulary until a dedicated schema
+# compatibility change renames them; no local market-analysis runtime uses them.
 ANALYSIS_INPUT_TOKENS = 24_000
 ANALYSIS_OUTPUT_TOKENS = 3_000
 ANALYSIS_COST_CEILING_USD = 0.015
@@ -56,7 +46,7 @@ TURN_OUTPUT_TOKENS = 20_000
 TURN_COST_CEILING_USD = 0.50
 
 # Money compared in floating point needs a tolerance, and the unit the ledger
-# is denominated in is the honest one: a micro-USD (``docs/adr/0014``).
+# is denominated in is the honest one: a micro-USD.
 MICRO_USD = 1e-6
 HARD_MONTHLY_ENVELOPE_USD = 45.0
 HARD_LANE_ALLOCATIONS_USD = {

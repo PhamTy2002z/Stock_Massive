@@ -3,12 +3,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Loader2 } from "lucide-react"
 
-import { toolCallEmptyLabel, toolCallErrorLabel } from "@/lib/alpha-desk/copy"
-import { signalIssueSentence } from "@/lib/signal-issues"
+import { toolCallErrorLabel } from "@/lib/alpha-desk/copy"
 import {
-  answeredNothing,
   distinctDomains,
-  outcomeIssue,
   toolCallKind,
   type Thought,
   type ToolCall,
@@ -330,24 +327,10 @@ function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
           {toolCallErrorLabel(call.error)}
         </span>
       )}
-      {/* A call that ran and came back with nothing says so, in its own words.
-          It is neither a failure nor a plain success: the tool worked, the
-          question was well formed, and there was no number at the end of it.
-          Drawn like a success it was invisible, and a third of the store reads
-          in the trace were exactly this. The reason rides in the title, where
-          the Signal Issue vocabulary already owns one sentence per code. */}
-      {call.status === "ok" && answeredNothing(call) && (
-        <span
-          className="ml-auto flex-none text-meta leading-[22px] text-muted-foreground/70"
-          title={emptyReason(call)}
-        >
-          {toolCallEmptyLabel(call.outcome)}
-        </span>
-      )}
       {/* A result count only where results are what came back. A store read
-          answers with one figure and no sources, so "0 kết quả" beside a call
+          answers with local content and no sources, so "0 kết quả" beside a call
           that succeeded said the opposite of what happened. */}
-      {call.status === "ok" && !answeredNothing(call) && toolCallKind(call) === "external" && (
+      {call.status === "ok" && toolCallKind(call) === "external" && (
         <SourceTally call={call} />
       )}
     </div>
@@ -442,10 +425,10 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
         aria-expanded={open}
         className="flex w-full items-center gap-[0.55rem] text-left text-meta leading-[22px] text-muted-foreground transition-colors hover:text-ink-2"
       >
-        {/* A store read is not a query against anything outside, and calling a
-            dozen of them "truy vấn" borrowed the wrong word for the work. */}
         <span className="min-w-0">
-          {allStore ? `Đọc ${calls.length} chỉ báo` : `Đã chạy ${calls.length} truy vấn`}
+          {allStore
+            ? `Đã chạy ${calls.length} công cụ nội bộ`
+            : `Đã chạy ${calls.length} truy vấn`}
         </span>
         {/* Only while the rows that would say it themselves are folded away. */}
         {!open && anyRunning && (
@@ -476,20 +459,11 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
                 {toolCallErrorLabel(call.error)}
               </span>
             )}
-            {call.status === "ok" && answeredNothing(call) && (
-              <span
-                className="flex-none text-meta leading-[22px] text-muted-foreground/70"
-                title={emptyReason(call)}
-              >
-                {toolCallEmptyLabel(call.outcome)}
-              </span>
-            )}
             {/* The branch rows are where the parallel searches land, and they
                 were the one place the count and the marks were missing: a round
                 of three searches said what each one asked and nothing about what
                 any of them found. */}
             {call.status === "ok" &&
-              !answeredNothing(call) &&
               toolCallKind(call) === "external" && <SourceTally call={call} />}
           </div>
         ))}
@@ -497,20 +471,6 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
       )}
     </RailRow>
   )
-}
-
-/**
- * The sentence behind an empty answer, for the row's title attribute.
- *
- * Read out of `signalIssueSentence` rather than written here: that module holds
- * the one Vietnamese sentence per **Signal Issue** code, and a second copy of
- * any of them is the drift it exists to prevent. It already answers an unknown
- * code with a readable sentence rather than the code itself, so there is nothing
- * to guard here.
- */
-function emptyReason(call: ToolCall): string {
-  const issue = outcomeIssue(call)
-  return issue === null ? toolCallEmptyLabel(call.outcome) : signalIssueSentence(issue)
 }
 
 function Spinner({ className }: { className?: string }) {

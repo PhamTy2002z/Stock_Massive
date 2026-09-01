@@ -196,7 +196,7 @@ def test_parallel_rate_is_measured_per_round_not_per_turn():
 
 
 def test_parallel_rate_has_no_value_when_the_turn_never_searched():
-    report = grade(artifact(case(tool_calls=[{"name": "get_field", "round": 1}])))
+    report = grade(artifact(case(tool_calls=[{"name": "session_search", "round": 1}])))
     result = finding(report, "parallel_rate")
     assert result.value is None
     assert result.passed is None

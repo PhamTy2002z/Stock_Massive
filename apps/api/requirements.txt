@@ -18,40 +18,15 @@ email-validator>=2.0.0
 
 # Utils
 httpx>=0.25.0
-websockets>=14.0,<17.0
-mcp>=2.0.0,<3.0.0
 python-multipart>=0.0.6
-tenacity>=8.2.0
 # Document evidence extraction. Both are imported directly by the agent layer.
 pypdf>=6.0.0,<7.0.0
 openpyxl>=3.1.0,<4.0.0
 
-# Cache & Rate Limiting
+# Cache & Rate Limiting. Rate limiting is served by the plain Redis client in
+# src/core/ratelimit.py, so no separate limiter package belongs here.
 redis>=5.0.0,<9.0.0
 upstash-redis>=1.0.0
-upstash-ratelimit>=1.0.0
-
-# Stock Data
-# Pinned to 4.x: 3.x -> 4.x renamed the industry columns this app reads
-# (icb_code2/icb_name2 -> industry_code/industry_name), which failed silently.
-vnstock>=4.0.0,<5.0.0
-# FiinQuantX is distributed from the provider's signed GitHub release, not PyPI.
-fiinquantx @ https://github.com/fiinquant/fiinquantx/releases/download/0.1.67/fiinquantx-0.1.67-py3-none-any.whl#sha256=92d8f1dc44717e2d895176668a811c8f3940a4cd74de2da8738572ed626276eb
-# FiinQuantX declares signalrcore without a version bound. signalrcore 1.0.0
-# added a negotiate validator that requires a "negotiateVersion" integer, and
-# FiinQuant's realtime hub answers with a negotiate payload that has no such key
-# — so an unpinned resolve installs 1.0.x and every Trading_Data_Stream dies in
-# the handshake. Measured working on 0.9.5: the hub returns a connectionId and
-# joins Realtime.Ticker.<symbol>.
-signalrcore>=0.9.5,<1.0.0
-# Imported directly: FiinQuantX hides SSL failures behind empty frames, so the
-# provider points SSL_CERT_FILE at this bundle before opening a session.
-certifi>=2024.2.2
-pandas>=2.0.0,<3.0.0
-numpy>=1.24.0,<3.0.0
-
-# Scheduler
-apscheduler>=4.0.0a6
 
 # Dev
 pytest>=7.4.0

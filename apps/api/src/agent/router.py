@@ -1,6 +1,6 @@
 """The three endpoints that put a Turn on the wire, and the Threads behind them.
 
-``docs/adr/0013`` fixes the surface:
+The surface is fixed:
 
 ```
 POST /api/alpha-desk/threads/{threadId}/turns    → admit, create, return turnId
@@ -19,9 +19,9 @@ would make the idempotency key arrive at the same moment as the work.
 **No database session is held across the streaming response.**  The subscribe
 endpoint authenticates and resolves ownership through its own short session and
 closes it *before* the response begins, rather than through ``Depends(get_db)``
-whose scope ends only when the response does.  The async pool is 15 connections
-(``docs/specs/0003`` §10.5); one held per Turn would cap concurrency at 15 and
-make the sixteenth wait thirty seconds to fail.
+whose scope ends only when the response does.  The async pool is 15 connections;
+one held per Turn would cap concurrency at 15 and make the sixteenth wait thirty
+seconds to fail.
 
 **Ownership is verified here, not at the proxy.**  Next owns cookies and
 forwards a bearer token, and that is all it is: every one of create, subscribe,
@@ -42,6 +42,7 @@ import logging
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Annotated
 
 from fastapi import (
@@ -65,10 +66,10 @@ from src.agent.persistence import (
     TurnPayloadConflict,
     TurnRecord,
 )
+from src.agent.domain.trading_calendar import market_day
 from src.agent.prompt import RuntimeContext
 from src.agent.schemas import (
     AllowanceResponse,
-    ArtifactResponse,
     AttachmentResponse,
     CreatedTurnResponse,
     CreateThreadRequest,
@@ -100,7 +101,8 @@ from src.auth.models import User
 from src.auth.security import TokenError, decode_access_token
 from src.auth.service import get_user_by_id
 from src.core.database import async_session_factory
-from src.stocks.providers.normalize import VN_TZ
+
+VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 logger = logging.getLogger(__name__)
 
@@ -265,8 +267,8 @@ async def streaming_user_id(request: Request) -> int:
 
     Deliberately not ``Depends(get_current_user)``. A dependency that opens a
     database session keeps it until the *response* ends, and this response ends
-    when the Turn does — up to ten minutes later. ``docs/specs/0003`` §10.5 is
-    explicit that no session is held across a streaming Turn.
+    when the Turn does — up to ten minutes later. No session is held across a
+    streaming Turn.
     """
     scheme, _, token = request.headers.get("Authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not token:
@@ -374,8 +376,7 @@ async def delete_thread(
 ) -> Response:
     """Delete a Thread and everything hanging off it.
 
-    Cascades to its messages, its traces and its Turns (`docs/specs/0003`
-    §10.6). It is not reversible and there is no archive: the menu asks the
+    Cascades to its messages, its traces and its Turns. It is not reversible and there is no archive: the menu asks the
     user to confirm, and this route is what that confirmation runs.
 
     A Thread that is not this user's answers 404 rather than 403, for the same
@@ -391,20 +392,27 @@ async def delete_thread(
 
 
 def _runtime(user: User) -> RuntimeContext:
-    """The two trusted values, and nothing else, for one Turn.
+    """The three trusted values, and nothing else, for one Turn.
 
     The date is read in Vietnam rather than in UTC: a Turn opened at 00:30 local
     time is asked on a day that is still yesterday in UTC, and "today" is the
     reader's day or it is no use to them.
+
+    The trading status is derived from that same local date, and here rather
+    than inside the prompt module, which renders text and owns no calendar. It
+    is the one place the two can be read together, so it is the one place they
+    cannot disagree about which day is being described.
 
     The name is the only user-supplied string that reaches the system prompt, so
     it is the whole attack surface of this function. ``RuntimeContext`` sanitises
     it; passing it through untouched here is deliberate, because a second
     cleaning rule beside that one is how the two come to disagree.
     """
+    today = datetime.now(VN_TZ).date()
     return RuntimeContext(
-        today=datetime.now(VN_TZ).date(),
+        today=today,
         user_name=user.full_name,
+        market=market_day(today),
     )
 
 
@@ -479,9 +487,6 @@ async def create_turn(
     the commit and the task start is recoverable as an incomplete Turn rather
     than as an invisible or duplicated request.
 
-    ``mode`` is carried through untouched. It is the switch the reader threw,
-    and this layer neither interprets it nor defaults it a second time: the
-    schema owns the two values and the loop owns what they promise.
     """
     desk.assert_enabled()
     view: ThreadView | None = await desk.store.read_thread(current_user.id, thread_id)
@@ -515,7 +520,6 @@ async def create_turn(
             symbols=payload.symbols,
             history=history_of(view.messages),
             retry_of_turn_id=payload.retry_of_turn_id,
-            mode=payload.mode,
             attachments=attachments,
         )
     except TurnPayloadConflict as conflict:
@@ -655,45 +659,6 @@ def _allowance(value: Allowance) -> AllowanceResponse:
 # -- cancel ----------------------------------------------------------------
 
 
-# -- one Signal Desk ------------------------------------------------------------
-
-
-@router.get("/artifacts/{artifact_id}", response_model=ArtifactResponse)
-async def read_artifact(
-    artifact_id: uuid.UUID,
-    current_user: CurrentUser,
-    desk: Desk,
-) -> ArtifactResponse:
-    """The numbers behind one Signal Desk, for the reader whose answer produced it.
-
-    The one route ``frames`` travels. It is a separate request from the
-    transcript on purpose: a heatmap is thousands of cells and a conversation
-    scrolls, so the text loads at text weight and the picture is fetched by
-    whoever opens the panel.
-
-    **Immutable, so the client may cache it forever.** The row is written once
-    and never updated; re-opening a Thread renders what was frozen rather than
-    recomputing against a store that has moved on.
-
-    An artifact under another user's Thread is *not found* rather than
-    forbidden, exactly as a Turn is: a caller who could tell the two apart has
-    been told an id exists.
-    """
-    record = await desk.store.read_artifact(current_user.id, artifact_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Artifact not found")
-    return ArtifactResponse(
-        id=record.id,
-        study_name=record.study_name,
-        study_version=record.study_version,
-        params=dict(record.params),
-        signal_desk_spec=dict(record.signal_desk_spec),
-        frames=dict(record.frames),
-        provenance=dict(record.provenance),
-        created_at=record.created_at,
-    )
-
-
 # -- attachments -----------------------------------------------------------
 
 
@@ -783,9 +748,8 @@ async def read_attachment_bytes(
 ) -> Response:
     """The bytes, for the reader who uploaded them.
 
-    Somebody else's attachment is *not found* rather than forbidden, exactly as
-    a Turn and an artifact are: a caller who could tell the two apart has been
-    told that an id exists.
+    Somebody else's attachment is *not found* rather than forbidden: a caller
+    who could tell the two apart has been told that an id exists.
 
     The two text types have no magic bytes, so anything at all can arrive under
     one of them. They are handed back as an opaque download with sniffing
@@ -811,7 +775,7 @@ async def cancel_turn(
 
     A second cancel returns the same answer, stamps nothing a second time and
     cannot change a terminal reason that is already written. A read-only call
-    already in flight is allowed to finish as ``docs/adr/0008`` requires; its
+    already in flight is allowed to finish; its
     trace is kept and its result is simply not fed into another round.
 
     **Retry is not this endpoint.** A retry is a new Turn carrying

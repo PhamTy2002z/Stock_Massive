@@ -5,8 +5,7 @@ capture and the bounded queue.  This module owns only the wire: framing an
 envelope, putting ``seq`` in the SSE ``id`` so the browser resends it as
 ``Last-Event-ID``, and keeping a quiet path observable.
 
-**The heartbeat is an SSE comment.**  ``docs/adr/0013`` says it consumes no
-sequence, and a comment is the only frame that can make that promise structural
+**The heartbeat is an SSE comment.**  It consumes no sequence, and a comment is the only frame that can make that promise structural
 rather than remembered: it has no ``id``, so there is nothing for it to number,
 and ``EventSource`` discards it without dispatching an event.  A synthetic
 ``ping`` event would have needed either a sequence — making the stream's
@@ -27,7 +26,7 @@ from contextlib import suppress
 
 from .events import Subscriber, TurnEvent
 
-# ``docs/adr/0013``: fifteen seconds, so a proxy with a sixty-second idle
+# Fifteen seconds, so a proxy with a sixty-second idle
 # timeout sees traffic four times before it would have closed the connection.
 SSE_HEARTBEAT_SECONDS = 15.0
 

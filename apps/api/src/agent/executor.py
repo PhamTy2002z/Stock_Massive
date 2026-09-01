@@ -64,7 +64,6 @@ from typing import Any, Literal
 from . import registry
 from .definitions import ResolvedToolSurface
 from .guardrails import HALT_GUIDANCE, TurnGuardrails, Verdict, result_signature
-from .messages import outcome_of
 from .untrusted import scan_for_threats
 
 logger = logging.getLogger(__name__)
@@ -98,7 +97,7 @@ MAX_EXTERNAL_CALLS_PER_ROUND = 8
 #: How many calls that stay inside this deployment one round dispatches. Also
 #: arithmetic: the Signal Field catalog holds thirty fields
 #: (``tools/signals.py``), so a question about one symbol can legitimately want
-#: all thirty in a single round, and two spare leave room for the ``list_fields``
+#: all thirty in a single round, and two spare leave room for control calls
 #: that found them and a price claim checked beside them.
 #:
 #: It is a ceiling and not an absence of one. Thirty-two concurrent reads share a
@@ -537,10 +536,6 @@ class ToolExecutor:
             # knows the Turn's budget.
             "result_text": result.text,
             "result_chars": len(result.text),
-            # Whether the call *answered*, which ``ok`` above cannot say: a store
-            # read that comes back with no figure is a successful call and a
-            # missing number at the same time.
-            "outcome": outcome_of(result.tool_name, result.payload),
         }
         try:
             written = self.trace(entry)

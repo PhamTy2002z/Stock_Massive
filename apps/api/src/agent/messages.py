@@ -103,8 +103,6 @@ SUMMARY_LABEL = "Summary of the earlier turns in this conversation:"
 #: ``user_intent`` is the newest question, in the reader's own words.
 #: ``attachments`` is what they attached to it, text and pixels.
 #: ``tool_results`` is this Turn's tool exchange.
-#: ``study_headlines`` is the part of that exchange a Study answered, kept apart
-#: because a headline is capped prose about a picture and a page is not.
 SYSTEM_CORE = "system_core"
 DOMAIN_BODY = "domain_body"
 SYSTEM_DYNAMIC = "system_dynamic"
@@ -112,7 +110,6 @@ HISTORY = "history"
 USER_INTENT = "user_intent"
 ATTACHMENTS = "attachments"
 TOOL_RESULTS = "tool_results"
-STUDY_HEADLINES = "study_headlines"
 
 CONTEXT_LAYERS = (
     SYSTEM_CORE,
@@ -122,7 +119,6 @@ CONTEXT_LAYERS = (
     USER_INTENT,
     ATTACHMENTS,
     TOOL_RESULTS,
-    STUDY_HEADLINES,
 )
 
 
@@ -200,7 +196,6 @@ class ContextComposition:
     user_intent: int = 0
     attachments: int = 0
     tool_results: int = 0
-    study_headlines: int = 0
 
     @property
     def total(self) -> int:
@@ -332,23 +327,6 @@ class TurnToolCall:
     #: text the web tools ran through ``visible_text`` and therefore stripped of
     #: markup. Empty for every tool that has nothing worth showing.
     results: tuple[Mapping[str, Any], ...] = ()
-    #: What this call actually yielded, for the calls where "it ran" and "it
-    #: answered" are different facts.
-    #:
-    #: ``status`` cannot carry this. A store read that comes back saying the
-    #: store has nothing to say is a successful call — the tool worked, the
-    #: question was well formed, and the answer is that there is no figure — so
-    #: it is ``ok``, and it was drawn and recorded exactly like a call that
-    #: returned a number. Measured over the trace: of 151 ``get_field`` calls,
-    #: 94 carried a figure, 42 carried a refusal and 15 said the symbol was
-    #: outside the Universe, and all 151 were stored as ``ok``. That is a third
-    #: of the evidence path invisible to anyone reading either the rail or the
-    #: table.
-    #:
-    #: ``None`` for every tool with nothing to classify, which is the default: a
-    #: tool added later says nothing here until somebody decides what its
-    #: outcomes are.
-    outcome: str | None = None
     #: The route's own opaque token for the reasoning behind this call, when the
     #: route issued one. Held for the length of the Turn and no longer: a route
     #: that demands it back demands it for the rounds of the Turn it is
@@ -429,7 +407,6 @@ class TurnToolCall:
             # registry does not hold reads as external, conservatively, exactly
             # as it does for the wrapper.
             "kind": EXTERNAL_KIND if self.reads_external else STORE_KIND,
-            "outcome": self.outcome,
             # The advisory scan's verdict, on the payload that is persisted with
             # the Turn rather than in a column of its own. That choice is the
             # whole storage decision: this dictionary is already written to
@@ -464,7 +441,7 @@ def summarise_call(
     the phrase a person reads (``ToolEntry.display_name``) beside the name the
     model calls, and ``register`` refuses a blank one. This function used to keep
     its own mapping of five tool names, which is why the three tools added after
-    it was written showed a reader ``get_field`` — the same defect, in the same
+    it was written showed a reader a raw function name — the same defect, in the same
     shape, that ``untrusted.py`` had with its frozenset of two.
 
     A name the registry does not hold falls back to itself. That is a tool
@@ -714,192 +691,6 @@ def _distinct(
             seen.add(slot)
         kept.append(_display_item(best[slot]))
     return tuple(kept)
-
-
-#: What a call yielded, where that is a different question from whether it ran.
-#:
-#: Three values, and the middle one is the one this exists for. Kept short and
-#: stable because they are stored in a column and grouped by in a query, and
-#: because a surface holds one sentence per value the way it already does for a
-#: **Signal Issue**.
-OUTCOME_VALUE = "value"
-OUTCOME_NO_VALUE = "no_value"
-OUTCOME_CANNOT_READ = "cannot_read"
-
-#: Every tool whose result carries a figure that may be absent. Named rather
-#: than sniffed from the payload shape: a tool answering with a ``value`` key
-#: that is legitimately null would otherwise be reported as having refused.
-_FIGURE_TOOLS = frozenset({"get_field"})
-
-#: Every tool that answers with a whole picture rather than one figure.
-#:
-#: Named for the same reason and classified apart, because the two say "nothing
-#: this time" differently: a figure is a ``value`` that came back null, and a
-#: Study is a refusal carrying the input that was short. Folding them together
-#: would mean sniffing for whichever key happened to be present, which is the
-#: guess this table exists to avoid.
-_STUDY_TOOLS = frozenset({"run_study", "render_signal_desk"})
-
-
-def outcome_of(name: str, payload: Any) -> str | None:
-    """What one call yielded, or ``None`` where the question does not apply.
-
-    Read off the structured payload rather than the result text, for the reason
-    :func:`display_results` is: the executor is holding the object, and a second
-    parse is a second chance to read it differently from the first.
-
-    A Study answers the same three ways for the same reasons: an ``artifactId``
-    is a picture that exists, an ``issue`` is the input that was too short, and
-    an ``error`` is the question itself being declined.
-
-    A refusal keeps the **Signal Issue** that caused it, not a flat "nothing".
-    The whole value of separating these is that ``insufficient_cross_section``
-    and ``market_cap_absent`` are different operational facts with different
-    fixes, and folding them into one word rebuilds the blind spot one level up.
-    """
-    if not isinstance(payload, Mapping):
-        return None
-    if name in _STUDY_TOOLS:
-        if payload.get("error"):
-            return OUTCOME_CANNOT_READ
-        if payload.get("artifactId"):
-            return OUTCOME_VALUE
-        issue = payload.get("issue")
-        return f"{OUTCOME_NO_VALUE}:{issue}" if issue else OUTCOME_NO_VALUE
-    if name not in _FIGURE_TOOLS:
-        return None
-    if payload.get("error"):
-        # The tool declined the question itself — a symbol outside the Universe,
-        # a call opened for another one. It never reached the store.
-        return OUTCOME_CANNOT_READ
-    if "value" not in payload:
-        return None
-    if payload.get("value") is not None:
-        return OUTCOME_VALUE
-    code = payload.get("reasonCode")
-    return f"{OUTCOME_NO_VALUE}:{code}" if code else OUTCOME_NO_VALUE
-
-
-#: The one thing a Signal Desk absence can be that nothing already names.
-#:
-#: Every other reason a Turn drew nothing is a code that exists: the Signal
-#: Issue a Study refused under (:data:`OUTCOME_NO_VALUE` and the issue),
-#: :data:`OUTCOME_CANNOT_READ` for a Study that declined the question, and the
-#: executor's own error code for a call that never ran. This one has no home
-#: among them because it is not a fact about the data at all — the model simply
-#: never reached for a picture — and inventing a Signal Issue to say so would
-#: put a claim about the store on a Turn that never asked it anything.
-NO_SIGNAL_DESK_TOOL_CALLED = "no_signal_desk_tool_called"
-
-
-def signal_desk_absence(calls: Sequence[TurnToolCall]) -> str:
-    """Why this Turn drew nothing, in the vocabulary its calls already wrote.
-
-    Read off :attr:`TurnToolCall.outcome`, which the loop already computed with
-    :func:`outcome_of` at the moment the payload was in hand. Deriving it a
-    second time from the result text would be a second chance to read the same
-    call differently, and the whole value of a named reason is that the surface
-    and the trace agree about it.
-
-    The *last* signal_desk-producing call decides, because a Turn that tried twice
-    gave up on the second one: reporting the first would tell the reader about
-    an attempt the model had already moved past.
-
-    Never ``None``. This is called only where a Turn owes an account of itself,
-    and a caller handed nothing would have to invent a sentence — which is the
-    silence the account exists to prevent.
-    """
-    attempts = [call for call in calls if call.name in _STUDY_TOOLS]
-    if not attempts:
-        return NO_SIGNAL_DESK_TOOL_CALLED
-    last = attempts[-1]
-    if last.outcome:
-        # ``no_value:<signal issue>`` or ``cannot_read``. ``value`` cannot reach
-        # here: a call that carried an ``artifactId`` produced a signal_desk.
-        return last.outcome
-    if last.error:
-        # The call never got as far as an outcome — it was blocked, it timed
-        # out, the budget refused it, or the tool broke. The executor already
-        # named that, in codes the surface holds a sentence for because it draws
-        # them beside the call itself, so the name is carried rather than
-        # restated.
-        return last.error
-    # A call that finished, reported no error, and answered with something no
-    # signal_desk could be read out of. Rare enough to have no code of its own, and
-    # this is what that code would mean.
-    return OUTCOME_CANNOT_READ
-
-
-def signal_desk_of(name: str, payload: Any) -> Mapping[str, Any] | None:
-    """The Signal Desk one call produced, or ``None`` where it produced none.
-
-    Read off the structured payload for the reason :func:`outcome_of` is, and
-    projected rather than passed through: what the stream may carry about a
-    signal_desk is the id to fetch it by and enough to draw a skeleton of the right
-    height. The numbers stay in the row, which is the whole arrangement.
-    """
-    if name not in _STUDY_TOOLS or not isinstance(payload, Mapping):
-        return None
-    artifact_id = payload.get("artifactId")
-    if not artifact_id:
-        return None
-    headline = payload.get("headline")
-    provenance = payload.get("provenance")
-    return {
-        "artifactId": str(artifact_id),
-        "studyName": str(payload.get("studyName") or ""),
-        # The Vietnamese name of the recipe, which is the only one a reader may
-        # be shown. Resolved here because the registry is the one place that
-        # knows it, and a browser given only the slug would either print the
-        # slug or keep a second copy of the catalogue.
-        "studyDisplayName": _study_display_name(payload.get("studyName")),
-        "title": str(payload.get("title") or ""),
-        "blockCount": (
-            payload["blockCount"] if isinstance(payload.get("blockCount"), int) else 0
-        ),
-        # Which company the picture is about, so a reader with twenty boards can
-        # type a ticker to find one again. Read off the headline the model was
-        # handed rather than fetched: it is already in this payload, and a
-        # Study about no single company honestly has none.
-        "symbol": _headline_symbol(headline),
-        # When the numbers were frozen. Off the provenance for the same reason.
-        "asOf": (
-            str(provenance.get("asOf") or "") if isinstance(provenance, Mapping) else ""
-        ),
-        # Whether the server drew this board because the model drew none.
-        #
-        # It travels because the panel prints a line saying so, and it prints a
-        # line because a board nobody claims authorship of is read as an argument
-        # somebody made. Defaulted rather than required: every board written
-        # before the compiler existed was the model's, and an absent flag is that
-        # fact rather than a gap.
-        "autoComposed": bool(payload.get("autoComposed")),
-    }
-
-
-def _headline_symbol(headline: Any) -> str:
-    """The ticker one run is about, or ``""`` where it is about no single one."""
-    if not isinstance(headline, Mapping):
-        return ""
-    symbol = headline.get("symbol")
-    return str(symbol).strip().upper() if isinstance(symbol, str) else ""
-
-
-def _study_display_name(name: Any) -> str:
-    """The registered Vietnamese name for a Study, or ``""`` for an unknown one.
-
-    Imported where it is used rather than at module scope: ``studies`` reaches
-    the database layer, and this module is imported by the context builder,
-    which has no business dragging the store in behind it. The package import
-    is also what registers the Studies, so it is the package and not the
-    registry module that is asked.
-    """
-    if not isinstance(name, str) or not name:
-        return ""
-    from src import studies
-
-    definition = studies.REGISTRY.get(name)
-    return definition.display_name if definition is not None else ""
 
 
 def _display_item(item: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -1468,15 +1259,8 @@ def _user_message(
 
 
 def _result_layer(call: TurnToolCall) -> str:
-    """Which layer one tool result is charged to.
-
-    A Study's answer is kept apart from a page's because the two are different
-    spending decisions. A headline is a capped sentence about a picture whose
-    numbers never travel (``studies/``), so it is already as small as it can be;
-    a page is the layer prune is aimed at. Folding them together would report a
-    Turn that drew three charts as having read three pages.
-    """
-    return STUDY_HEADLINES if call.name in _STUDY_TOOLS else TOOL_RESULTS
+    """Charge every current tool result to the tool-result layer."""
+    return TOOL_RESULTS
 
 
 def _turn_messages(
@@ -1522,8 +1306,8 @@ def _turn_messages(
         # tool made it: the layer answers "can this be pruned", and a finished
         # Turn's results can be, while this Turn's are the evidence the answer
         # is standing on. Per call rather than per message because a round that
-        # mixed a search with a Study would otherwise put the Study's ask on
-        # the page layer, and the layer names would stop meaning what they say.
+        # mixed external and local calls would otherwise put every ask on the
+        # page layer, and the layer names would stop meaning what they say.
         messages.append(
             _Tagged(
                 ask,
@@ -1761,7 +1545,6 @@ __all__ = [
     "CONTEXT_LAYERS",
     "DOMAIN_BODY",
     "HISTORY",
-    "STUDY_HEADLINES",
     "SYSTEM_CORE",
     "SYSTEM_DYNAMIC",
     "TOOL_RESULTS",
@@ -1772,12 +1555,6 @@ __all__ = [
     "MAX_DISPLAY_RESULTS",
     "MAX_SUMMARY_CHARS",
     "MESSAGE_OVERHEAD_TOKENS",
-    "NO_SIGNAL_DESK_TOOL_CALLED",
-    "signal_desk_absence",
-    "signal_desk_of",
-    "OUTCOME_CANNOT_READ",
-    "OUTCOME_NO_VALUE",
-    "OUTCOME_VALUE",
     "SUMMARY_LABEL",
     "THOUGHT",
     "ConstructedContext",
@@ -1797,7 +1574,6 @@ __all__ = [
     "dedup_key",
     "display_results",
     "estimate_tokens",
-    "outcome_of",
     "shown_result",
     "summarise_call",
 ]

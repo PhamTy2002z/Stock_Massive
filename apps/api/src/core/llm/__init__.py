@@ -1,7 +1,7 @@
 """The LLM boundary: one protocol, one transport, one error taxonomy.
 
-``docs/adr/0008`` keeps the agent loop hand-rolled over this package rather than
-inside a framework, for a reason this package is the whole of: the failures on
+The agent loop is hand-rolled over this package rather than run inside a
+framework, for a reason this package is the whole of: the failures on
 this channel class are silent. A measured gateway keyed streamed tool calls on a
 local counter instead of the upstream index and concatenated two calls'
 arguments into invalid JSON under the wrong id — while returning 200. Nothing

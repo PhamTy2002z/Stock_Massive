@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { searchStocks } from "./api"
-import { ApiUnavailableError, connectionStatus, healthUrlFrom } from "./connection-status"
+import { alphaFetch, AlphaRefusalError } from "./alpha"
+import {
+  ApiUnavailableError,
+  connectionStatus,
+  healthUrlFrom,
+  UPSTREAM_UNREACHABLE,
+} from "./connection-status"
 
 describe("what the app does when the API cannot answer", () => {
   beforeEach(() => {
@@ -21,18 +26,15 @@ describe("what the app does when the API cannot answer", () => {
       vi.fn().mockRejectedValue(new TypeError("Failed to fetch"))
     )
 
-    await expect(searchStocks("VCB")).rejects.toThrow(/không phản hồi|unavailable/i)
+    await expect(alphaFetch("/threads")).rejects.toThrow(/không phản hồi|unavailable/i)
     expect(connectionStatus.get()).toBe("waiting")
   })
 
-  it("waits out a rate limit instead of blaming the user for it", async () => {
-    // The limit is per-window and the window is seconds long. Telling someone
-    // they have been throttled invites them to reload, which spends the very
-    // allowance they are waiting on.
+  it("keeps an answered admission limit as a typed refusal", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(429, { detail: "Too many requests" })))
 
-    await expect(searchStocks("VCB")).rejects.toBeInstanceOf(ApiUnavailableError)
-    expect(connectionStatus.get()).toBe("waiting")
+    await expect(alphaFetch("/threads")).rejects.toBeInstanceOf(AlphaRefusalError)
+    expect(connectionStatus.get()).toBe("ready")
   })
 
   it("keeps a real refusal a refusal", async () => {
@@ -41,7 +43,7 @@ describe("what the app does when the API cannot answer", () => {
     // resolves.
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(404, { detail: "Không có mã này" })))
 
-    await expect(searchStocks("VCB")).rejects.not.toBeInstanceOf(ApiUnavailableError)
+    await expect(alphaFetch("/threads/missing")).rejects.not.toBeInstanceOf(ApiUnavailableError)
     expect(connectionStatus.get()).toBe("ready")
   })
 
@@ -50,12 +52,16 @@ describe("what the app does when the API cannot answer", () => {
       "fetch",
       vi
         .fn()
-        .mockResolvedValueOnce(jsonResponse(503, { detail: "Restarting" }))
+        .mockResolvedValueOnce(
+          jsonResponse(503, {
+            detail: { reason: UPSTREAM_UNREACHABLE, message: "Restarting" },
+          }),
+        )
         .mockResolvedValueOnce(jsonResponse(200, [])),
     )
 
-    await expect(searchStocks("VCB")).rejects.toBeInstanceOf(ApiUnavailableError)
-    await searchStocks("VCB")
+    await expect(alphaFetch("/threads")).rejects.toBeInstanceOf(ApiUnavailableError)
+    await alphaFetch("/threads")
 
     expect(connectionStatus.get()).toBe("ready")
   })

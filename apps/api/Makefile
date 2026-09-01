@@ -1,6 +1,6 @@
 # API Development Commands
 
-.PHONY: dev run test lint clean contracts smoke-signal-desk backfill-daily backfill-intraday seed-statement-labels golden-run golden-grade golden-corpus-select golden-corpus-validate golden-context-export golden-context-replay probe-prompt-cache
+.PHONY: dev run test lint clean golden-run golden-grade golden-release golden-context-export golden-context-replay probe-prompt-cache probe-vision
 
 # Use venv python if exists
 PYTHON := $(shell if [ -d ".venv" ]; then echo ".venv/bin/python"; else echo "python"; fi)
@@ -24,22 +24,10 @@ test:
 test-file:
 	@read -p "Test file: " file; pytest tests/$$file -v
 
-# Run a named subset non-interactively:  make test-one T=tests/studies -K "refusal"
+# Run a named subset non-interactively:  make test-one T=tests/test_agent_loop.py -K "tool"
 test-one:
 	@test -n "$(T)" || (echo "T=<path> is required" >&2; exit 2)
 	$(PYTEST) $(T) -q $(if $(K),-k "$(K)",)
-
-# Regenerate the contract files both apps read. Deterministic: a synthetic
-# window and a pinned as-of, so no code change means no diff.
-contracts:
-	$(PYTHON) -c "import json;from src.studies import widgets;print(json.dumps(widgets.catalog_payload(),ensure_ascii=False,indent=2))" > ../../contracts/signal-desk-widget-catalog.json
-	$(PYTHON) -m tests.studies.artifact_fixture > ../../contracts/fixtures/artifact-intraday-liquidity.json
-
-# Five real questions against a running deployment: does the model reach for
-# run_study, and where do the seconds go. Spends real model calls, so it is run
-# by hand and never in CI. Needs SMOKE_EMAIL and SMOKE_PASSWORD.
-smoke-signal-desk:
-	$(PYTHON) -m scripts.smoke_signal_desk
 
 # Does the configured route actually read an image, measured through the same
 # serializer production uses. Spends three real model calls, so it is run by
@@ -47,44 +35,6 @@ smoke-signal-desk:
 # copy the model it passed on into LLM_VISION_MEASURED_MODEL.
 probe-vision:
 	$(PYTHON) -m scripts.probe_vision
-
-# Fill the daily spine the Trading Day calendar is derived from. This is the
-# one way bar_daily stays current: there is no scheduler inside the app, so it
-# is driven from outside, after the close.
-#
-#   make backfill-daily SCOPE=index      # VNINDEX — defines the calendar
-#   make backfill-daily SCOPE=declared   # the 30 Universe symbols
-#   make backfill-daily SCOPE=market     # every listed share, 52 weeks
-#
-# Run index first: every other scope's window ends on a day the calendar names.
-# The run exits non-zero when a symbol failed *or* when the spine is still not
-# current afterwards, so cron reports a market that has stopped moving instead
-# of succeeding quietly. A crontab entry at 16:00 Asia/Ho_Chi_Minh, weekdays:
-#
-#   0 16 * * 1-5 cd <repo>/apps/api && make backfill-daily SCOPE=index && \
-#                make backfill-daily SCOPE=declared
-backfill-daily:
-	@test -n "$(SCOPE)" || (echo "SCOPE=index|declared|market is required" >&2; exit 2)
-	$(PYTHON) -m src.stocks.backfill_daily --scope "$(SCOPE)" $(if $(SESSIONS),--sessions "$(SESSIONS)",)
-
-# Fill 15-minute intraday history for the declared Universe. One request per
-# symbol, paced through the same quota arbiter the daily spine uses, so it can
-# run beside a conversation without spending its slots.
-#
-#   make backfill-intraday SCOPE=declared
-backfill-intraday:
-	@test -n "$(SCOPE)" || (echo "SCOPE=declared is required" >&2; exit 2)
-	$(PYTHON) -m src.stocks.intraday.ingest --scope "$(SCOPE)" $(if $(SESSIONS),--sessions "$(SESSIONS)",)
-
-# Name the market's statement lines once, from one symbol per reporting
-# template. Sixteen provider requests, idempotent, run by hand. A second run
-# rewrites the same rows and adds none.
-#
-#   make seed-statement-labels
-#   make seed-statement-labels SEED_ARGS="--dry-run"
-#   make seed-statement-labels SEED_ARGS="--symbols VCB"
-seed-statement-labels:
-	$(PYTHON) -m scripts.seed_statement_item_labels $(SEED_ARGS)
 
 # Type check
 lint:
@@ -126,22 +76,20 @@ golden-context-replay:
 	@test -n "$(OUT)" || (echo "OUT=<path> is required" >&2; exit 2)
 	$(PYTHON) -m golden.context_replay replay $(if $(CORPUS),--corpus "$(CORPUS)",) --out "$(OUT)"
 
-# Draw the signal_desk corpus from labelled outside submissions, by seed rather
-# than by taste, and check a corpus file against the family floors. Both are
-# free and offline; neither writes a question.
-#
-#   make golden-corpus-select SUBMISSIONS=/path/to/submissions.json SEED=20260830
-#   make golden-corpus-validate CORPUS=golden/signal_desk.json
-golden-corpus-select:
-	@test -n "$(SUBMISSIONS)" || (echo "SUBMISSIONS=<path> is required" >&2; exit 2)
-	@test -n "$(SEED)" || (echo "SEED=<integer> is required: the draw has to be repeatable" >&2; exit 2)
-	$(PYTHON) -m golden.signal_desk_corpus select --submissions "$(SUBMISSIONS)" --seed "$(SEED)" $(if $(CORPUS),--out "$(CORPUS)",) $(if $(FORCE),--force,)
-
-golden-corpus-validate:
-	@test -n "$(CORPUS)" || (echo "CORPUS=<path> is required" >&2; exit 2)
-	$(PYTHON) -m golden.signal_desk_corpus validate "$(CORPUS)"
-
 # Reads one artifact file. No network, no database, no model.
 golden-grade:
 	@test -n "$(ARTIFACT)" || (echo "ARTIFACT=path/to/artifact.json is required" >&2; exit 2)
 	$(PYTHON) -m golden.grade "$(ARTIFACT)" $(GRADE_ARGS)
+
+# The whole release corpus behind one invocation: run, rubric pass, score, gate.
+# Roadmap §10 Phase 1 asks for one command because a four-step measurement is a
+# measurement somebody eventually runs three steps of. The exit code is the
+# verdict: 0 green, 1 a hard dimension under 100% or a run that did not finish,
+# 2 an artifact that cannot be scored at all.
+#
+# TRIALS defaults to one. The first trial records the tape and the rest replay
+# it, so a multi-trial baseline varies the model and nothing else.
+golden-release:
+	@test -n "$(CEILING_USD)" || (echo "CEILING_USD is required: a run spends real money" >&2; exit 2)
+	$(PYTHON) -m golden.release --ceiling-usd "$(CEILING_USD)" \
+		--trials "$(or $(TRIALS),1)" $(RELEASE_ARGS)

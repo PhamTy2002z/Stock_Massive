@@ -33,32 +33,6 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = "http://localhost:3000"  # Comma-separated origins
 
-    # Vnstock
-    vnstock_source: str = "VCI"  # Default data source (VCI is most reliable)
-    # VNSTOCK_API_KEY cố ý không khai ở đây: vnstock đọc thẳng từ os.environ để
-    # quyết định tier (20 request/phút khi không thấy, 60 khi thấy). Khai lại
-    # thành setting sẽ đọc được cả từ .env — nơi vnstock không nhìn tới — nên hai
-    # bên có thể lệch nhau. Xem API_KEY_ENV_VAR ở src/core/quota.py, nơi cùng
-    # biến môi trường đó quyết định giãn cách của Redis arbiter.
-
-    # Daily spine backfill — công việc định kỳ duy nhất của harness.
-    #
-    # Mặc định TẮT, và đó là chủ ý: scheduler_enabled mặc định True, nên một job
-    # đăng ký vô điều kiện sẽ tự bắt đầu gọi provider ngoài trên bất kỳ máy nào
-    # dựng stack này lên. Scope market là 1.523 request; bật nó phải là một quyết
-    # định ai đó viết ra, không phải hệ quả của việc chạy `pnpm dev`.
-    #
-    # 16:30 giờ VN là quy ước đã có trong code chứ không phải số chọn tuỳ ý:
-    # ingest đóng dấu observed_at = 16:30 và mô tả nó là "khi một run chờ hết
-    # phiên sẽ đọc" — phiên đóng 15:00, số liệu lắng sau đó.
-    backfill_daily_scheduled: bool = False
-    backfill_daily_hour: int = 16
-    backfill_daily_minute: int = 30
-
-    # Universe — tập mã được thu thập và phục vụ, trần 100 mã (src/stocks/universe.py).
-    # Rỗng là hợp lệ: ứng dụng chạy được và Collector không có gì để làm.
-    universe_symbols: str = ""  # Comma-separated
-
     # Upstash Redis (supports both naming conventions)
     upstash_redis_url: str = ""
     upstash_redis_token: str = ""
@@ -76,11 +50,8 @@ class Settings(BaseSettings):
         """Get Redis token (supports both naming conventions)."""
         return self.upstash_redis_rest_token or self.upstash_redis_token
 
-    # Scheduler
-    scheduler_enabled: bool = True
-
     # Alpha Desk — tuyến LLM, hai model theo workload, và giá của chúng
-    # (src/core/llm/, docs/adr/0014). Tắt mặc định: đây là kênh trả tiền, nên
+    # (src/core/llm/). Tắt mặc định: đây là kênh trả tiền, nên
     # một lần triển khai phải chủ động bật chứ không phải chủ động tắt.
     #
     # Mã model nằm ở đây và không ở đâu khác trong mã nguồn. Đó chính là lý do
@@ -108,7 +79,7 @@ class Settings(BaseSettings):
     # quay lại cùng lịch sử tool-call: DeepSeek v4-pro qua TokenRouter từ chối vòng
     # thứ hai với `messages[1].reasoning_content is required for thinking tool-call
     # history`. Transcript ở đây không lưu chuỗi suy luận của model — nó không phải
-    # bằng chứng, và Evidence Manifest không có chỗ cho nó — nên cờ này chỉ khiến
+    # bằng chứng, và transcript không giữ chỗ cho nó — nên cờ này chỉ khiến
     # mỗi assistant turn có tool call mang theo một chỗ giữ chỗ hợp lệ. Đo được:
     # tuyến nhận một khoảng trắng nhưng từ chối chuỗi rỗng.
     llm_reasoning_history_required: bool = False
@@ -133,9 +104,10 @@ class Settings(BaseSettings):
     # `make probe-vision` passes, never before.
     #
     # This is deliberately *not* a sixth Capability Probe check.
-    # `enforce_capability_probe` raises when any check fails and Alpha Desk is
-    # enabled, so a missing side capability would stop the API from booting —
-    # and the probe already spends five real model calls on every restart.
+    # `enforce_capability_probe` raises when a check the route *answered* fails
+    # and Alpha Desk is enabled, so a missing side capability would stop the API
+    # from booting — and the probe already spends five real model calls on every
+    # restart.
     llm_vision_enabled: bool = False
     # The model string `make probe-vision` last passed on. `_cached_result` in
     # the probe is process-global and not keyed by model, so nothing else would
@@ -146,7 +118,7 @@ class Settings(BaseSettings):
 
     # Open-web tools use their own Redis lane and Tavily credential. They are
     # off by default because each enabled Turn can spend external-provider
-    # allowance independently of the vnstock account arbiter.
+    # allowance independently of the model budget ledger.
     tavily_api_key: str = ""
     web_tools_enabled: bool = False
     web_fetch_max_bytes: int = 512 * 1024
@@ -180,10 +152,10 @@ class Settings(BaseSettings):
     llm_budget_turn_usd: float = 30.0
     llm_budget_emergency_usd: float = 5.0
 
-    # Năm trần per-user của docs/adr/0014. Là cấu hình chứ không phải hằng số vì
+    # Năm trần chi tiêu per-user. Là cấu hình chứ không phải hằng số vì
     # một account được tiêu bao nhiêu trong ngày là quyết định chi tiêu: bản
     # nội bộ chạy qua route thuê bao trả lời khác hẳn bản phục vụ người lạ trên
-    # một API tính tiền theo call. Con số của ADR vẫn là mặc định ở đây, nên hợp
+    # một API tính tiền theo call. Con số dưới đây là mặc định, nên hợp
     # đồng còn một chỗ được ghi lại và một biến env là đủ để siết lại.
     #
     # `0` = không giới hạn: mọi call vẫn được ghi vào `llm_call_usage`, chỉ bỏ
@@ -203,7 +175,7 @@ class Settings(BaseSettings):
     rate_limit_heavy_window: int = 60  # seconds
 
     # Đăng ký và kết nối lại một Turn có bộ đếm riêng, tính theo user và theo
-    # Turn chứ không theo IP (docs/adr/0013). Sau proxy Next mọi user chung một
+    # Turn chứ không theo IP. Sau proxy Next mọi user chung một
     # IP, nên limiter `heavy` sẽ chặn tất cả cùng lúc ngay đợt reconnect đầu.
     # Trần rộng hơn `heavy` một cách có chủ ý: EventSource tự kết nối lại sau
     # khoảng ba giây, nên một mạng chập chờn sinh ra nhiều lần thử hợp lệ.

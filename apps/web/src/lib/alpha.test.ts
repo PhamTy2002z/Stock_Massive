@@ -85,7 +85,7 @@ describe("sendAlpha body headers", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }))
     vi.stubGlobal("fetch", fetchMock)
 
-    await alphaFetch("/watchlist", { method: "POST", body: JSON.stringify({ symbol: "FPT" }) })
+    await alphaFetch("/threads", { method: "POST", body: JSON.stringify({ title: "FPT" }) })
 
     const [, init] = fetchMock.mock.calls[0]
     expect(init.headers).toMatchObject({ "Content-Type": "application/json" })

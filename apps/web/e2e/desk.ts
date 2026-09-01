@@ -118,25 +118,6 @@ export async function liveThreadId(page: Page): Promise<string> {
   return threadId as string
 }
 
-/**
- * Write one artifact for this Turn and announce it on the stream.
- *
- * Both halves, because the browser does both: the event opens the panel and the
- * id it carried is what fetches the row. Announcing without writing would prove
- * only that a tab can render a spinner.
- */
-export async function draw(
-  request: APIRequestContext,
-  threadId: string,
-  turnId: string,
-): Promise<string> {
-  const response = await request.post(`${API_ORIGIN}/e2e/turn/draw`, {
-    data: { thread_id: threadId, turn_id: turnId },
-  })
-  expect(response.ok()).toBeTruthy()
-  return (await response.json()).artifact_id as string
-}
-
 /** The Turn this tab is watching, read from where the desk remembers it. */
 export async function liveTurnId(page: Page): Promise<string> {
   const turnId = await page.evaluate(() => {

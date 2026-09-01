@@ -840,32 +840,6 @@ async def test_a_completed_turn_emits_its_terminal_event_after_the_transaction(o
 
 
 @pytest.mark.asyncio
-async def test_a_signal_desk_turn_records_how_it_was_asked(owner):
-    """How a Turn was *asked* cannot be recovered from what it produced.
-
-    So it is committed with the request, beside the words the reader typed, and
-    a Thread reopened tomorrow can still tell a question put to the desk from
-    the same question put in chat.
-    """
-    thread_id = await thread_for(owner)
-    turns = service(FakeClient([answer("Không có gì để vẽ.")]))
-    turn_id = uuid.uuid4()
-
-    await turns.create(
-        user_id=owner,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        user_text="FPT thế nào?",
-        runtime=runtime(owner),
-        mode="signal_desk",
-    )
-    await turns.running(turn_id).task
-
-    request = [row for row in messages_of(thread_id) if row.role == "user"][0]
-    assert request.content["mode"] == "signal_desk"
-
-
-@pytest.mark.asyncio
 async def test_an_ordinary_turn_records_no_mode_at_all(owner):
     # The default writes nothing, which is what keeps the same question asked
     # before this existed comparing equal to itself under the idempotency key.
@@ -884,88 +858,6 @@ async def test_an_ordinary_turn_records_no_mode_at_all(owner):
 
     request = [row for row in messages_of(thread_id) if row.role == "user"][0]
     assert "mode" not in request.content
-
-
-@pytest.mark.asyncio
-async def test_the_same_id_asked_from_two_surfaces_is_a_conflict(owner):
-    """A mode is part of the question, because only one of the two owes a picture."""
-    thread_id = await thread_for(owner)
-    turns = service(FakeClient([answer("Xong."), answer("Xong.")]))
-    turn_id = uuid.uuid4()
-
-    await turns.create(
-        user_id=owner,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        user_text="FPT thế nào?",
-        runtime=runtime(owner),
-    )
-    await turns.running(turn_id).task
-
-    with pytest.raises(TurnPayloadConflict):
-        await turns.create(
-            user_id=owner,
-            thread_id=thread_id,
-            turn_id=turn_id,
-            user_text="FPT thế nào?",
-            runtime=runtime(owner),
-            mode="signal_desk",
-        )
-
-
-@pytest.mark.asyncio
-async def test_a_signal_desk_turn_that_drew_nothing_says_why_on_both_paths(owner):
-    """The reason reaches a reader watching and a reader who comes back later.
-
-    Two paths and one code: the terminal event for the browser holding the
-    stream, and the canonical message for the Thread reopened tomorrow. A Turn
-    that answered in prose and said nothing about the picture is exactly what
-    this mode exists to make impossible.
-    """
-    thread_id = await thread_for(owner)
-    client = FakeClient([answer("Câu này không có gì để vẽ.")])
-    turns = service(client)
-    turn_id = uuid.uuid4()
-
-    await turns.create(
-        user_id=owner,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        user_text="Giải thích P/E giúp tôi.",
-        runtime=runtime(owner),
-        mode="signal_desk",
-    )
-    subscriber = await turns.subscribe(owner, turn_id)
-    await turns.running(turn_id).task
-    seen = [event async for event in subscriber.events()]
-
-    assert seen[-1].type is EventType.COMPLETED
-    assert seen[-1].data["signal_desk_absence"] == "no_signal_desk_tool_called"
-    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
-    assert assistant.content["signal_desk_absence"] == "no_signal_desk_tool_called"
-
-
-@pytest.mark.asyncio
-async def test_an_ordinary_turn_carries_no_such_reason(owner):
-    thread_id = await thread_for(owner)
-    client = FakeClient([answer("Xong.")])
-    turns = service(client)
-    turn_id = uuid.uuid4()
-
-    await turns.create(
-        user_id=owner,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        user_text="FPT thế nào?",
-        runtime=runtime(owner),
-    )
-    subscriber = await turns.subscribe(owner, turn_id)
-    await turns.running(turn_id).task
-    seen = [event async for event in subscriber.events()]
-
-    assert "signal_desk_absence" not in seen[-1].data
-    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
-    assert "signal_desk_absence" not in assistant.content
 
 
 @pytest.mark.asyncio

@@ -549,8 +549,8 @@ async def test_a_symbols_whole_field_catalog_fits_in_one_round():
     around instead of being given its evidence.
     """
     surface = Surface()
-    surface.add("get_field", reads_external=False)
-    calls = [call("get_field", f"c{index}") for index in range(30)]
+    surface.add("session_search", reads_external=False)
+    calls = [call("session_search", f"c{index}") for index in range(30)]
 
     outcome = await surface.executor().run(calls)
 
@@ -562,26 +562,26 @@ async def test_a_symbols_whole_field_catalog_fits_in_one_round():
 async def test_the_two_kinds_of_call_are_counted_against_their_own_ceilings():
     """A batch of store reads does not push a web search out of the round."""
     surface = Surface()
-    surface.add("get_field", reads_external=False)
+    surface.add("session_search", reads_external=False)
     surface.add("web_search", reads_external=True)
     # More store reads than the external ceiling, with the search issued last so
     # a shared counter would have spent the round before reaching it.
-    calls = [call("get_field", f"s{index}") for index in range(20)]
+    calls = [call("session_search", f"s{index}") for index in range(20)]
     calls.append(call("web_search", "w"))
 
     outcome = await surface.executor().run(calls)
 
     assert all(result.ok for result in outcome.results)
-    assert surface.order.count("get_field") == 20
+    assert surface.order.count("session_search") == 20
     assert surface.order.count("web_search") == 1
 
 
 @pytest.mark.asyncio
 async def test_the_store_ceiling_still_cuts_a_batch_that_passes_it():
     surface = Surface()
-    surface.add("get_field", reads_external=False)
+    surface.add("session_search", reads_external=False)
     issued = executor.MAX_STORE_CALLS_PER_ROUND + 3
-    calls = [call("get_field", f"c{index}") for index in range(issued)]
+    calls = [call("session_search", f"c{index}") for index in range(issued)]
 
     outcome = await surface.executor().run(calls)
 
@@ -668,8 +668,8 @@ async def test_a_result_is_scanned_exactly_once(monkeypatch) -> None:
 async def test_a_store_read_is_not_scanned() -> None:
     """Scanning our own store's answer puts a risk verdict on ourselves."""
     surface = Surface()
-    surface.add("get_field", reads_external=False)
-    outcome = await surface.executor().run([call("get_field")])
+    surface.add("session_search", reads_external=False)
+    outcome = await surface.executor().run([call("session_search")])
 
     assert outcome.results[0].scan is None
 

@@ -8,7 +8,7 @@ import type { FlagReason } from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
 
 /**
- * Flag a message — the one dispute action v1 ships (`docs/adr/0016`).
+ * Flag a message — the one dispute action v1 ships.
  *
  * **It promises nothing, and that is the design rather than an omission.** V1
  * has no dispute workflow: pressing this opens no ticket, notifies nobody and

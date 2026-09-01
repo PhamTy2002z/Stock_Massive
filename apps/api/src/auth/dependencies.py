@@ -46,7 +46,7 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 async def require_admin(current_user: CurrentUser) -> User:
     """Gate operational endpoints behind an admin account.
 
-    These trigger vnstock collection, long-running jobs, and cache eviction, so
+    These trigger privileged operations and cache eviction, so
     a rate limit is not sufficient — anonymous callers could still burn the API
     quota or wipe caches. 403 (not 404) because the route's existence is public
     in the OpenAPI schema anyway.

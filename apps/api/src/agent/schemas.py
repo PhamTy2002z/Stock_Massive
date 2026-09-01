@@ -17,27 +17,22 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.agent.attachments import MAX_IMAGES_PER_TURN
-from src.agent.loop import CHAT_MODE, TurnMode
 from src.agent.turns import MAX_USER_INPUT_BYTES
 from src.alpha.models import FLAG_REASONS
-from src.stocks.shared import validate_symbol
+
+from src.agent.symbols import normalize_symbol
 
 
 def _symbol(value: str) -> str:
     """Normalise one symbol, refusing a malformed one as a request error.
 
-    ``validate_symbol`` raises a ``StockServiceError``, which the application
-    answers with 502 — the right status for an upstream that misbehaved and the
-    wrong one for a browser that sent ``"hp g"``. Re-raised as a ``ValueError``
-    so pydantic answers 422.
+    This is transport validation only; it deliberately does not consult a local
+    market universe or data provider.
     """
-    try:
-        return validate_symbol(value)
-    except Exception as exc:  # noqa: BLE001 - narrowed to a request error below
-        raise ValueError(str(exc)) from exc
+    return normalize_symbol(value)
 
 
 class CreateThreadRequest(BaseModel):
@@ -122,27 +117,6 @@ class MessageResponse(BaseModel):
     helpful_at: datetime | None = None
 
 
-class ArtifactResponse(BaseModel):
-    """One Study run, as the Signal Desk panel fetches it.
-
-    Immutable by design, which is what lets the browser cache it forever: the
-    row is written once and re-opening a Thread renders it rather than
-    recomputing. ``provenance`` carries the ``asOf`` that freeze is measured by.
-
-    ``frames`` is the numbers themselves. This is the only route they travel,
-    and the model is not on it.
-    """
-
-    id: uuid.UUID
-    study_name: str
-    study_version: int
-    params: dict[str, Any]
-    signal_desk_spec: dict[str, Any]
-    frames: dict[str, Any]
-    provenance: dict[str, Any]
-    created_at: datetime
-
-
 class ThreadResponse(BaseModel):
     id: uuid.UUID
     title: str | None
@@ -221,6 +195,8 @@ class CreateTurnRequest(BaseModel):
     the Turn does not exist yet.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     turn_id: uuid.UUID
     text: str = Field(min_length=1)
     # The symbols the user's message is about, as the surface understood them.
@@ -230,17 +206,6 @@ class CreateTurnRequest(BaseModel):
     # Retry creates a *new* Turn that points at the old one; the previous Turn,
     # its spend, its message and its traces stay immutable.
     retry_of_turn_id: uuid.UUID | None = None
-    # Which surface asked, and therefore what the Turn owes back. ``chat`` is
-    # the default, so a client that has never heard of the Signal Desk sends
-    # exactly what it sent before and gets exactly what it got before.
-    #
-    # The type comes from the loop rather than being spelled again here, for the
-    # reason this module's docstring gives about the Turn's other vocabularies:
-    # a second declaration of the two values is a second place they can
-    # disagree. It is part of the idempotency payload — the same question asked
-    # from the desk is a different request from the same question asked in chat,
-    # because only one of them is owed a picture.
-    mode: TurnMode = CHAT_MODE
     # What the reader attached, by id — the bytes were uploaded before this
     # request and are read from the store, so the same question asked twice
     # sends the same short list either time.
@@ -303,8 +268,7 @@ class AttachmentResponse(BaseModel):
     """What an upload answers with: an id and what the file turned out to be.
 
     Never the bytes. Reading them is its own request, so a transcript loads at
-    text weight and a picture is fetched by whoever looks at it — the same split
-    ``ArtifactResponse`` makes for ``frames``.
+    text weight and a picture is fetched by whoever looks at it.
 
     ``media_type`` is what the bytes were measured to be, which for an image is
     not necessarily what the client said. ``estimated_tokens`` is what this file
@@ -327,7 +291,6 @@ class CreatedTurnResponse(TurnResponse):
 
 __all__ = [
     "AllowanceResponse",
-    "ArtifactResponse",
     "AttachmentResponse",
     "CreateThreadRequest",
     "CreateTurnRequest",

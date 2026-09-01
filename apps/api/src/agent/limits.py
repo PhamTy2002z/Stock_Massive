@@ -1,14 +1,13 @@
 """The limiter subscription gets instead of the IP-based one (#85).
 
-``docs/adr/0013`` is specific about this, and the reason is architectural rather
-than a tuning preference: **behind the Next proxy every user shares one IP.**
+The reason is architectural rather than a tuning preference: **behind the Next proxy every user shares one IP.**
 The existing ``heavy`` limiter identifies a caller by address, so the first
 reconnect burst after a dropped network would rate-limit everybody at once —
 one user's flaky connection taking the surface away from the rest.
 
 So subscription and reconnection are counted per user and per Turn, and they are
-**not charged as a Turn start**: ADR-0015 consumes the start allowance at
-dispatch, and reattaching to a Turn that is already running dispatches nothing.
+**not charged as a Turn start**: the start allowance is consumed at dispatch,
+and reattaching to a Turn that is already running dispatches nothing.
 A reader who reloads twenty times has spent no model budget at all, and a
 limiter that said otherwise would make a reload cost the same as a question.
 

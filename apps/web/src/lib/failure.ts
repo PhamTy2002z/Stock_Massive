@@ -11,13 +11,9 @@
  * So classification happens exactly once, here, and the surfaces differ only in
  * how much room they have to say it.
  *
- * **What belongs here and what does not.** This module is about *faults* —
- * transport, authorization, and the server's own failures. It is not about
- * absent data. A figure the store has no session for is not an error: it is a
- * fact about the world, it renders as an em dash with its reason from
- * `signal-issues.ts`, and offering "Thử lại" for it would be a button that
- * cannot work. Keeping the two apart is the point of the split, because
- * conflating them is how a product starts inviting people to retry the weather.
+ * This module is about transport, authorization and server failures. Empty
+ * search or memory results are successful tool outcomes and do not enter this
+ * classification path.
  *
  * **Every kind names one recovery, and only one.** A failure state offering two
  * routes out makes the reader choose between them with less information than

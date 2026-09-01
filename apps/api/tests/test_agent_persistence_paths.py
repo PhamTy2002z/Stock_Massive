@@ -176,78 +176,6 @@ async def test_a_traced_result_keeps_its_body_and_is_scoped_to_its_request(owner
 
 
 @pytest.mark.asyncio
-async def test_a_call_that_ran_and_answered_nothing_is_stored_as_such(owner):
-    """``ok`` and empty are not a contradiction, and the row has to hold both.
-
-    A store read that comes back with no figure is a successful call: the tool
-    worked and the answer is that there is no number. Measured on the trace
-    before this column existed, 42 of 151 ``get_field`` rows were exactly this
-    and every one of them was indistinguishable from a row carrying a figure.
-    """
-    store = persistence()
-    thread = await store.create_thread(owner)
-    request = await store.append_message(
-        thread.id, role="user", content={"text": "phân vị động lượng VHM"}
-    )
-    for call_id, outcome in (
-        ("call_0", "value"),
-        ("call_1", "no_value:market_cap_absent"),
-        ("call_2", "cannot_read"),
-    ):
-        await store.record_tool_call(
-            {
-                "thread_id": thread.id,
-                "request_message_id": request.id,
-                "tool_name": "get_field",
-                "tool_call_id": call_id,
-                "arguments": {"field_id": "momentum_rank.percentile_12_2"},
-                "result": {"text": "{}", "chars": 2, "dispatched": True},
-                "status": "ok",
-                "error": None,
-                "outcome": outcome,
-            }
-        )
-
-    traces = await store.traces_for_request(request.id)
-
-    assert [trace.status for trace in traces] == ["ok", "ok", "ok"]
-    assert [trace.outcome for trace in traces] == [
-        "value",
-        # The reason survives the round trip: which refusal it was is the whole
-        # point of separating them.
-        "no_value:market_cap_absent",
-        "cannot_read",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_a_call_with_nothing_to_classify_stores_no_outcome(owner):
-    """The default. A web search either failed or returned results, and there is
-    no figure of its that could be missing."""
-    store = persistence()
-    thread = await store.create_thread(owner)
-    request = await store.append_message(
-        thread.id, role="user", content={"text": "tin tức"}
-    )
-    await store.record_tool_call(
-        {
-            "thread_id": thread.id,
-            "request_message_id": request.id,
-            "tool_name": "web_search",
-            "arguments": {"query": "x"},
-            "result": {"text": "…", "chars": 1, "dispatched": True},
-            "status": "ok",
-            "error": None,
-            "outcome": None,
-        }
-    )
-
-    (trace,) = await store.traces_for_request(request.id)
-
-    assert trace.outcome is None
-
-
-@pytest.mark.asyncio
 async def test_a_tool_the_registry_does_not_have_is_persisted_as_unknown(owner):
     """The one status the ops query counts by name, written by the executor."""
     store = persistence()
@@ -457,7 +385,7 @@ async def test_a_store_read_is_persisted_with_no_verdict_at_all(owner):
     """
     store = persistence()
     thread = await store.create_thread(owner)
-    result = await dispatched(owner, "get_field", "{}", external=False)
+    result = await dispatched(owner, "session_search", "{}", external=False)
 
     await store.append_message(
         thread.id, role="assistant", content=committed(result)

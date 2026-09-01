@@ -6,8 +6,8 @@ Lua that is not made here would leave the suite green over a bucket that no
 longer spaces anything. Two things hold it down. The mirror lives beside the
 scripts it copies, keyed by the script text itself, so an edited script that was
 not mirrored raises ``UnknownScript`` rather than silently passing. And
-``tests/test_vnstock_quota_redis.py`` runs the same assertions against a real
-server whenever one is configured, which is what actually proves the Lua.
+the integration suite can run the same assertions against a real server, which
+is what actually proves the Lua.
 
 Thread-safe, because the spacing guarantee is only interesting under concurrent
 callers.
@@ -20,7 +20,6 @@ import time
 from typing import Any
 
 from src.core.llm.breaker import OPEN_BREAKER_SCRIPT
-from src.core.quota import RESERVE_SLOT_SCRIPT
 from src.core.redis import RELEASE_IF_OWNED_SCRIPT, RENEW_IF_OWNED_SCRIPT
 
 
@@ -120,8 +119,6 @@ class FakeRedis:
 
     def eval(self, script: str, keys: list[str], args: list[Any]) -> Any:
         with self._lock:
-            if script == RESERVE_SLOT_SCRIPT:
-                return self._reserve(keys[0], [float(arg) for arg in args])
             if script == RELEASE_IF_OWNED_SCRIPT:
                 if self.get(keys[0]) == str(args[0]):
                     return self.delete(keys[0])
@@ -133,18 +130,6 @@ class FakeRedis:
             if script == OPEN_BREAKER_SCRIPT:
                 return self._open_breaker(keys[0], [float(arg) for arg in args])
             raise UnknownScript(script)
-
-    def _reserve(self, key: str, args: list[float]) -> int:
-        now, spacing, max_wait, ttl = args
-        stored = self.get(key)
-        next_at = float(stored) if stored is not None else now
-        if next_at < now:
-            next_at = now
-        wait = next_at - now
-        if max_wait >= 0 and wait > max_wait:
-            return -1
-        self.set(key, int(next_at + spacing), px=int(ttl))
-        return int(wait)
 
     def _open_breaker(self, key: str, args: list[float]) -> int:
         # Floors where the Lua floors, and nowhere else: rounding a value the

@@ -12,13 +12,7 @@ export const queryKeys = {
   threads: ["threads"] as const,
   thread: (threadId: string) => ["thread", threadId] as const,
 
-  // One Study run. Immutable by design — the row is written once and never
-  // updated — so the panel caches it with `staleTime: Infinity` and re-opening
-  // a Thread renders what was frozen rather than refetching a moved store.
-  artifact: (artifactId: string) => ["artifact", artifactId] as const,
-
-  // This account's allowance. Unlike `artifact`, it moves: every Turn spends
-  // against it and the daily half expires at Vietnamese midnight.
+  // This account's allowance moves as every Turn spends against it.
   usage: ["usage"] as const,
 
   // What the route can do. The opposite of `usage`: constant until a deploy, so
