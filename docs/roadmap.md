@@ -274,6 +274,38 @@ fallback 7 tầng. Hermes không có grader chất lượng — Phase 1 tự d�
 
 Claim–evidence ledger, `as_of`/phiên/timezone, publication lag, corporate
 action, đơn vị/tiền tệ, source conflict, uncertainty, suitability boundary.
+Không có harness nào để port nguyên tầng này, nhưng từng mảnh có nguồn học
+pattern — xem bảng dưới.
+
+### Nguồn học pattern theo phase (không phải nguồn harness thứ ba)
+
+Hermes và OpenCode vẫn là hai nguồn học duy nhất cho harness core; các đối
+thủ coding-agent khác (Codex, Claude Code, OpenHands, LangGraph…) đã được
+đối chiếu trong `docs/hermes/` và `docs/opencode/` và không mang lại thứ
+Evidence Desk thiếu. Các hệ thống dưới đây là **nguồn học pattern ở mức
+phase plan**: học shape đã chứng minh, không port code, không thêm
+dependency, và không adopt cơ chế trust citation-by-prompt của chúng (hợp
+đồng sự thật §2 mạnh hơn). Phase plan của phase tương ứng thêm bước scout
+nguồn này trước khi thiết kế phần liên quan.
+
+| Nguồn | Phase | Học gì |
+|---|---|---|
+| STORM / Co-STORM (Stanford) | P6 | Perspective-guided question generation — bản mẫu cho counterevidence pass; đa góc nhìn tăng coverage có số đo |
+| GPT Researcher | P6 | Planner→executor fan-out nhỏ gọn; per-source summary giữ URL |
+| Open Deep Research (HuggingFace) | P6 | Vòng browsing đo trên GAIA — tham chiếu cho ngưỡng "fetch đủ để kết luận" |
+| SAFE (DeepMind) | P6 | Verifier pass: tách claim → search độc lập → chấm từng claim, nhiều trial; các failure mode đã biết của claim decomposition |
+| FacTool / RARR | P6 | Biến thể claim-extraction → retrieval → verdict/revise; tham chiếu cho chính sách rớt verify → hạ nhãn hoặc loại |
+| Anthropic Citations API | P6 | Span-grounding cơ học ở tầng provider — cùng triết lý render-only-from-ledger; probe như named assumption (gateway đa model có thể không hỗ trợ) |
+| Inspect AI (UK AISI) | P1 | Tách task/solver/scorer; epochs = multi-trial mặc định; log viewer đọc lại từng trial — pattern khi mở rộng `grade.py`, không dựng framework mới |
+| promptfoo / Braintrust | P1 | Gate hồi quy trong CI và artifact versioning cho release corpus |
+| Temporal / Restate | P3 | Từ vựng persist-intent-before-effect, idempotent terminal write — chỉ khái niệm, không thêm runtime |
+| OpenTelemetry GenAI semconv (+ Langfuse) | P9 | Chuẩn đặt tên trace Turn → attempt → tool, tương thích content-light mặc định |
+
+Đã xét và loại: AutoGen/CrewAI/LangGraph-as-runtime (tạo dispatch path thứ
+hai, vi phạm quy tắc dependency §6.3; multi-agent bị chặn trước gate P12),
+Perplexity-style render (citation không verify — anti-pattern của §2),
+MindSearch (verdict reference-only tại
+[`docs/research/mindsearch-alpha-desk.md`](research/mindsearch-alpha-desk.md)).
 
 Nguồn nội bộ: [`docs/hermes/README.md`](hermes/README.md),
 [`docs/opencode/README.md`](opencode/README.md),
@@ -411,6 +443,9 @@ có (`run.py` + `grade.py` + `web_first.json`), không dựng framework mới.
 - Rubric judge: synthesis, cấu trúc theo intent, chất lượng phản biện,
   uncertainty, decision utility; judge không chấm số backend kiểm được.
 - Artifact ghi code SHA, prompt/tool/model/config/data versions, trial count.
+- Phase plan scout nguồn pattern §7 trước khi thiết kế grader mới (Inspect
+  AI cho cấu trúc solver/scorer/epochs; promptfoo/Braintrust cho regression
+  gate) — chỉ học pattern, ràng buộc "không dựng framework mới" giữ nguyên.
 
 **Gate.** Toàn corpus chạy bằng **một lệnh**, artifact in pass/fail theo từng
 dimension; run nửa xanh là `incomplete`. Hard dimensions 100% trên corpus
@@ -528,6 +563,10 @@ loop và reasoning; không indicator/store/Study engine.
   scout-then-ask, budget cứng backend.
 - Prompt theo §3; câu "có nên mua" thiếu context → phân tích với giả định in
   rõ, không giả personalization.
+- Phase plan scout nguồn pattern §7 trước khi thiết kế pipeline 3-pass:
+  STORM (counterevidence qua đa góc nhìn), SAFE/FacTool (claim decomposition
+  và chính sách rớt verify), probe Anthropic Citations API như named
+  assumption cho span-grounding cơ học.
 
 **Gate.** Golden Phase 1 đạt hard gates; elicitation family đạt (0 câu hỏi
 discoverable, 0 câu không rẽ nhánh trên corpus); conflict/missing nói thẳng;
