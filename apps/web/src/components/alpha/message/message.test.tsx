@@ -11,9 +11,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
-import { FLAG_COPY, TOOL_CALL_COPY, terminalSentence } from "@/lib/alpha-desk/copy"
+import {
+  FLAG_COPY,
+  QUESTION_COPY,
+  TOOL_CALL_COPY,
+  terminalSentence,
+} from "@/lib/alpha-desk/copy"
 import type { AssistantView, DraftEntry } from "@/lib/alpha-desk/transcript"
-import type { ToolCall } from "@/lib/alpha-desk/types"
+import type { QuestionPart, ToolCall } from "@/lib/alpha-desk/types"
 import { CHUNK_CLASS } from "@/lib/alpha-desk/word-cadence"
 import { AssistantMessage } from "./assistant-message"
 import { DraftMessage } from "./draft-message"
@@ -59,6 +64,7 @@ function view(overrides: Partial<AssistantView> = {}): AssistantView {
     toolCalls: [],
     thoughts: [],
     followUps: [],
+    question: null,
     elapsedMs: 0,
     completed: true,
     ...overrides,
@@ -80,6 +86,7 @@ function draft(overrides: Partial<DraftEntry> = {}): DraftEntry {
     working: inFlight && text === "",
     toolCalls: [],
     thoughts: [],
+    question: null,
     elapsedMs: 0,
     terminalReason: null,
     ...overrides,
@@ -486,5 +493,123 @@ describe("the answer arriving", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe("the question an answer ended by asking", () => {
+  function question(overrides: Partial<QuestionPart> = {}): QuestionPart {
+    return {
+      question_id: "q-1",
+      prompt: "Bạn đang quyết định gì cho STB?",
+      options: [
+        { id: "hold", label: "Giữ", detail: null },
+        { id: "add", label: "Mua thêm", detail: "Trong 3 tháng" },
+      ],
+      multi_select: false,
+      skip_label: "Bỏ qua — dùng giả định mặc định",
+      state: "pending",
+      selected_option_ids: null,
+      ...overrides,
+    }
+  }
+
+  it("asks with the backend's own words, and posts back the option's id", () => {
+    // The label is a wording that can change; the id is what the row stores. A
+    // card that posted its label would lose the reader's choice on a reword.
+    const onAnswer = vi.fn()
+    render(
+      <AssistantMessage
+        view={view({ question: question() })}
+        messageId={7}
+        onAnswerQuestion={onAnswer}
+        onSkipQuestion={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText("Bạn đang quyết định gì cho STB?")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Giữ" }))
+
+    expect(onAnswer).toHaveBeenCalledWith("q-1", ["hold"])
+  })
+
+  it("offers the skip as a choice with an outcome, not as a way to dismiss", () => {
+    const onSkip = vi.fn()
+    render(
+      <AssistantMessage
+        view={view({ question: question() })}
+        messageId={7}
+        onAnswerQuestion={vi.fn()}
+        onSkipQuestion={onSkip}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Bỏ qua — dùng giả định mặc định" }))
+
+    expect(onSkip).toHaveBeenCalledWith("q-1")
+  })
+
+  it("draws a card with nowhere to send a press as inert rather than as a control", () => {
+    render(<AssistantMessage view={view({ question: question() })} messageId={7} />)
+
+    expect(screen.getByRole("button", { name: "Giữ" })).toBeDisabled()
+    expect(
+      screen.queryByRole("button", { name: "Bỏ qua — dùng giả định mặc định" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps an answered card on screen, saying which way it was answered", () => {
+    // Removed once settled, the answer below it would refer to a question the
+    // transcript no longer shows.
+    render(
+      <AssistantMessage
+        view={view({
+          question: question({ state: "answered", selected_option_ids: ["add"] }),
+        })}
+        messageId={7}
+        onAnswerQuestion={vi.fn()}
+        onSkipQuestion={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText(`${QUESTION_COPY.answered}: Mua thêm`)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Mua thêm/ })).toBeDisabled()
+    expect(
+      screen.queryByRole("button", { name: "Bỏ qua — dùng giả định mặc định" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["skipped", QUESTION_COPY.skipped],
+    ["superseded", QUESTION_COPY.superseded],
+  ] as const)("says in one line what became of a %s card", (state, line) => {
+    render(
+      <AssistantMessage
+        view={view({ question: question({ state }) })}
+        messageId={7}
+        onAnswerQuestion={vi.fn()}
+        onSkipQuestion={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText(line)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Giữ" })).toBeDisabled()
+  })
+
+  it("is answerable on the draft too, before the refetch replaces it", () => {
+    // The card is published in the same breath as the terminal event, so a
+    // reader watching the Turn end is looking at the draft when it appears.
+    const onAnswer = vi.fn()
+    render(
+      <DraftMessage
+        entry={draft({ text: "đáp", phase: "completed", question: question() })}
+        onRetry={vi.fn()}
+        onAnswerQuestion={onAnswer}
+        onSkipQuestion={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Giữ" }))
+
+    expect(onAnswer).toHaveBeenCalledWith("q-1", ["hold"])
   })
 })

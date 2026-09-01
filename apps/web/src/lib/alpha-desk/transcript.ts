@@ -13,10 +13,16 @@
  */
 
 import type { LivePhase, LiveTurn } from "./live-turn"
-import { readStrings, readThoughts, readToolCalls } from "./read-content"
+import {
+  readQuestion,
+  readStrings,
+  readThoughts,
+  readToolCalls,
+} from "./read-content"
 import type {
   Attachment,
   FlagReason,
+  QuestionPart,
   Thought,
   ThreadMessage,
   ToolCall,
@@ -62,6 +68,15 @@ export interface AssistantView {
    * given. Regenerating produces a different answer and different suggestions.
    */
   followUps: string[]
+  /**
+   * The question this answer ended by asking, or none.
+   *
+   * Read off the stored message, where the backend merged the outcome into the
+   * card, so a reopened Thread draws what the reader actually did with it — an
+   * answered card and a skipped one are different rows of history, not a card
+   * waiting to be pressed again.
+   */
+  question: QuestionPart | null
   /** How long the Turn took, for the line that says so. Zero when unrecorded. */
   elapsedMs: number
   /**
@@ -122,6 +137,14 @@ export interface DraftEntry {
   working: boolean
   toolCalls: ToolCall[]
   thoughts: Thought[]
+  /**
+   * The card this Turn ended by asking for, while the draft is still standing.
+   *
+   * Carried so a reader watching live can answer without waiting for the
+   * refetch that replaces the draft. Always `pending`: the stream publishes the
+   * card in the same breath as the terminal, before anyone can have pressed it.
+   */
+  question: QuestionPart | null
   elapsedMs: number
   phase: LivePhase
   terminalReason: string | null
@@ -222,6 +245,7 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
       working: reveal.working,
       toolCalls: input.live.toolCalls,
       thoughts: input.live.thoughts,
+      question: input.live.question,
       elapsedMs: input.live.elapsedMs,
       phase: input.live.phase,
       terminalReason: input.live.terminalReason,
@@ -310,6 +334,11 @@ function assistantView(message: ThreadMessage): AssistantView {
     toolCalls: readToolCalls(content.tool_calls, "ok"),
     thoughts: readThoughts(content.thoughts),
     followUps: readStrings(content.follow_ups),
+    // A stored card whose state is missing has lost the row that recorded the
+    // outcome, so it is read as superseded rather than as one more question to
+    // answer: an answer nothing can record is worse than a question nobody can
+    // press.
+    question: readQuestion(content.question, "superseded"),
     elapsedMs:
       typeof content.elapsed_ms === "number" && Number.isFinite(content.elapsed_ms)
         ? content.elapsed_ms

@@ -80,6 +80,7 @@ const answer = {
   toolCalls: [],
   thoughts: [],
   followUps: [],
+  question: null,
   elapsedMs: 0,
   completed: true,
 }
@@ -216,6 +217,7 @@ describe("asking a follow-up", () => {
         working: false,
         toolCalls: [],
         thoughts: [],
+        question: null,
         elapsedMs: 0,
         phase: "running",
         terminalReason: null,

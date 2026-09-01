@@ -6,7 +6,9 @@ import { Loader2 } from "lucide-react"
 import { toolCallErrorLabel } from "@/lib/alpha-desk/copy"
 import {
   distinctDomains,
+  toolCallFailed,
   toolCallKind,
+  toolCallWaiting,
   type Thought,
   type ToolCall,
 } from "@/lib/alpha-desk/types"
@@ -308,7 +310,10 @@ function SourceTally({ call }: { call: ToolCall }) {
 /** A round with exactly one tool call: its own row, its own result count. */
 function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
   const [expanded, setExpanded] = useState(false)
-  const running = call.status === "running"
+  // A call written down before its effect ran has not come back either, so it
+  // spins like one that is on its way: the row says whether the reader is still
+  // waiting, and both of those are waiting.
+  const waiting = toolCallWaiting(call)
   const hasResults = call.results.length > 0
 
   const row = (
@@ -321,8 +326,9 @@ function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
           out would draw a call that returned nothing exactly like a call that
           found nothing, and only one of those is worth retrying. Which word it
           gets depends on the reason: a ceiling of ours refusing the call is not
-          the same event as a page that would not load. */}
-      {call.status === "error" && (
+          the same event as a page that would not load, and a route a permission
+          rule closed is neither. */}
+      {toolCallFailed(call) && (
         <span className="ml-auto flex-none text-meta leading-[22px] text-destructive">
           {toolCallErrorLabel(call.error)}
         </span>
@@ -338,7 +344,7 @@ function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
 
   return (
     <RailRow
-      icon={running ? <Spinner /> : <CallIcon call={call} />}
+      icon={waiting ? <Spinner /> : <CallIcon call={call} />}
       isLast={isLast}
     >
       {hasResults ? (
@@ -403,7 +409,7 @@ const GROUP_FOLD_FROM = 7
  */
 function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
   const [pressed, setPressed] = useState<boolean | null>(null)
-  const anyRunning = calls.some((call) => call.status === "running")
+  const anyWaiting = calls.some(toolCallWaiting)
   const allStore = calls.every((call) => toolCallKind(call) === "store")
   const mixed = !allStore && calls.some((call) => toolCallKind(call) === "store")
 
@@ -411,12 +417,12 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
   // reopens it: the count only ever grows, so a group that folded itself cannot
   // unfold under a reader who left it shut.
   const open = pressed ?? calls.length < GROUP_FOLD_FROM
-  const settled = calls.filter((call) => call.status !== "running").length
-  const failed = calls.filter((call) => call.status === "error").length
+  const settled = calls.filter((call) => !toolCallWaiting(call)).length
+  const failed = calls.filter(toolCallFailed).length
 
   return (
     <RailRow
-      icon={anyRunning ? <Spinner /> : allStore ? <ChartIcon /> : <SearchIcon />}
+      icon={anyWaiting ? <Spinner /> : allStore ? <ChartIcon /> : <SearchIcon />}
       isLast={isLast}
     >
       <button
@@ -431,7 +437,7 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
             : `Đã chạy ${calls.length} truy vấn`}
         </span>
         {/* Only while the rows that would say it themselves are folded away. */}
-        {!open && anyRunning && (
+        {!open && anyWaiting && (
           <span className="flex-none tabular-nums">{`· ${settled}/${calls.length}`}</span>
         )}
         {!open && failed > 0 && (
@@ -443,18 +449,18 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
       <div className="mt-[11px] grid gap-[9px]">
         {calls.map((call) => (
           <div key={call.id} className="flex items-center gap-[0.55rem]">
-            {call.status === "running" ? (
+            {toolCallWaiting(call) ? (
               <Spinner className="flex-none" />
             ) : (
               <BranchIcon className="flex-none text-muted-foreground/70" />
             )}
-            {mixed && call.status !== "running" && (
+            {mixed && !toolCallWaiting(call) && (
               <CallIcon call={call} className="flex-none text-muted-foreground" />
             )}
             <span className="min-w-0 text-meta leading-[22px] text-muted-foreground">
               {call.summary}
             </span>
-            {call.status === "error" && (
+            {toolCallFailed(call) && (
               <span className="flex-none text-meta leading-[22px] text-destructive">
                 {toolCallErrorLabel(call.error)}
               </span>

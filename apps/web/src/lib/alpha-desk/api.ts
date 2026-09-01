@@ -23,6 +23,7 @@ import type {
   FlagReason,
   MessageFlag,
   MessageHelpful,
+  ResolvedQuestion,
   Thread,
   ThreadDetail,
   Turn,
@@ -195,6 +196,44 @@ export function clearHelpful(messageId: number): Promise<MessageHelpful> {
   return alphaFetch<MessageHelpful>(`/messages/${messageId}/helpful`, {
     method: "DELETE",
   })
+}
+
+/**
+ * Record the reader's choice on one question card.
+ *
+ * A list even where the card offers one choice, because `multi_select` is a
+ * property of the question rather than of the request — one shape here means a
+ * card that gains multi-select later changes nothing on this side.
+ *
+ * **It starts nothing.** The Turn that asked already ended, so this writes down
+ * what was chosen and no more; the reply is the next Turn the reader sends.
+ * Idempotent per question: the same choice again answers with the row unchanged,
+ * a different one on a question already settled is a `409`.
+ */
+export function answerQuestion(
+  questionId: string,
+  selectedOptionIds: string[],
+): Promise<ResolvedQuestion> {
+  return alphaFetch<ResolvedQuestion>(
+    `/questions/${encodeURIComponent(questionId)}/answer`,
+    {
+      method: "POST",
+      body: JSON.stringify({ selected_option_ids: selectedOptionIds }),
+    },
+  )
+}
+
+/**
+ * Record that the reader declined to choose.
+ *
+ * No body, because a skip carries no choice — and it is not a cancellation: the
+ * work runs on default assumptions and prints them.
+ */
+export function skipQuestion(questionId: string): Promise<ResolvedQuestion> {
+  return alphaFetch<ResolvedQuestion>(
+    `/questions/${encodeURIComponent(questionId)}/skip`,
+    { method: "POST" },
+  )
 }
 
 /** Where the browser's `EventSource` points. Same origin, so cookies travel. */

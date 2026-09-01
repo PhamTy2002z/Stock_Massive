@@ -866,9 +866,9 @@ def _settled_status(result: ExecutorToolResult) -> ToolCallStatus:
     permission rule is not a tool that broke. Nothing ran and nothing will:
     asking again for the same call is the one move that cannot work, and drawn as
     ``error`` beside a search engine that went down that is exactly the move a
-    reader would make. The code stays on the record for the transcript and the
-    trace; the *status* is what the rendered channel carries, because
-    ``events.TOOL_CALL_FIELDS`` deliberately does not carry ``error``.
+    reader would make. The status is what a surface draws the row from; the code
+    beside it (``error``) is how it names the refusal, and both travel on the
+    rendered channel as well as into the transcript and the trace.
     """
     if result.ok:
         return ToolCallStatus.OK

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import type { DraftEntry } from "@/lib/alpha-desk/transcript"
 import { Markdown } from "./markdown"
 import { MessageShell } from "./message-shell"
+import { QuestionCard } from "./question-card"
 import { ReasoningTimeline } from "./reasoning-timeline"
 import { TurnStatus } from "./turn-status"
 
@@ -33,10 +34,22 @@ import { TurnStatus } from "./turn-status"
 export function DraftMessage({
   entry,
   onRetry,
+  onAnswerQuestion,
+  onSkipQuestion,
   className,
 }: {
   entry: DraftEntry
   onRetry: () => void
+  /**
+   * The same two writes the canonical message offers.
+   *
+   * Here as well as there because the card arrives *before* the refetch that
+   * replaces this draft: a reader watching the Turn end would otherwise have to
+   * wait for a round trip before the question they are looking at could be
+   * answered.
+   */
+  onAnswerQuestion?: (questionId: string, selectedOptionIds: string[]) => void
+  onSkipQuestion?: (questionId: string) => void
   className?: string
 }) {
   const elapsedMs = useTickingElapsed(entry.elapsedMs, entry.working)
@@ -59,6 +72,16 @@ export function DraftMessage({
           that appears as it is written, and holding it back until it parsed
           cleanly would be the buffering this whole path exists to avoid. */}
       {entry.text !== "" && <Markdown text={entry.text} animate />}
+
+      {/* The card the Turn ended by asking for, in the same place the canonical
+          message draws it, so the swap moves nothing on screen. */}
+      {entry.question !== null && (
+        <QuestionCard
+          question={entry.question}
+          onAnswer={onAnswerQuestion}
+          onSkip={onSkipQuestion}
+        />
+      )}
 
       <TurnStatus
         phase={entry.phase}

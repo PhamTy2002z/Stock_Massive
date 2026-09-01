@@ -988,9 +988,8 @@ async def test_a_tool_that_failed_settles_as_an_error_and_the_turn_goes_on() -> 
 async def test_a_call_a_permission_rule_refused_is_denied_and_not_an_error() -> None:
     """A closed route and a broken tool are opposite things to be told.
 
-    Only one of them is worth asking again, and the reason code does not reach
-    the rendered channel at all (``events.TOOL_CALL_FIELDS`` carries no
-    ``error``), so the status is where the surface has to learn which it was.
+    Only one of them is worth asking again, so the status is what the surface
+    draws the row from and the code beside it is how it names the refusal.
     """
     publisher = RecordingPublisher()
     registry.register(

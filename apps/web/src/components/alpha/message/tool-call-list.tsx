@@ -3,7 +3,7 @@
 import { AlertCircle, Check, Loader2 } from "lucide-react"
 
 import { TOOL_CALL_COPY, toolCallErrorLabel } from "@/lib/alpha-desk/copy"
-import type { ToolCall } from "@/lib/alpha-desk/types"
+import { toolCallFailed, toolCallWaiting, type ToolCall } from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
 
 /**
@@ -38,10 +38,10 @@ export function ToolCallList({
     >
       {calls.map((call) => (
         <li key={call.id} className="flex items-center gap-2">
-          <StatusIcon status={call.status} />
+          <StatusIcon call={call} />
           <span className="min-w-0 flex-1 truncate">{call.summary}</span>
-          <span className={cn("shrink-0 text-micro", call.status === "error" && "text-destructive")}>
-            {call.status === "error"
+          <span className={cn("shrink-0 text-micro", toolCallFailed(call) && "text-destructive")}>
+            {toolCallFailed(call)
               ? toolCallErrorLabel(call.error)
               : TOOL_CALL_COPY[call.status]}
           </span>
@@ -51,11 +51,19 @@ export function ToolCallList({
   )
 }
 
-function StatusIcon({ status }: { status: ToolCall["status"] }) {
-  if (status === "running") {
+/**
+ * The mark beside one call: still out, came back, or came back with nothing.
+ *
+ * Three icons for five statuses, because the reader is being told which of the
+ * three happened. Which *kind* of failure it was, and which kind of wait, is the
+ * word beside it — a second glyph for a call refused by a permission rule would
+ * be a distinction drawn twice and read once.
+ */
+function StatusIcon({ call }: { call: ToolCall }) {
+  if (toolCallWaiting(call)) {
     return <Loader2 className="size-3 shrink-0 animate-spin motion-reduce:animate-none" />
   }
-  if (status === "error") {
+  if (toolCallFailed(call)) {
     return <AlertCircle className="size-3 shrink-0 text-destructive" />
   }
   return <Check className="size-3 shrink-0" />

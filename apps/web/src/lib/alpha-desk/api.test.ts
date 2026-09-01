@@ -20,9 +20,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AlphaRefusalError } from "@/lib/alpha"
 
 import {
+  answerQuestion,
   attachmentUrl,
   createTurn,
   newTurnId,
+  skipQuestion,
   turnStreamUrl,
   uploadAttachment,
 } from "./api"
@@ -210,6 +212,63 @@ describe("putting one file up", () => {
     await expect(
       uploadAttachment(new File(["abc"], "a.png", { type: "image/png" })),
     ).rejects.toMatchObject({ reason: "file_too_large" })
+  })
+})
+
+describe("resolving one question card", () => {
+  const settled = { id: "q-1", state: "answered", selected_option_ids: ["hold"], resolved_at: null }
+
+  it("posts the chosen ids as a list, whatever the card offered", async () => {
+    // A list even for a single choice: `multi_select` is a property of the
+    // question, so one request shape covers both kinds.
+    fetchMock.mockResolvedValue(json(settled))
+
+    const resolved = await answerQuestion("q-1", ["hold"])
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe("/api/alpha-desk/questions/q-1/answer")
+    expect(init.method).toBe("POST")
+    expect(sentBody()).toEqual({ selected_option_ids: ["hold"] })
+    expect(resolved.state).toBe("answered")
+  })
+
+  it("sends a skip with no body, because a skip carries no choice", async () => {
+    fetchMock.mockResolvedValue(json({ ...settled, state: "skipped", selected_option_ids: null }))
+
+    await skipQuestion("q-1")
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe("/api/alpha-desk/questions/q-1/skip")
+    expect(init.method).toBe("POST")
+    expect(init.body).toBeUndefined()
+  })
+
+  it("escapes the id, so a card id is never read as a path", () => {
+    fetchMock.mockResolvedValue(json(settled))
+
+    void skipQuestion("q 1/../turns")
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/alpha-desk/questions/q%201%2F..%2Fturns/skip",
+    )
+  })
+
+  it("throws a question the conversation has already left as its 409", async () => {
+    // The reader pressed a card the work has moved past. It is a refusal with a
+    // reason rather than a silent no-op, so the surface can say which.
+    fetchMock.mockResolvedValue(
+      json(
+        { detail: { reason: "question_already_resolved", message: "Đã chốt." } },
+        409,
+      ),
+    )
+
+    const refusal = (await answerQuestion("q-1", ["hold"]).catch(
+      (error: unknown) => error,
+    )) as AlphaRefusalError
+
+    expect(refusal.status).toBe(409)
+    expect(refusal.reason).toBe("question_already_resolved")
   })
 })
 

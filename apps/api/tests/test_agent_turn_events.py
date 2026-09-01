@@ -131,12 +131,36 @@ def test_a_tool_call_carries_the_contract_fields_and_never_its_arguments():
         # would be the page's own text travelling on the rendered channel under
         # a second name.
         "scan",
+        # Why the call did not answer, as a code this harness wrote. A refusal
+        # by a permission rule, an allowance of ours already spent and a tool
+        # that broke all arrive as one status, and only one of the three is
+        # worth pressing again.
+        "error",
     }
     assert event.data["summary"] == "Tìm trên web: lãi suất"
     # Widening the allowlist for the sources a reader is shown did not let the
     # arguments or the whole result through with them.
     assert "arguments" not in event.data
     assert "result_text" not in event.data
+
+
+def test_a_refused_call_carries_the_code_that_says_why_it_never_ran():
+    """A closed route and a broken tool arrive under one status.
+
+    The transcript has always carried the code; the stream carrying it too is
+    what lets a reader watching live and a reader reopening the Thread be told
+    the same thing about the same call.
+    """
+    published = publisher()
+
+    event = published.tool_call(
+        {**CALL, "status": "denied", "error": "permission_denied"}
+    )
+
+    assert event.data["status"] == "denied"
+    assert event.data["error"] == "permission_denied"
+    # And a call that simply succeeded says nothing under it.
+    assert published.tool_call({**CALL, "status": "ok"}).data["error"] is None
 
 
 def test_a_second_event_for_one_call_replaces_it_rather_than_adding_a_row():

@@ -152,7 +152,21 @@ TOOL_CALL_FIELDS = (
     # model reads. It carries pattern names and never a matched span, so nothing
     # a page wrote travels under it.
     "scan",
+    # Why the call did not answer, as the stable code this harness wrote. Never
+    # a sentence, never the tool's own message and never a page's text: the codes
+    # are a closed vocabulary of this deployment's, and the surface owns the
+    # words for them the way it already owns the words for ``terminal_reason``.
+    #
+    # On the allowlist because ``status`` alone cannot say why a call was
+    # refused. A permission rule that closed the route, an allowance of ours
+    # that was already spent and a search engine that went down are three
+    # different things to be told, and only one of the three is worth pressing
+    # again. The transcript has carried the code all along
+    # (``messages.TurnToolCall.as_wire``), so what this adds is that the live row
+    # and the stored row finally say the same thing.
+    "error",
 )
+
 
 @dataclass(frozen=True)
 class TurnEvent:

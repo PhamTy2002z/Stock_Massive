@@ -17,6 +17,7 @@ import {
   useCreateThread,
   useFlagMessage,
   useHelpfulMessage,
+  useResolveQuestion,
   useThread,
 } from "@/hooks/use-threads"
 import {
@@ -150,6 +151,14 @@ interface DeskApi {
   unflag: (messageId: number) => void
   /** Leave the positive verdict on one answer, or take it back. */
   helpful: (messageId: number, helpful: boolean) => void
+  /**
+   * Record the reader's choice on one question card, or that they declined.
+   *
+   * Neither resumes anything: the Turn that asked has ended, so this writes
+   * down what was chosen and the reply is the next question the reader sends.
+   */
+  answerQuestion: (questionId: string, selectedOptionIds: string[]) => void
+  skipQuestion: (questionId: string) => void
   dismissRefusal: () => void
   openThread: (id: string) => void
   newThread: () => void
@@ -214,6 +223,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   const createThread = useCreateThread()
   const flagging = useFlagMessage(threadId)
   const helpfulness = useHelpfulMessage(threadId)
+  const questions = useResolveQuestion(threadId)
 
   // The deep link is consumed once. Left in the URL, every later reload would
   // read as a fresh arrival and open yet another Thread.
@@ -574,6 +584,19 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     [mark, unmark],
   )
 
+  // -- the question card --------------------------------------------------
+
+  const { answer, skip } = questions
+  const onAnswerQuestion = useCallback(
+    (questionId: string, selectedOptionIds: string[]) =>
+      answer.mutate({ questionId, selectedOptionIds }),
+    [answer],
+  )
+  const onSkipQuestion = useCallback(
+    (questionId: string) => skip.mutate(questionId),
+    [skip],
+  )
+
   const openThread = useCallback(
     (id: string) => {
       setThreadId(id)
@@ -628,6 +651,8 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       flag: onFlag,
       unflag: onUnflag,
       helpful: onHelpful,
+      answerQuestion: onAnswerQuestion,
+      skipQuestion: onSkipQuestion,
       dismissRefusal,
       openThread,
       newThread,
@@ -655,6 +680,8 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       onFlag,
       onUnflag,
       onHelpful,
+      onAnswerQuestion,
+      onSkipQuestion,
       dismissRefusal,
       openThread,
       newThread,

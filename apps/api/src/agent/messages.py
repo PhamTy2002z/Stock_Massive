@@ -63,9 +63,9 @@ class ToolCallStatus(str, Enum):
     ``denied`` is a call the declaration's permission rule refused. It never
     reached a tool and never will, which is a different fact from ``error``: a
     tool that broke is worth asking again and a closed route is not. The
-    ``error`` code travels beside it in the transcript, but not on the rendered
-    channel (``events.TOOL_CALL_FIELDS`` carries no ``error``), so the status is
-    where a surface learns this.
+    ``error`` code travels beside the status on both channels — the transcript
+    and the rendered one — so a surface can say which refusal this was and not
+    only that there was one.
 
     The Tool Call Trace keeps its own four-value vocabulary
     (``alpha/models.py``): these are the states of a call as a *screen* and a

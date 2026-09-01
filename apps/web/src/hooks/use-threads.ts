@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import {
+  answerQuestion,
   clearHelpful,
   createThread,
   deleteThread,
@@ -11,9 +12,11 @@ import {
   flagMessage,
   listThreads,
   markHelpful,
+  skipQuestion,
   unflagMessage,
   updateThread,
 } from "@/lib/alpha-desk/api"
+import { QUESTION_COPY } from "@/lib/alpha-desk/copy"
 import type {
   FlagReason,
   MessageFlag,
@@ -290,4 +293,57 @@ export function useHelpfulMessage(threadId: string | null) {
   })
 
   return { mark, unmark }
+}
+
+/**
+ * Answer one question card, or skip it.
+ *
+ * The Thread is invalidated rather than patched, which is the difference from
+ * the two verdicts above. A flag lives in two columns the response hands back,
+ * so writing them into the cache is exact; a question's outcome lives on a row
+ * of its own and reaches the client *merged into the message* the card was
+ * stored on — so the transcript is where it becomes visible, and a refetch is
+ * the honest way to learn it.
+ *
+ * **Not optimistic**, for the reason nothing else on this surface is: a choice
+ * that appeared instantly and then vanished on a `409` would tell the reader
+ * their answer was recorded when the work had already gone another way.
+ */
+export function useResolveQuestion(threadId: string | null) {
+  const queryClient = useQueryClient()
+
+  function refetchThread(): void {
+    if (threadId === null) return
+    void queryClient.invalidateQueries({ queryKey: queryKeys.thread(threadId) })
+  }
+
+  const answer = useMutation({
+    mutationFn: ({
+      questionId,
+      selectedOptionIds,
+    }: {
+      questionId: string
+      selectedOptionIds: string[]
+    }) => answerQuestion(questionId, selectedOptionIds),
+    onSuccess: refetchThread,
+    // A card that could not be resolved stays exactly as it was, pressable
+    // again. The reader is told by the row not moving; a settled question that
+    // answers `409` is one the conversation has already left behind, and the
+    // refetch is what draws it in the state it is actually in.
+    onError: () => {
+      toast.error(QUESTION_COPY.failed)
+      refetchThread()
+    },
+  })
+
+  const skip = useMutation({
+    mutationFn: (questionId: string) => skipQuestion(questionId),
+    onSuccess: refetchThread,
+    onError: () => {
+      toast.error(QUESTION_COPY.failed)
+      refetchThread()
+    },
+  })
+
+  return { answer, skip }
 }

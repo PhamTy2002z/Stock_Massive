@@ -223,6 +223,45 @@ describe("tool calls", () => {
     expect(call.results[0].source).toBe("theguardian.com")
   })
 
+  it("keeps a call written down before its effect ran as the pending it is", () => {
+    // `pending` and `running` are both calls that have not come back, and the
+    // surface draws them alike — but only one of them says the intent was
+    // checkpointed before anything ran, so the status is kept as it arrived.
+    const state = apply(
+      started(),
+      event("tool.call", 1, {
+        id: "a",
+        name: "remember_fact",
+        status: "pending",
+        summary: "Ghi lại: STB",
+      }),
+      event("tool.call", 2, {
+        id: "a",
+        name: "remember_fact",
+        status: "ok",
+        summary: "Ghi lại: STB",
+      }),
+    )
+    expect(state.toolCalls.map((call) => call.status)).toEqual(["ok"])
+  })
+
+  it("keeps a refused call as denied, with the code that says why", () => {
+    // Not folded into `error`: a permission rule that closed the route is the
+    // one failure pressing again cannot fix.
+    const state = apply(
+      started(),
+      event("tool.call", 1, {
+        id: "a",
+        name: "web_search",
+        status: "denied",
+        summary: "Tìm trên web: x",
+        error: "permission_denied",
+      }),
+    )
+    expect(state.toolCalls[0].status).toBe("denied")
+    expect(state.toolCalls[0].error).toBe("permission_denied")
+  })
+
   it("drops a result that is neither titled nor linked, rather than drawing a blank row", () => {
     const state = apply(
       started(),
@@ -264,6 +303,124 @@ describe("narration", () => {
     const state = apply(started(), event("content.delta", 1, { text: "Xong." }))
     expect(state.text).toBe("Xong.")
     expect(state.thoughts).toEqual([])
+  })
+})
+
+describe("the progress trail", () => {
+  const part = (seq: number, overrides: Record<string, unknown> = {}) =>
+    event("part.progress", seq, {
+      seq,
+      kind: "tool_round",
+      round: seq - 1,
+      payload: { calls: 1, external_used: seq },
+      at: "2026-09-01T09:00:00+00:00",
+      ...overrides,
+    })
+
+  it("keeps every part in the order the loop emitted them", () => {
+    const state = apply(
+      started(),
+      part(1, { kind: "lane_selected", round: 0, payload: { lane: "light" } }),
+      part(2, { kind: "model_attempt", payload: { status: "running" } }),
+      part(3),
+    )
+    expect(state.progress.map((entry) => entry.kind)).toEqual([
+      "lane_selected",
+      "model_attempt",
+      "tool_round",
+    ])
+    expect(state.progress.map((entry) => entry.seq)).toEqual([1, 2, 3])
+  })
+
+  it("orders the trail by the parts' own count rather than by arrival", () => {
+    // The two counts are different things: the publisher's sequence advances on
+    // every delta, and a reader reading the trail wants the parts' own order.
+    const state = apply(started(), part(1, { seq: 9 }), part(2, { seq: 4 }))
+    expect(state.progress.map((entry) => entry.seq)).toEqual([4, 9])
+  })
+
+  it("carries the payload as it arrived, without inventing a shape for it", () => {
+    const state = apply(
+      started(),
+      part(1, { kind: "recovery", payload: { action: "compress", attempt: 1, bound: 2 } }),
+    )
+    expect(state.progress[0].payload).toEqual({ action: "compress", attempt: 1, bound: 2 })
+    expect(state.progress[0].at).toBe("2026-09-01T09:00:00+00:00")
+  })
+
+  it("draws no row for a kind nobody designed one for", () => {
+    const state = apply(started(), part(1, { kind: "vibes" }))
+    expect(state.progress).toEqual([])
+    // The event still counted: the trail lost a row, not the sequence.
+    expect(state.seq).toBe(1)
+  })
+
+  it("tolerates a part carrying a key this build has never heard of", () => {
+    const state = apply(started(), part(1, { lane_hint: "deep" }))
+    expect(state.progress).toHaveLength(1)
+    expect(state.progress[0]).not.toHaveProperty("lane_hint")
+  })
+})
+
+describe("the question a Turn ends by asking", () => {
+  const card = (overrides: Record<string, unknown> = {}) => ({
+    question_id: "q-1",
+    prompt: "Bạn đang quyết định gì?",
+    options: [
+      { id: "hold", label: "Giữ", detail: null },
+      { id: "add", label: "Mua thêm", detail: "Trong 3 tháng" },
+    ],
+    multi_select: false,
+    skip_label: "Bỏ qua",
+    state: "pending",
+    selected_option_ids: null,
+    ...overrides,
+  })
+
+  it("holds the card so a reader watching live can answer it", () => {
+    const state = apply(started(), event("part.question", 1, card()))
+    expect(state.question?.question_id).toBe("q-1")
+    expect(state.question?.state).toBe("pending")
+    expect(state.question?.options.map((option) => option.label)).toEqual([
+      "Giữ",
+      "Mua thêm",
+    ])
+    // Nothing is chosen at the moment of asking, and null says so where an empty
+    // list would read as a skip.
+    expect(state.question?.selected_option_ids).toBeNull()
+  })
+
+  it("refuses a card with nothing answerable on it", () => {
+    // A card is a dead end unless there are at least two ways out of it, which
+    // is the same rule the backend applies when it builds one.
+    const state = apply(
+      started(),
+      event("part.question", 1, card({ options: [{ id: "hold", label: "Giữ" }] })),
+    )
+    expect(state.question).toBeNull()
+    expect(state.seq).toBe(1)
+  })
+
+  it("keeps the card across a reconnect, because a snapshot from a draft has none", () => {
+    // A snapshot rebuilt out of a checkpoint always says null: the outcome
+    // changes after the Turn ended, so it is read from the transcript rather
+    // than from a draft. Clearing on that would take the card off screen from
+    // the one reader who was looking at it.
+    const asked = apply(started(), event("part.question", 1, card()))
+    const state = apply(
+      asked,
+      event("turn.snapshot", 0, {
+        through_seq: 1,
+        status: "complete",
+        terminal_reason: null,
+        text: "Cần biết thêm một điều.",
+        tool_calls: [],
+        progress: [],
+        question: null,
+        message_id: 11,
+      }),
+    )
+    expect(state.question?.question_id).toBe("q-1")
   })
 })
 
@@ -310,6 +467,70 @@ describe("a snapshot", () => {
     expect(state.seq).toBe(4)
     expect(state.toolCalls).toHaveLength(1)
     expect(state.needsResync).toBe(false)
+  })
+
+  it("replaces the progress trail wholesale rather than appending to it", () => {
+    const trail = [
+      {
+        seq: 1,
+        kind: "lane_selected",
+        round: 0,
+        payload: { lane: "light", reason: "default" },
+        at: "2026-09-01T09:00:00+00:00",
+      },
+      {
+        seq: 2,
+        kind: "tool_round",
+        round: 0,
+        payload: { calls: 2, external_used: 2 },
+        at: "2026-09-01T09:00:03+00:00",
+      },
+    ]
+    const state = apply(
+      started(),
+      event("part.progress", 1, trail[0]),
+      snapshot({
+        through_seq: 4,
+        status: "running",
+        terminal_reason: null,
+        text: "một",
+        tool_calls: [],
+        progress: trail,
+        message_id: null,
+      }),
+    )
+    // Two rows and not three: the snapshot restates the trail that was
+    // published, so merging would show every step twice per reconnect.
+    expect(state.progress.map((part) => part.seq)).toEqual([1, 2])
+  })
+
+  it("hands a reader who joined after the question the card they missed", () => {
+    const state = apply(
+      started(),
+      snapshot({
+        through_seq: 5,
+        status: "complete",
+        terminal_reason: null,
+        text: "Cần biết thêm một điều.",
+        tool_calls: [],
+        progress: [],
+        question: {
+          question_id: "q-1",
+          prompt: "Bạn đang quyết định gì?",
+          options: [
+            { id: "hold", label: "Giữ" },
+            { id: "add", label: "Mua thêm" },
+          ],
+          multi_select: false,
+          skip_label: "Bỏ qua",
+          state: "pending",
+          selected_option_ids: null,
+        },
+        message_id: 9,
+      }),
+    )
+    expect(state.question?.prompt).toBe("Bạn đang quyết định gì?")
+    expect(state.phase).toBe("completed")
   })
 
   it("is applied whatever its seq says, because it restates rather than replays", () => {

@@ -199,6 +199,75 @@ describe("the tool calls a stored answer carries", () => {
   })
 })
 
+describe("the question a stored answer ended by asking", () => {
+  const card = (extra: Record<string, unknown> = {}) => ({
+    question_id: "q-1",
+    prompt: "Bạn đang quyết định gì?",
+    options: [
+      { id: "hold", label: "Giữ" },
+      { id: "add", label: "Mua thêm" },
+    ],
+    multi_select: false,
+    skip_label: "Bỏ qua",
+    ...extra,
+  })
+
+  it("reads the card with the outcome the backend merged into it", () => {
+    // The message is immutable and the outcome is not, so the transcript is
+    // where the two are put back together — and this is where the client reads
+    // the result of that.
+    const [entry] = transcript({
+      messages: [
+        withContent({
+          question: card({ state: "answered", selected_option_ids: ["add"] }),
+        }),
+      ],
+    })
+
+    expect(entry.kind === "assistant" && entry.view.question?.state).toBe("answered")
+    expect(entry.kind === "assistant" && entry.view.question?.selected_option_ids).toEqual([
+      "add",
+    ])
+  })
+
+  it("reads a card whose row is gone as superseded, not as one to answer again", () => {
+    // The backend leaves the content alone when the row behind a question has
+    // vanished. Drawing that as pending would invite an answer nothing can
+    // record.
+    const [entry] = transcript({ messages: [withContent({ question: card() })] })
+
+    expect(entry.kind === "assistant" && entry.view.question?.state).toBe("superseded")
+  })
+
+  it("reads an answer that asked nothing as carrying no card", () => {
+    const [entry] = transcript({ messages: [assistantMessage(1, "đáp")] })
+
+    expect(entry.kind === "assistant" && entry.view.question).toBeNull()
+  })
+
+  it("carries the live card on the draft, so it is answerable before the refetch", () => {
+    const [entry] = transcript({
+      messages: [],
+      live: live({
+        question: {
+          question_id: "q-1",
+          prompt: "Bạn đang quyết định gì?",
+          options: [
+            { id: "hold", label: "Giữ", detail: null },
+            { id: "add", label: "Mua thêm", detail: null },
+          ],
+          multi_select: false,
+          skip_label: "Bỏ qua",
+          state: "pending",
+          selected_option_ids: null,
+        },
+      }),
+    })
+
+    expect(entry.kind === "draft" && entry.question?.state).toBe("pending")
+  })
+})
+
 describe("whether a stored answer is whole", () => {
   it("reads as complete when the message says nothing about it", () => {
     const [entry] = transcript({ messages: [assistantMessage(1, "đáp")] })
