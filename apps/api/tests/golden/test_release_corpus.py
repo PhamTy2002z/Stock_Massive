@@ -10,6 +10,8 @@ failure mode both previous eval batteries died of.
 from __future__ import annotations
 
 import json
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -120,25 +122,63 @@ def test_refusal_cases_exist_and_the_vocabulary_is_used(corpus):
     assert corpus["markers"]["refusal"] and corpus["markers"]["advice"]
 
 
-def test_ground_truth_is_declared_pending_rather_than_invented(corpus):
-    frozen = [c for c in corpus["cases"] if c["family"] == "material_claim_accuracy"]
-    assert frozen
-    for case in frozen:
+def test_every_frozen_figure_names_the_page_it_came_off(corpus):
+    """A ground-truth number with no source is a fabricated one.
+
+    The protection has not moved since the corpus was empty; only its shape
+    has. Then, the way to avoid inventing truth was to declare every case
+    pending. Now that curation has happened, the way is to demand of each value
+    what curation was supposed to produce: a number a grader can parse, the unit
+    it is in, and the URL and publication date of the page it was read off.
+
+    A case may still carry no values, and that is not a lesser state — it scores
+    ``None`` rather than a pass. What it may not do is stay silent about why:
+    the status has to say what happened, so a reader can tell work-not-done from
+    a figure no source states.
+    """
+    material = [c for c in corpus["cases"] if c["family"] == "material_claim_accuracy"]
+    assert material
+    for case in material:
         truth = case["ground_truth"]
-        # Empty on purpose until a record run exists. A value written here
-        # before anybody read a page would be a fabricated ground truth, which
-        # is worse than no ground truth at all.
-        assert truth["values"] == []
-        assert truth["status"] == "pending_record_run"
+        status = truth.get("status") or ""
+        assert status, f"{case['id']} declares no ground-truth status"
+        if not truth["values"]:
+            # Long enough to be an explanation rather than a label.
+            assert len(truth.get("note") or "") > 40, (
+                f"{case['id']} froze nothing and does not say why"
+            )
+            continue
+        for value in truth["values"]:
+            assert Decimal(str(value["value"]))
+            assert value["unit"]
+            assert str(value["source"]).startswith("https://")
+            assert value["published_at"]
+            assert Decimal(str(value["tolerance"])) >= 0
 
 
-def test_evidence_dates_are_empty_and_say_what_blocks_them(corpus):
-    """Empty is the honest state, and the note has to name the blocker.
+def test_every_curated_date_is_a_date_and_says_how_it_was_read(corpus):
+    """A date here is read off the page, and the map records how.
 
-    Filling this map by guessing dates would fabricate the very ground truth
-    ``temporal_validity`` exists to check, so the corpus carries the measurement
-    that explains the gap instead of a plausible-looking date.
+    Filling this map by guessing would fabricate the very ground truth
+    ``temporal_validity`` exists to check, so the rule is not that the map be
+    full — it is that every entry in it be a parseable date with a recorded
+    extraction method and confidence, and that the note carry the coverage
+    measurement rather than a promise.
+
+    ``evidence_dates`` stays flat because the grader reads it with ``as_date``;
+    the provenance lives in its own map so that a nested object can never turn
+    a date into something ``as_date`` refuses.
     """
     dates = corpus["evidence_dates"]
-    assert set(dates) == {"note"}
+    provenance = corpus["evidence_date_provenance"]
     assert "publication time" in dates["note"]
+    curated = {url: value for url, value in dates.items() if url != "note"}
+    assert curated, "no source is dated, so temporal_validity can only report BLIND"
+    for url, value in curated.items():
+        assert url.startswith("https://")
+        assert date.fromisoformat(str(value)[:10])
+        assert provenance[url]["method"] in {
+            "provider", "html_meta", "json_ld", "visible_text", "url_pattern"
+        }
+        assert provenance[url]["confidence"] in {"high", "medium", "low"}
+    assert set(provenance) == set(curated)

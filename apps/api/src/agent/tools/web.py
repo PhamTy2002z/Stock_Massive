@@ -39,8 +39,10 @@ the bytes were actually fetched, never with now.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import http.client
 import ipaddress
+import json
 import logging
 import math
 import re
@@ -59,6 +61,14 @@ import httpx
 from src.core.config import Settings, get_settings
 from src.core.web_lane import URL_FRESH_SECONDS, WebLane, WebUnavailable
 
+from ..evidence.source_policy import (
+    PublicationStamp,
+    SourcePolicy,
+    SourceTier,
+    canonical_url,
+    classify_source,
+    extract_publication_stamp,
+)
 from ..security import refuse_secret_egress
 from ..registry import (
     ContentTrust,
@@ -128,9 +138,28 @@ class _TextExtractor(HTMLParser):
         self.parts: list[str] = []
         self.title_parts: list[str] = []
         self._in_title = False
+        self.metadata: dict[str, list[str]] = {}
+        self.json_ld_values: list[str] = []
+        self._json_ld_depth = 0
+        self._json_ld_parts: list[str] = []
 
-    def handle_starttag(self, tag: str, _attrs: list[tuple[str, str | None]]) -> None:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         lowered = tag.lower()
+        attributes = {key.lower(): value for key, value in attrs if value is not None}
+        if lowered == "meta":
+            key = (
+                attributes.get("property")
+                or attributes.get("name")
+                or attributes.get("itemprop")
+            )
+            content = attributes.get("content")
+            if key and content:
+                self.metadata.setdefault(key.lower(), []).append(content)
+        elif lowered == "time" and attributes.get("datetime"):
+            self.metadata.setdefault("datepublished", []).append(attributes["datetime"])
+        if lowered == "script" and attributes.get("type", "").lower() == "application/ld+json":
+            self._json_ld_depth += 1
+            self._json_ld_parts = []
         if lowered in self._SUPPRESSED:
             self._suppression_depth += 1
         elif lowered == "title":
@@ -138,16 +167,42 @@ class _TextExtractor(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         lowered = tag.lower()
+        if lowered == "script" and self._json_ld_depth:
+            self._json_ld_depth -= 1
+            self._collect_json_ld("".join(self._json_ld_parts))
+            self._json_ld_parts = []
         if lowered in self._SUPPRESSED and self._suppression_depth:
             self._suppression_depth -= 1
         elif lowered == "title":
             self._in_title = False
 
     def handle_data(self, data: str) -> None:
+        if self._json_ld_depth:
+            self._json_ld_parts.append(data[:64_000])
         if self._suppression_depth == 0:
             self.parts.append(data)
             if self._in_title:
                 self.title_parts.append(data)
+
+    def _collect_json_ld(self, raw: str) -> None:
+        try:
+            value = json.loads(raw[:64_000])
+        except (json.JSONDecodeError, TypeError):
+            return
+
+        def walk(item: Any) -> None:
+            if isinstance(item, Mapping):
+                for key, child in item.items():
+                    if str(key).lower() in {"datepublished", "datecreated"}:
+                        if isinstance(child, (str, int, float)):
+                            self.json_ld_values.append(str(child))
+                    elif isinstance(child, (Mapping, list, tuple)):
+                        walk(child)
+            elif isinstance(item, (list, tuple)):
+                for child in item:
+                    walk(child)
+
+        walk(value)
 
 
 def visible_text(value: Any, limit: int) -> str:
@@ -166,6 +221,50 @@ def extract_page(value: Any, limit: int) -> tuple[str, str]:
     title = re.sub(r"\s+", " ", " ".join(parser.title_parts)).strip()[:240]
     body = re.sub(r"\s+", " ", " ".join(parser.parts)).strip()[:limit]
     return title, body
+
+
+def extract_page_details(
+    value: Any, limit: int
+) -> tuple[str, str, Mapping[str, tuple[str, ...]], tuple[str, ...]]:
+    """Visible page text plus bounded publication metadata for evidence policy."""
+
+    parser = _TextExtractor()
+    parser.feed("" if value is None else str(value))
+    parser.close()
+    title = re.sub(r"\s+", " ", " ".join(parser.title_parts)).strip()[:240]
+    body = re.sub(r"\s+", " ", " ".join(parser.parts)).strip()[:limit]
+    metadata = {key: tuple(values[:8]) for key, values in parser.metadata.items()}
+    return title, body, metadata, tuple(parser.json_ld_values[:16])
+
+
+def _source_metadata(
+    *,
+    url: str,
+    publisher: str | None,
+    stamp: PublicationStamp,
+    policy: SourcePolicy | None = None,
+    snippet_only: bool = False,
+) -> dict[str, Any]:
+    """The additive typed evidence identity carried by both web tools."""
+
+    source_policy = policy or classify_source(url)
+    try:
+        identity_url: str | None = canonical_url(url)
+    except ValueError:
+        identity_url = None
+    return {
+        "canonical_url": identity_url,
+        "publisher": publisher or urlsplit(url).hostname or "web",
+        "source_class": source_policy.source_class.value,
+        "source_tier": source_policy.tier.value,
+        "tos_risk": source_policy.tos_risk.value,
+        "material_min_publishers": (
+            None if snippet_only else source_policy.material_min_publishers
+        ),
+        "durable_evidence": source_policy.durable_evidence and not snippet_only,
+        "evidence_tier": SourceTier.SNIPPET.value if snippet_only else source_policy.tier.value,
+        "publication": stamp.to_payload(),
+    }
 
 
 def _terms(looking_for: str) -> tuple[str, ...]:
@@ -698,6 +797,21 @@ class WebTools:
             "page_chars": len(body),
             "source": page.get("source"),
             "retrieved_at": page.get("retrieved_at"),
+            "content_sha256": page.get("content_sha256"),
+            **{
+                key: page.get(key)
+                for key in (
+                    "canonical_url",
+                    "publisher",
+                    "source_class",
+                    "source_tier",
+                    "tos_risk",
+                    "material_min_publishers",
+                    "durable_evidence",
+                    "evidence_tier",
+                    "publication",
+                )
+            },
             "stale": read.stale,
             "age_seconds": round(read.age_seconds, 1),
             # Stated on both paths rather than only on the one it is true of.
@@ -761,8 +875,20 @@ class WebTools:
         if not whole_page and str(recorded.get("looking_for") or "") != looking_for:
             return None
         passages = select_passages(body, looking_for, MAX_PAGE_TEXT_CHARS)
+        record_url = str(recorded.get("url") or initial)
+        publication = recorded.get("publication")
+        if not isinstance(publication, Mapping):
+            publication = extract_publication_stamp(
+                visible_text=body,
+                url=record_url,
+            ).to_payload()
+        derived = _source_metadata(
+            url=record_url,
+            publisher=str(recorded.get("publisher") or recorded.get("source") or ""),
+            stamp=extract_publication_stamp(),
+        )
         return {
-            "url": str(recorded.get("url") or initial),
+            "url": record_url,
             "title": recorded.get("title"),
             "content": PASSAGE_GAP.join(passages),
             "looking_for": looking_for or None,
@@ -770,6 +896,25 @@ class WebTools:
             "page_chars": len(body),
             "source": recorded.get("source"),
             "retrieved_at": retrieved_at,
+            "content_sha256": recorded.get("content_sha256") or (
+                hashlib.sha256(body.encode("utf-8")).hexdigest()
+                if whole_page
+                else None
+            ),
+            **{
+                key: recorded.get(key, derived.get(key))
+                for key in (
+                    "canonical_url",
+                    "publisher",
+                    "source_class",
+                    "source_tier",
+                    "tos_risk",
+                    "material_min_publishers",
+                    "durable_evidence",
+                    "evidence_tier",
+                )
+            },
+            "publication": dict(publication),
             "stale": age_seconds > URL_FRESH_SECONDS,
             "age_seconds": round(age_seconds, 1),
             "from_record": True,
@@ -806,13 +951,31 @@ class WebTools:
             # The whole visible text, not the first ``MAX_PAGE_TEXT_CHARS`` of
             # it: what this returns is what the lane stores, and the cut belongs
             # to the call that asked the question, not to the page.
-            title, content = extract_page(html, self._settings.web_fetch_max_bytes)
+            title, content, metadata, json_ld_values = extract_page_details(
+                html, self._settings.web_fetch_max_bytes
+            )
+            stamp = extract_publication_stamp(
+                html_metadata=metadata,
+                json_ld_values=json_ld_values,
+                visible_text=content,
+                url=current,
+            )
+            publisher_values = metadata.get("og:site_name", ()) or metadata.get(
+                "application-name", ()
+            )
+            publisher = (
+                str(publisher_values[0]).strip()
+                if publisher_values and str(publisher_values[0]).strip()
+                else urlsplit(current).hostname or current
+            )
             return {
                 "url": current,
                 "title": title,
                 "content": content,
                 "source": urlsplit(current).hostname or current,
                 "retrieved_at": self._now().astimezone(timezone.utc).isoformat(),
+                "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                **_source_metadata(url=current, publisher=publisher, stamp=stamp),
             }
         raise ValueError("the URL exceeded the redirect limit")
 
@@ -861,6 +1024,12 @@ class WebTools:
         """
         url = str(raw.get("url") or "")
         score = raw.get("score")
+        stamp = extract_publication_stamp(
+            provider_values=(raw.get("published_date"), raw.get("published_at")),
+            url=url,
+        )
+        policy = classify_source(url)
+        publisher = urlsplit(url).hostname or str(raw.get("source") or "web")
         return {
             "rank": rank,
             "title": visible_text(raw.get("title"), 240),
@@ -868,7 +1037,14 @@ class WebTools:
             "snippet": visible_text(raw.get("content", raw.get("snippet")), MAX_SNIPPET_CHARS),
             "published_at": raw.get("published_date") or raw.get("published_at"),
             "relevance": round(float(score), 4) if isinstance(score, (int, float)) else None,
-            "source": urlsplit(url).hostname or str(raw.get("source") or "web"),
+            "source": publisher,
+            **_source_metadata(
+                url=url,
+                publisher=publisher,
+                stamp=stamp,
+                policy=policy,
+                snippet_only=True,
+            ),
         }
 
 
@@ -889,6 +1065,7 @@ __all__ = [
     "WebTools",
     "capped_body",
     "extract_page",
+    "extract_page_details",
     "register_web_tools",
     "validate_public_url",
     "visible_text",

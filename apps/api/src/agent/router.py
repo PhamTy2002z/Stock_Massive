@@ -279,6 +279,11 @@ def history_of(messages: Sequence[MessageRecord]) -> tuple[TranscriptTurn, ...]:
                         for call in record.content.get("tool_calls") or ()
                         if isinstance(call, Mapping) and call.get("name")
                     ),
+                    # The key is written only by a Turn that asked, so its
+                    # presence is the whole test — a message from before cards
+                    # existed reads as a Turn that did not ask, not as one whose
+                    # asking was lost.
+                    asked=bool(record.content.get("question")),
                 )
     return tuple(turns)
 

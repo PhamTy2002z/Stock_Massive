@@ -60,6 +60,8 @@ from .events import (
     snapshot_from_draft,
     terminal_event_for,
 )
+from src.core.llm.protocol import Usage
+
 from .lanes import LIGHT, DEFAULT_REASON, LaneProfile, route_reason
 from .loop import (
     TurnAttachment,
@@ -604,10 +606,22 @@ class TurnService:
 
 
     async def _finish(self, running: RunningTurn, outcome: TurnOutcome) -> TurnRecord:
-        """The one terminal transaction, then the terminal event."""
+        """The one terminal transaction, then the terminal event.
+
+        A Turn that ended by asking settles through here like any other, and the
+        only differences are the three ``settle_with_question`` documents: the
+        card rides on the message, the ``agent_question`` row is written in the
+        same transaction, and the question is published before the terminal so
+        the client refetching on the terminal cannot race the row.
+
+        It ends ``complete`` with no terminal reason for the same reason: asking
+        is a way of finishing, not a way of failing, and a Turn that asked keeps
+        the whole trail — its calls, its passes, its prose — that got it there.
+        """
         status, terminal_reason = _terminal_state(running, outcome)
         text = outcome.text or ""
         calls = [call.as_wire() for call in outcome.tool_calls]
+        question = outcome.question
         message = (
             assistant_message(
                 text=text,
@@ -616,9 +630,13 @@ class TurnService:
                 tool_calls=calls,
                 progress=outcome.progress,
                 status=status,
+                question=question,
                 elapsed_ms=outcome.elapsed_ms,
             )
-            if text
+            # Written whenever there is prose *or* a card: the card is the
+            # content, so the transcript's empty-bubble rule does not apply to
+            # it, and the question row needs a message to be anchored to.
+            if text or question is not None
             else None
         )
         record = await self._store.finish_turn(
@@ -626,6 +644,7 @@ class TurnService:
             status=status,
             terminal_reason=terminal_reason,
             message=message,
+            question=question,
             draft=draft_content(
                 TurnDraft(
                     text=outcome.text,
@@ -634,11 +653,16 @@ class TurnService:
                     progress=outcome.progress,
                 )
             ),
-            last_event_seq=running.publisher.next_seq,
+            # Two events follow this commit when there is a card — the question,
+            # then the terminal — so the sequence persisted is the terminal's.
+            last_event_seq=running.publisher.next_seq + (1 if question else 0),
+            claim_ledger=outcome.claim_ledger,
         )
         data: dict[str, Any] = {"message_id": record.response_message_id}
+        if question is not None:
+            running.publisher.question(question, state=QUESTION_PENDING)
         running.publisher.terminal(
-            terminal_event_for(status, has_content=bool(text)),
+            terminal_event_for(status, has_content=bool(text) or question is not None),
             status=status,
             terminal_reason=terminal_reason,
             data=data,
@@ -730,52 +754,40 @@ class TurnService:
         anybody has to keep alive between them, nothing to time out, and nothing
         lost if the reader never taps the card at all.
 
-        Three writes, in one order that matters. The terminal transaction writes
-        the assistant message carrying the part *and* the ``agent_question`` row
-        at ``pending`` together — a card a reader can tap with no row behind it
-        would take an answer nothing could record. Then the question is published,
-        so a reader watching live sees the card without refetching the Thread.
-        Then the terminal event, last, because the client refetches the transcript
-        when that arrives and must not race the row it is about to read.
+        Three writes, in one order that matters, and they happen in ``_finish``
+        rather than here. The terminal transaction writes the assistant message
+        carrying the part *and* the ``agent_question`` row at ``pending``
+        together — a card a reader can tap with no row behind it would take an
+        answer nothing could record. Then the question is published, so a reader
+        watching live sees the card without refetching the Thread. Then the
+        terminal event, last, because the client refetches the transcript when
+        that arrives and must not race the row it is about to read.
 
-        **Nothing in production calls this yet, and that is deliberate.** Whether
-        to ask is a planning decision this phase does not make; what is settled
-        here is the contract — the shape, the persistence, the three outcomes and
-        the replay — so the decision can be wired to it later without touching
-        the lifecycle again. Its callers today are the tests that hold that
-        contract in place.
+        Production asks by returning a question on the outcome; this settles the
+        same Turn from a caller that has the part in hand. Both end up in the one
+        terminal transaction, because a second way to write a question terminal
+        would be a second place for that order to be got wrong.
         """
-        part_wire = question_part.as_wire()
-        # Written even when the Turn said nothing in prose: the card *is* the
-        # content, so the transcript's empty-bubble rule does not apply, and the
-        # question row needs a message to be anchored to.
-        message = assistant_message(
-            text=text,
-            status=TURN_COMPLETE,
-            question=part_wire,
-            elapsed_ms=running.publisher.elapsed_ms,
+        draft = running.draft
+        return await self._finish(
+            running,
+            TurnOutcome(
+                status=TurnStatus.COMPLETE,
+                terminal_reason=None,
+                text=text,
+                # Whatever the Turn had already reached is what it keeps: asking
+                # adds a terminal and takes nothing away from the trail that got
+                # there.
+                rounds_used=0 if draft is None else draft.rounds_used,
+                rounds_exhausted=False,
+                tool_calls=() if draft is None else draft.tool_calls,
+                usage=Usage(),
+                thoughts=() if draft is None else draft.thoughts,
+                progress=() if draft is None else draft.progress,
+                elapsed_ms=running.publisher.elapsed_ms,
+                question=question_part.as_wire(),
+            ),
         )
-        record = await self._store.finish_turn(
-            running.turn.id,
-            status=TURN_COMPLETE,
-            terminal_reason=None,
-            message=message,
-            question=part_wire,
-            # Two events follow this commit — the question, then the terminal —
-            # so the sequence persisted is the terminal's, one past the next.
-            # ``_finish`` needs only ``next_seq`` because it publishes one.
-            last_event_seq=running.publisher.next_seq + 1,
-        )
-        # The loop's last checkpoint is left exactly as it stands: this path adds
-        # a terminal and takes nothing away from the trail that reached it.
-        running.publisher.question(part_wire, state=QUESTION_PENDING)
-        running.publisher.terminal(
-            terminal_event_for(TURN_COMPLETE, has_content=True),
-            status=TURN_COMPLETE,
-            terminal_reason=None,
-            data={"message_id": record.response_message_id},
-        )
-        return record
 
     # -- observation and cancellation -------------------------------------
 

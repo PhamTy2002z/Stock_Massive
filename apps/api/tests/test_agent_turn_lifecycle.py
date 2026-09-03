@@ -742,10 +742,16 @@ async def test_the_canonical_message_says_which_lane_answered_and_why(owner):
     # Turn was routed to it, rather than re-deriving either.
     assert trail[0]["kind"] == "lane_selected"
     assert trail[0]["payload"] == {"lane": DEEP.name, "reason": "keyword:memo"}
-    assert [part["payload"]["status"] for part in trail[1:]] == [
+    assert [
+        part["payload"]["status"]
+        for part in trail[1:]
+        if part["kind"] == "model_attempt"
+    ] == [
         "running",
         "completed",
     ]
+    assert trail[-1]["kind"] == "pipeline_pass"
+    assert trail[-1]["payload"]["outcome"] == "failed"
 
 
 # --- nothing is left waiting when a Turn ends ------------------------------
@@ -1384,10 +1390,11 @@ def card(**overrides) -> QuestionPart:
 async def committed_turn(owner: int, thread_id: uuid.UUID) -> RunningTurn:
     """A Turn committed and held the way the service holds one, and nothing run.
 
-    ``settle_with_question`` is a seam for the planning that decides to ask, and
-    no production path reaches it in this build — so the Turn is created and then
-    settled directly, with no loop in between. What is under test is the terminal
-    itself: one transaction, two events, and the order they happen in.
+    ``settle_with_question`` settles a Turn from a caller holding the part, and
+    it ends in the same terminal transaction the deep lane's own asking does — so
+    the Turn is created and then settled directly, with no loop in between. What
+    is under test is the terminal itself: one transaction, two events, and the
+    order they happen in.
     """
     creation = await store().create_turn(
         user_id=owner,

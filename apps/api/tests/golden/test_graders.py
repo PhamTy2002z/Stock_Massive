@@ -333,3 +333,63 @@ def test_no_grader_branches_on_a_case_id(grader):
     first = grader(case(id="alpha"), CORPUS, RUN)
     second = grader(case(id="omega"), CORPUS, RUN)
     assert (first.passed, first.value) == (second.passed, second.value)
+
+
+def test_budget_holds_a_deep_turn_to_the_deep_ceiling_not_the_light_one():
+    """A deep Turn reading widely is the lane working, not the lane breaching.
+
+    Measured on the first Phase 6 deep case: 19 dispatched external calls, which
+    is inside the deep lane's cap of 20 and well over the light lane's 7. Graded
+    against one flat pair it failed a *hard* dimension for doing exactly what it
+    was configured to do.
+    """
+    from src.agent.lanes import DEEP, LIGHT
+
+    from golden.graders import grade_budget
+
+    limits = {
+        "MAX_TOOL_ROUNDS": LIGHT.max_tool_rounds,
+        "MAX_EXTERNAL_TOOL_CALLS": LIGHT.max_external_calls,
+        "lanes": {
+            lane.name: {
+                "max_tool_rounds": lane.max_tool_rounds,
+                "max_external_calls": lane.max_external_calls,
+                "deadline_seconds": lane.deadline_seconds,
+            }
+            for lane in (LIGHT, DEEP)
+        },
+    }
+    calls = [
+        {"kind": "external", "round": index % DEEP.max_tool_rounds, "status": "ok",
+         "result_chars": 100}
+        for index in range(LIGHT.max_external_calls + 2)
+    ]
+    deep_case = {
+        "id": "deep", "trial": 1,
+        "question": "Kiểm chứng luận điểm mua HPG giúp tôi",
+        "tool_calls": calls, "cost": {"micro_usd": 1000},
+    }
+    light_case = {**deep_case, "id": "light", "question": "VN-Index bao nhiêu điểm?"}
+
+    assert grade_budget(deep_case, {}, {"runtime_constants": limits}).passed
+    # The same call count on a light question is still a breach, and the message
+    # names which lane's ceiling it broke.
+    light = grade_budget(light_case, {}, {"runtime_constants": limits})
+    assert not light.passed
+    assert "light" in light.detail
+
+
+def test_budget_falls_back_to_the_flat_pair_for_an_artifact_without_lanes():
+    """An artifact recorded before lanes were written down still grades."""
+    from golden.graders import grade_budget
+
+    limits = {"MAX_TOOL_ROUNDS": 4, "MAX_EXTERNAL_TOOL_CALLS": 7}
+    case = {
+        "id": "old", "trial": 1, "question": "VN-Index bao nhiêu điểm?",
+        "tool_calls": [
+            {"kind": "external", "round": 0, "status": "ok", "result_chars": 10}
+        ],
+        "cost": {"micro_usd": 500},
+    }
+
+    assert grade_budget(case, {}, {"runtime_constants": limits}).passed

@@ -83,6 +83,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
 import time
 import uuid
@@ -147,6 +148,28 @@ from .executor import (
 )
 from .executor import ToolCall as ExecutorToolCall
 from .executor import ToolResult as ExecutorToolResult
+from .evidence import ClaimLedger, render_claim_ledger, validate_claim_ledger
+from .evidence.pipeline import (
+    COUNTER_TOOL_ROUND_LIMIT,
+    DRAFT_FORMAT,
+    PLANNER_NOTE,
+    RESEARCH_NOTE,
+    RESEARCH_TOOL_ROUND_LIMIT,
+    VERIFIER_FORMAT,
+    PipelineStage,
+    ResearchDraft,
+    candidate_ledger,
+    counter_note,
+    draft_recovery_messages,
+    elicitation_part,
+    evidence_from_calls,
+    failed_ledger,
+    parse_research_draft,
+    public_cache_payloads,
+    question_prose,
+    unasked_assumption,
+    verifier_messages,
+)
 from .guardrails import TurnGuardrails
 from .lanes import DEEP, DEFAULT_REASON, LIGHT, LaneProfile
 from .parts import (
@@ -159,6 +182,7 @@ from .parts import (
     RECOVERY_LOWER_OUTPUT_CAP,
     ProgressKind,
     ProgressPart,
+    QuestionPart,
     progress_payload,
     wire_parts,
 )
@@ -195,7 +219,12 @@ from .messages import (
 )
 from .prompt import RuntimeContext, cache_key, prefix as prompt_prefix, render
 from .domain import active_pack
-from .toolsets import CHAT_TOOLSETS
+from .toolsets import CHAT_TOOLSETS, TOOLSETS
+
+#: The reads that count as having gone and looked, taken from the catalog rather
+#: than named again here: a capability added to the web bundle is a capability
+#: that scouts, and a second list would be the one that forgot to say so.
+WEB_READS = frozenset(TOOLSETS["web"]["tools"])
 
 logger = logging.getLogger(__name__)
 
@@ -827,6 +856,12 @@ class TurnOutcome:
     #: message: the transcript is where an answer's audit trail has to survive,
     #: because it is the only view a reopened Thread has.
     progress: tuple[Mapping[str, Any], ...] = ()
+    #: The checked Phase 6 truth contract. Internal until Phase 7 projects it.
+    claim_ledger: Mapping[str, Any] | None = None
+    #: The question this Turn ended by asking, in wire form, or ``None`` on
+    #: every Turn that answered. A Turn that asks is ``complete`` like any
+    #: other: the card is the content, and the reply is the next Turn.
+    question: Mapping[str, Any] | None = None
 
 
 class TurnPublisher(Protocol):
@@ -855,6 +890,8 @@ Cancelled = Callable[[], bool]
 #: How one tool call is written down. A callback rather than a store handle for
 #: the reason the checkpoint is one: a Turn never holds a database session.
 TraceWriter = Callable[[Mapping[str, Any]], Awaitable[Any] | Any]
+TrajectoryWriter = Callable[..., Awaitable[Any] | Any]
+EvidenceCacheWriter = Callable[[Mapping[str, Any]], Awaitable[Any] | Any]
 
 
 def assert_distinct_ids(calls: Sequence[ToolCall]) -> None:
@@ -947,6 +984,7 @@ class _TurnState:
     turn_id: str | None = None
     thread_id: str | None = None
     question: str = ""
+    as_of: datetime | None = None
     text: str | None = None
     #: The same prose minus the thoughts: what the *reader* is shown as the
     #: reply. Held separately rather than derived by subtracting one string from
@@ -1063,6 +1101,16 @@ class _TurnState:
     # guidance asks for — ending here would throw away evidence the reader was
     # already owed.
     tools_halted: bool = False
+    pipeline_stage: PipelineStage | None = None
+    research_draft: ResearchDraft | None = None
+    counter_draft: ResearchDraft | None = None
+    counter_started_round: int = 0
+    claim_ledger: ClaimLedger | None = None
+    #: The card this Turn ends on, when the research pass earned one. Held on
+    #: the state rather than raised, because asking is an ordinary terminal:
+    #: everything the Turn already produced — its calls, its trail, its prose —
+    #: settles with it.
+    question_part: QuestionPart | None = None
 
     def add_usage(self, usage: Usage | None) -> None:
         # ``None`` usage is not zero usage: a provider that supplied no evidence
@@ -1134,6 +1182,8 @@ class AgentLoop:
         checkpoint: Checkpoint | None = None,
         publisher: TurnPublisher | None = None,
         trace: TraceWriter | None = None,
+        trajectory: TrajectoryWriter | None = None,
+        evidence_cache: EvidenceCacheWriter | None = None,
         call_timeout_seconds: float = LLM_CALL_TIMEOUT_SECONDS,
         tool_timeout_seconds: float = TOOL_TIMEOUT_SECONDS,
         deadline_seconds: float | None = None,
@@ -1160,6 +1210,8 @@ class AgentLoop:
         self._checkpoint = checkpoint
         self._publisher = publisher
         self._trace = trace
+        self._trajectory = trajectory
+        self._evidence_cache = evidence_cache
         self._call_timeout = call_timeout_seconds
         self._tool_timeout = tool_timeout_seconds
         self._deadline = (
@@ -1213,10 +1265,12 @@ class AgentLoop:
         cancelled: Cancelled,
         cancel_event: asyncio.Event | None,
     ) -> TurnOutcome:
+        turn_as_of = self._clock()
         state = _TurnState(
             turn_id=str(request.turn_id) if request.turn_id is not None else None,
             thread_id=str(request.thread_id),
             question=_asked(request.user_text),
+            as_of=turn_as_of,
             cancel_event=cancel_event,
         )
         surface = resolve_tool_surface(self._toolsets)
@@ -1234,7 +1288,7 @@ class AgentLoop:
                 user_id=request.user_id,
                 thread_id=_as_uuid(request.thread_id),
                 turn_id=_as_uuid(request.turn_id),
-                now=self._clock(),
+                now=turn_as_of,
             ),
             guardrails=TurnGuardrails(),
             trace=self._trace_writer(request, turn_budget),
@@ -1287,8 +1341,19 @@ class AgentLoop:
             lane=self._lane.name,
             reason=request.lane_reason,
         )
+        deep_pipeline = self._lane.name == DEEP.name
+        if deep_pipeline:
+            state.pipeline_stage = PipelineStage.PLANNING
+            state.note = PLANNER_NOTE
 
-        for round_index in range(self._lane.max_tool_rounds + 1):
+        # Deep reserves the lane's eleventh model-call slot for its clean
+        # verifier. Light keeps the exact five-call shape it had before.
+        loop_iterations = (
+            self._lane.max_tool_rounds
+            if deep_pipeline
+            else self._lane.max_tool_rounds + 1
+        )
+        for round_index in range(loop_iterations):
             if cancelled():
                 self._cancelled_attempt(state)
                 return await self._ended(
@@ -1312,8 +1377,25 @@ class AgentLoop:
             # the *tool* loop rather than the Turn — this call is the answering
             # one — but the rounds are not gone, and saying they are would be
             # false.
-            exhausted = round_index == self._lane.max_tool_rounds
-            final = exhausted or state.tools_halted
+            exhausted = (
+                not deep_pipeline and round_index == self._lane.max_tool_rounds
+            )
+            phase_final = False
+            call_tools = tools
+            tool_choice: str | None = None
+            if deep_pipeline and state.pipeline_stage is PipelineStage.PLANNING:
+                call_tools = tuple(tool for tool in tools if tool.name == "web_search")
+                tool_choice = "required"
+            elif deep_pipeline and state.pipeline_stage is PipelineStage.RESEARCH:
+                phase_final = state.tool_rounds - 1 >= RESEARCH_TOOL_ROUND_LIMIT
+            elif deep_pipeline and state.pipeline_stage is PipelineStage.COUNTEREVIDENCE:
+                phase_final = (
+                    state.tool_rounds - state.counter_started_round
+                    >= COUNTER_TOOL_ROUND_LIMIT
+                )
+            if deep_pipeline and round_index + 1 == loop_iterations:
+                phase_final = True
+            final = exhausted or state.tools_halted or phase_final
             if exhausted:
                 # Once per Turn by construction: this is the last iteration the
                 # range produces, and every branch below it returns. What the
@@ -1328,7 +1410,14 @@ class AgentLoop:
             self._attempt(state, ATTEMPT_RUNNING)
             try:
                 completion = await self._call(
-                    system_prompt, request, state, turn_budget, tools, final, exhausted
+                    system_prompt,
+                    request,
+                    state,
+                    turn_budget,
+                    call_tools,
+                    final,
+                    exhausted,
+                    tool_choice=tool_choice,
                 )
             except MalformedArguments:
                 # Counted and logged at the boundary, and never absorbed: the
@@ -1409,7 +1498,9 @@ class AgentLoop:
             state.add_usage(completion.usage)
             if completion.request_id:
                 state.request_id = completion.request_id
-            if completion.text:
+            if completion.text and not (
+                deep_pipeline and not completion.tool_calls
+            ):
                 # A round that also asked for tools was narrating, not
                 # concluding: the model said what it was about to look up. The
                 # decision is made here because this is the one place both
@@ -1435,6 +1526,18 @@ class AgentLoop:
                 return await self._ended(
                     state, TurnStatus.INCOMPLETE, ANSWER_TRUNCATED
                 )
+
+            if deep_pipeline and not completion.tool_calls:
+                finished = await self._advance_deep_pipeline(
+                    request=request,
+                    state=state,
+                    completion=completion,
+                    last_iteration=round_index + 1 == loop_iterations,
+                )
+                if finished is not None:
+                    return finished
+                await self._save(state, boundary=True)
+                continue
 
             if final or not completion.tool_calls:
                 if not state.answer:
@@ -1468,6 +1571,16 @@ class AgentLoop:
                     state, TurnStatus.COMPLETE, None, rounds_exhausted=exhausted
                 )
 
+            if (
+                deep_pipeline
+                and state.pipeline_stage is PipelineStage.PLANNING
+                and not self._valid_planner_calls(completion.tool_calls)
+            ):
+                return await self._fail_deep_pipeline(
+                    request,
+                    state,
+                    "planner_did_not_produce_four_independent_searches",
+                )
             assert_distinct_ids(completion.tool_calls)
             failed = await self._round(
                 completion.tool_calls, state, turn_budget, executor
@@ -1476,6 +1589,30 @@ class AgentLoop:
             await self._save(state, boundary=True)
             if failed is not None:
                 return await self._ended(state, TurnStatus.INCOMPLETE, failed)
+            if deep_pipeline and state.pipeline_stage is PipelineStage.PLANNING:
+                self._progress(
+                    state,
+                    ProgressKind.PIPELINE_PASS,
+                    stage=PipelineStage.PLANNING.value,
+                    outcome="completed",
+                    evidence=0,
+                    claims=0,
+                )
+                await self._record_trajectory(
+                    request,
+                    # The planning pass's own output, filed under the pass that
+                    # produced it. Filed under research it would make the audit
+                    # trail say the research pass returned four queries and no
+                    # claims, which is a different Turn to the one that ran.
+                    PipelineStage.PLANNING.value,
+                    {
+                        "plannerQueries": [
+                            dict(call.arguments) for call in completion.tool_calls
+                        ]
+                    },
+                )
+                state.pipeline_stage = PipelineStage.RESEARCH
+                state.note = RESEARCH_NOTE
 
             # The round is behind us either way: a stop that arrived during it
             # has already settled its own calls — reads given up on, a write in
@@ -1492,6 +1629,397 @@ class AgentLoop:
         raise RuntimeError(  # pragma: no cover - the range above is exhaustive
             "the round loop ended without a terminal state"
         )
+
+    # -- the deep evidence pipeline -------------------------------------
+
+    @staticmethod
+    def _valid_planner_calls(calls: Sequence[ToolCall]) -> bool:
+        if len(calls) != 4 or any(call.name != "web_search" for call in calls):
+            return False
+        queries = [
+            str(call.arguments.get("query") or "").strip().casefold()
+            if isinstance(call.arguments, Mapping)
+            else ""
+            for call in calls
+        ]
+        return all(queries) and len(set(queries)) == 4
+
+    async def _advance_deep_pipeline(
+        self,
+        *,
+        request: TurnRequest,
+        state: _TurnState,
+        completion: Completion,
+        last_iteration: bool,
+    ) -> TurnOutcome | None:
+        """Advance only after a pass actually returned its typed draft."""
+
+        assert state.as_of is not None
+        if state.pipeline_stage is PipelineStage.PLANNING:
+            return await self._fail_deep_pipeline(
+                request, state, "planner_returned_no_search_batch"
+            )
+        if state.pipeline_stage is PipelineStage.RESEARCH:
+            try:
+                draft = parse_research_draft(completion.text)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                recovered = await self._recover_draft(
+                    request, state, PipelineStage.RESEARCH.value, completion.text
+                )
+                if recovered is None:
+                    return await self._fail_deep_pipeline(
+                        request, state, "research_draft_schema_invalid"
+                    )
+                draft = recovered
+            part, elicitation = elicitation_part(
+                draft.question,
+                question_id=str(uuid.uuid4()),
+                # Scout-then-ask: the card may only be raised by a pass that
+                # already went and looked. A search that failed is not a scout,
+                # so the completed reads are counted rather than the dispatched
+                # ones.
+                scouted=any(
+                    call.status is ToolCallStatus.OK and call.name in WEB_READS
+                    for call in state.calls
+                ),
+                already_asked=any(turn.asked for turn in request.history),
+            )
+            assumption = unasked_assumption(draft.question, elicitation)
+            if assumption is not None:
+                # A question that was considered and refused becomes a printed
+                # assumption on the draft, so it travels through counterevidence
+                # and verification into the memo like every other assumption.
+                draft = replace(draft, assumptions=draft.assumptions + (assumption,))
+            state.research_draft = draft
+            self._progress(
+                state,
+                ProgressKind.PIPELINE_PASS,
+                stage=PipelineStage.RESEARCH.value,
+                outcome="asked" if part is not None else "completed",
+                evidence=len(evidence_from_calls(state.calls)),
+                claims=len(draft.claims),
+            )
+            await self._record_trajectory(
+                request, PipelineStage.RESEARCH.value, draft.to_payload()
+            )
+            if part is not None:
+                assert draft.question is not None
+                # The card is the content of this Turn, and the prose beside it
+                # is what a skip will mean. Both are written before the terminal
+                # so the transcript the next Turn reads carries the assumption
+                # whether the reader taps the card or ignores it.
+                state.question_part = part
+                self._append_text(state, question_prose(draft.question))
+                state.pipeline_stage = PipelineStage.COMPLETE
+                return await self._ended(state, TurnStatus.COMPLETE, None)
+            if last_iteration:
+                return await self._fail_deep_pipeline(
+                    request, state, "verification_budget_exhausted"
+                )
+            state.pipeline_stage = PipelineStage.COUNTEREVIDENCE
+            state.counter_started_round = state.tool_rounds
+            state.note = counter_note(draft)
+            return None
+        if state.pipeline_stage is PipelineStage.COUNTEREVIDENCE:
+            try:
+                counter = parse_research_draft(completion.text)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                recovered = await self._recover_draft(
+                    request, state, PipelineStage.COUNTEREVIDENCE.value, completion.text
+                )
+                if recovered is None:
+                    return await self._fail_deep_pipeline(
+                        request, state, "counterevidence_draft_schema_invalid"
+                    )
+                counter = recovered
+            state.counter_draft = counter
+            evidence = evidence_from_calls(state.calls)
+            self._progress(
+                state,
+                ProgressKind.PIPELINE_PASS,
+                stage=PipelineStage.COUNTEREVIDENCE.value,
+                outcome="completed",
+                evidence=len(evidence),
+                claims=len(counter.claims),
+            )
+            await self._record_trajectory(
+                request, PipelineStage.COUNTEREVIDENCE.value, counter.to_payload()
+            )
+            await self._cache_public_evidence(evidence, state.as_of)
+            state.pipeline_stage = PipelineStage.VERIFICATION
+            return await self._verify_deep_pipeline(request, state, evidence)
+        return await self._fail_deep_pipeline(
+            request, state, "pipeline_stage_invalid"
+        )
+
+    async def _recover_draft(
+        self,
+        request: TurnRequest,
+        state: _TurnState,
+        stage: str,
+        text: str | None,
+    ) -> ResearchDraft | None:
+        """One strict, tool-free retry for a pass that answered in prose.
+
+        The pass has already spent the Turn's reads on this question; what it
+        got wrong is the envelope. Discarding the whole pass over an envelope
+        would throw away the evidence to punish the formatting, so the shape is
+        asked for once more — this time enforced by the route rather than
+        requested by a note — and only then does the pipeline give up.
+
+        Charged to the same owner, deadline and envelope as every other call of
+        this Turn. ``None`` means the retry did not land, and the caller fails
+        the pipeline exactly as it would have without one.
+        """
+        if not (text or "").strip():
+            return None
+        messages = draft_recovery_messages(
+            question=request.user_text, stage=stage, text=text or ""
+        )
+        output_tokens = self._output_tokens(state)
+        spend = SpendRequest(
+            owner=CallOwner(
+                type=OwnerType.TURN_REQUEST_MESSAGE,
+                id=str(request.request_message_id),
+                user_id=request.user_id,
+            ),
+            lane=BudgetLane.TURN,
+            workload=Workload.SESSION,
+            input_tokens=sum(estimate_tokens(message) for message in messages),
+            output_tokens=output_tokens,
+            owner_output_total=self._lane.owner_output_total,
+            owner_input_total=self._lane.owner_input_total,
+        )
+        self._attempt(state, ATTEMPT_RUNNING)
+        asking = self._client.complete(
+            CompletionRequest(
+                model=self._model,
+                messages=messages,
+                tools=(),
+                tool_choice="none",
+                parallel_tool_calls=False,
+                response_format=DRAFT_FORMAT,
+                max_output_tokens=output_tokens,
+                stream=False,
+                metadata={
+                    "cache_identity": state.cache_identity,
+                    "evidence_pipeline_stage": f"{stage}_draft_recovery",
+                },
+            ),
+            spend,
+        )
+        try:
+            completion = (
+                await asyncio.wait_for(asking, self._call_timeout)
+                if state.cancel_event is None
+                else await asyncio.wait_for(
+                    self._asked(asking, state.cancel_event), self._call_timeout
+                )
+            )
+        except (
+            TurnCancelled,
+            BudgetRefusal,
+            TimeoutError,
+            LLMError,
+            ModelRefusal,
+            MalformedArguments,
+        ):
+            # Every one of these is the recovery failing, and the recovery
+            # failing is not a terminal of its own: the caller still has a
+            # pipeline failure to settle, with its own reason.
+            self._attempt(state, ATTEMPT_ERROR, terminal_reason="draft_recovery_failed")
+            return None
+        self._attempt(state, ATTEMPT_COMPLETED)
+        state.add_usage(completion.usage)
+        try:
+            return parse_research_draft(completion.text)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+
+    async def _verify_deep_pipeline(
+        self,
+        request: TurnRequest,
+        state: _TurnState,
+        evidence: Sequence[Any],
+    ) -> TurnOutcome:
+        """One strict, tool-free call over only bounded typed evidence."""
+
+        assert state.as_of is not None
+        assert state.research_draft is not None
+        assert state.counter_draft is not None
+        messages = verifier_messages(
+            question=request.user_text,
+            as_of=state.as_of,
+            research=state.research_draft,
+            counter=state.counter_draft,
+            evidence=evidence,
+        )
+        estimated_input = sum(estimate_tokens(message) for message in messages)
+        output_tokens = self._output_tokens(state)
+        spend = SpendRequest(
+            owner=CallOwner(
+                type=OwnerType.TURN_REQUEST_MESSAGE,
+                id=str(request.request_message_id),
+                user_id=request.user_id,
+            ),
+            lane=BudgetLane.TURN,
+            workload=Workload.SESSION,
+            input_tokens=estimated_input,
+            output_tokens=output_tokens,
+            owner_output_total=self._lane.owner_output_total,
+            owner_input_total=self._lane.owner_input_total,
+        )
+        self._attempt(state, ATTEMPT_RUNNING)
+        asking = self._client.complete(
+            CompletionRequest(
+                model=self._model,
+                messages=messages,
+                tools=(),
+                tool_choice="none",
+                parallel_tool_calls=False,
+                response_format=VERIFIER_FORMAT,
+                max_output_tokens=output_tokens,
+                stream=False,
+                metadata={
+                    "cache_identity": state.cache_identity,
+                    "evidence_pipeline_stage": PipelineStage.VERIFICATION.value,
+                },
+            ),
+            spend,
+        )
+        try:
+            completion = (
+                await asyncio.wait_for(asking, self._call_timeout)
+                if state.cancel_event is None
+                else await asyncio.wait_for(
+                    self._asked(asking, state.cancel_event), self._call_timeout
+                )
+            )
+        except TurnCancelled:
+            self._cancelled_attempt(state)
+            return await self._ended(
+                state, TurnStatus.CANCELLED, CANCELLED_BY_USER
+            )
+        except BudgetRefusal:
+            self._attempt(
+                state, ATTEMPT_ERROR, terminal_reason="verification_budget_exhausted"
+            )
+            return await self._fail_deep_pipeline(
+                request, state, "verification_budget_exhausted"
+            )
+        except TimeoutError:
+            self._attempt(
+                state, ATTEMPT_ERROR, terminal_reason="verification_timeout"
+            )
+            return await self._fail_deep_pipeline(
+                request, state, "verification_timeout"
+            )
+        except (LLMError, ModelRefusal, MalformedArguments) as error:
+            if isinstance(error, ModelRefusal):
+                state.add_usage(error.usage)
+            self._attempt(
+                state, ATTEMPT_ERROR, terminal_reason="verification_failed"
+            )
+            return await self._fail_deep_pipeline(
+                request, state, "verification_failed"
+            )
+
+        self._attempt(state, ATTEMPT_COMPLETED)
+        state.add_usage(completion.usage)
+        if completion.request_id:
+            state.request_id = completion.request_id
+        try:
+            candidate = candidate_ledger(
+                text=completion.text,
+                as_of=state.as_of,
+                research=state.research_draft,
+                counter=state.counter_draft,
+                evidence=evidence,
+            )
+            report = validate_claim_ledger(candidate)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return await self._fail_deep_pipeline(
+                request, state, "verification_schema_invalid"
+            )
+        state.claim_ledger = report.ledger
+        state.pipeline_stage = PipelineStage.COMPLETE
+        self._progress(
+            state,
+            ProgressKind.PIPELINE_PASS,
+            stage=PipelineStage.VERIFICATION.value,
+            outcome="passed" if report.valid else "downgraded",
+            evidence=len(report.ledger.evidence),
+            claims=len(report.ledger.claims),
+        )
+        await self._record_trajectory(
+            request, PipelineStage.VERIFICATION.value, report.to_payload()
+        )
+        self._append_text(state, render_claim_ledger(report.ledger))
+        return await self._ended(state, TurnStatus.COMPLETE, None)
+
+    async def _fail_deep_pipeline(
+        self,
+        request: TurnRequest,
+        state: _TurnState,
+        reason: str,
+    ) -> TurnOutcome:
+        assert state.as_of is not None
+        if state.claim_ledger is None:
+            state.claim_ledger = failed_ledger(
+                as_of=state.as_of,
+                reason=reason,
+                evidence=evidence_from_calls(state.calls),
+            )
+        if not state.answer:
+            self._append_text(state, render_claim_ledger(state.claim_ledger))
+        state.pipeline_stage = PipelineStage.COMPLETE
+        self._progress(
+            state,
+            ProgressKind.PIPELINE_PASS,
+            stage=PipelineStage.VERIFICATION.value,
+            outcome="failed",
+            evidence=len(state.claim_ledger.evidence),
+            claims=len(state.claim_ledger.claims),
+        )
+        await self._record_trajectory(
+            request,
+            PipelineStage.VERIFICATION.value,
+            {"outcome": "failed", "reason": reason},
+        )
+        return await self._ended(state, TurnStatus.COMPLETE, None)
+
+    async def _record_trajectory(
+        self,
+        request: TurnRequest,
+        stage: str,
+        payload: Mapping[str, Any],
+    ) -> None:
+        if self._trajectory is None or request.turn_id is None:
+            return
+        try:
+            written = self._trajectory(
+                request.user_id,
+                request.turn_id,
+                stage=stage,
+                payload=dict(payload),
+            )
+            if inspect.isawaitable(written):
+                await written
+        except Exception as error:  # noqa: BLE001 - private trace is not the answer
+            logger.warning("Could not persist %s evidence trajectory: %s", stage, error)
+
+    async def _cache_public_evidence(
+        self, evidence: Sequence[Any], as_of: datetime
+    ) -> None:
+        if self._evidence_cache is None:
+            return
+        for payload in public_cache_payloads(evidence, as_of=as_of):
+            try:
+                written = self._evidence_cache(payload)
+                if inspect.isawaitable(written):
+                    await written
+            except Exception as error:  # noqa: BLE001 - cache is an optimisation
+                logger.warning("Could not cache public evidence: %s", error)
 
     # -- the model call ---------------------------------------------------
 
@@ -1644,6 +2172,7 @@ class AgentLoop:
         tools: Sequence[ToolSchema],
         final: bool,
         reserved_tokens: int,
+        tool_choice: str | None = None,
     ) -> Completion:
         """One model call, reserved before dispatch and reconciled after.
 
@@ -1695,7 +2224,7 @@ class AgentLoop:
                 # On the ceiling the model answers from what it has: another
                 # round of tools it cannot spend would come back as a call
                 # nobody runs.
-                tool_choice="none" if final else "auto",
+                tool_choice=tool_choice or ("none" if final else "auto"),
                 parallel_tool_calls=True,
                 max_output_tokens=output_tokens,
             ),
@@ -1750,6 +2279,8 @@ class AgentLoop:
         tools: Sequence[ToolSchema],
         final: bool,
         exhausted: bool,
+        *,
+        tool_choice: str | None = None,
     ) -> Completion:
         """One round's model call, giving ground where the route says to.
 
@@ -1788,7 +2319,14 @@ class AgentLoop:
 
             try:
                 completion = await self._complete(
-                    request, messages, context, state, tools, final, reserved
+                    request,
+                    messages,
+                    context,
+                    state,
+                    tools,
+                    final,
+                    reserved,
+                    tool_choice,
                 )
             except LLMError as error:
                 action = recovery_for(error).action
@@ -2530,6 +3068,14 @@ class AgentLoop:
         outcome returned from here are the two views the rest of the system reads
         a finished Turn from.
         """
+        if self._lane.name == DEEP.name and not state.answer:
+            as_of = state.as_of or self._clock()
+            state.claim_ledger = state.claim_ledger or failed_ledger(
+                as_of=as_of,
+                reason=terminal_reason or "pipeline_incomplete",
+                evidence=evidence_from_calls(state.calls),
+            )
+            self._append_text(state, render_claim_ledger(state.claim_ledger))
         self._settle_orphans(state, status)
         await self._save(state, boundary=True)
         return TurnOutcome(
@@ -2546,6 +3092,14 @@ class AgentLoop:
             summary_needed=state.summary_needed,
             provider_request_id=state.request_id,
             progress=wire_parts(state.progress),
+            claim_ledger=(
+                state.claim_ledger.to_payload()
+                if state.claim_ledger is not None
+                else None
+            ),
+            question=(
+                None if state.question_part is None else state.question_part.as_wire()
+            ),
         )
 
     # -- clocks -----------------------------------------------------------

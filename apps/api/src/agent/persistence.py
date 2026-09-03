@@ -8,12 +8,13 @@ one short transaction; a Turn never owns a database session.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import EllipsisType
 from typing import Any, TypeVar
 
@@ -30,6 +31,9 @@ from src.alpha.models import (
     TURN_INCOMPLETE,
     TURN_RUNNING,
     AgentAttachment,
+    AgentClaimLedger,
+    AgentEvidenceCache,
+    AgentEvidenceTrajectory,
     AgentMessage,
     AgentQuestion,
     AgentThread,
@@ -38,6 +42,7 @@ from src.alpha.models import (
 )
 from src.core.database import sync_session_factory
 from .loop import CHAT_MODE
+from .evidence.source_policy import POLICY_VERSION, canonical_url
 from .messages import CALL_INTERRUPTED, settle_orphan_calls
 from .parts import (
     QUESTION_ANSWERED,
@@ -54,6 +59,20 @@ SessionFactory = Callable[[], Session]
 MessageBuilder = Callable[["TurnRecord"], Mapping[str, Any] | None]
 MAX_SEQUENCE_RETRIES = 20
 TOOL_CALL_RETENTION_DAYS = 90
+TRAJECTORY_RETENTION_DAYS = 30
+MAX_TRAJECTORY_JSON_BYTES = 256_000
+#: The passes whose own output is worth keeping as a private trace.
+#:
+#: Every stage the deep loop can record has to appear here, ``complete``
+#: excepted — it is the machine's end state and produces nothing. A stage
+#: missing from this set does not raise where anyone sees it: the loop treats a
+#: failed trajectory write as a lost trace rather than a lost answer, so the row
+#: simply never appears. ``planning`` was absent for exactly that reason and its
+#: four queries went missing from every deep Turn's trail; the test in
+#: ``test_agent_evidence_store`` now holds the two vocabularies together.
+EVIDENCE_TRAJECTORY_STAGES = frozenset(
+    {"planning", "research", "counterevidence", "verification", "elicitation"}
+)
 
 # How much of the opening question a Thread is named by. Long enough for a
 # whole short question, short enough to sit on one line of the sidebar.
@@ -252,6 +271,46 @@ class QuestionRecord:
     selected_option_ids: tuple[str, ...] | None
     created_at: datetime
     resolved_at: datetime | None
+
+
+@dataclass(frozen=True)
+class EvidenceCacheRecord:
+    id: int
+    canonical_url: str
+    content_sha256: str
+    as_of_bucket: str
+    policy_version: str
+    cache_kind: str
+    source_class: str
+    title: str
+    publisher: str
+    content: str
+    publication: Mapping[str, Any]
+    retrieved_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class EvidenceTrajectoryRecord:
+    id: int
+    turn_id: uuid.UUID
+    user_id: int
+    stage: str
+    payload: Mapping[str, Any]
+    expires_at: datetime
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class ClaimLedgerRecord:
+    id: int
+    turn_id: uuid.UUID
+    thread_id: uuid.UUID
+    message_id: int
+    user_id: int
+    policy_version: str
+    payload: Mapping[str, Any]
+    created_at: datetime
 
 
 @dataclass(frozen=True)
@@ -468,6 +527,49 @@ def _trace_record(row: AgentToolCall) -> ToolCallRecord:
         started_at=row.started_at,
         tool_call_id=row.tool_call_id,
         spilled_bytes=row.spilled_bytes,
+    )
+
+
+def _evidence_cache_record(row: AgentEvidenceCache) -> EvidenceCacheRecord:
+    return EvidenceCacheRecord(
+        id=int(row.id),
+        canonical_url=row.canonical_url,
+        content_sha256=row.content_sha256,
+        as_of_bucket=row.as_of_bucket,
+        policy_version=row.policy_version,
+        cache_kind=row.cache_kind,
+        source_class=row.source_class,
+        title=row.title,
+        publisher=row.publisher,
+        content=row.content,
+        publication=dict(row.publication or {}),
+        retrieved_at=row.retrieved_at,
+        expires_at=row.expires_at,
+    )
+
+
+def _trajectory_record(row: AgentEvidenceTrajectory) -> EvidenceTrajectoryRecord:
+    return EvidenceTrajectoryRecord(
+        id=int(row.id),
+        turn_id=row.turn_id,
+        user_id=row.user_id,
+        stage=row.stage,
+        payload=dict(row.payload or {}),
+        expires_at=row.expires_at,
+        created_at=row.created_at,
+    )
+
+
+def _claim_ledger_record(row: AgentClaimLedger) -> ClaimLedgerRecord:
+    return ClaimLedgerRecord(
+        id=int(row.id),
+        turn_id=row.turn_id,
+        thread_id=row.thread_id,
+        message_id=int(row.message_id),
+        user_id=row.user_id,
+        policy_version=row.policy_version,
+        payload=dict(row.payload or {}),
+        created_at=row.created_at,
     )
 
 
@@ -1137,6 +1239,267 @@ class AgentPersistence:
             ).scalars()
             return tuple(_trace_record(row) for row in rows)
 
+    # -- Phase 6 evidence lifetimes ---------------------------------------
+
+    async def cache_public_evidence(
+        self, payload: Mapping[str, Any]
+    ) -> EvidenceCacheRecord:
+        """Store one immutable public document under the typed cache identity.
+
+        The method has no user or Turn parameter by design: material that needs
+        either is private and belongs in ``write_evidence_trajectory``.  Search
+        snippets are refused because the source policy makes them discovery
+        material, not durable evidence.
+        """
+
+        return await asyncio.to_thread(self._cache_public_evidence, dict(payload))
+
+    def _cache_public_evidence(self, payload: Mapping[str, Any]) -> EvidenceCacheRecord:
+        normalized_url = canonical_url(str(payload.get("canonical_url") or ""))
+        content = str(payload.get("content") or "")
+        digest = str(payload.get("content_sha256") or "").lower()
+        if hashlib.sha256(content.encode("utf-8")).hexdigest() != digest:
+            raise ValueError("content_sha256 must identify the exact public content")
+        cache_kind = str(payload.get("cache_kind") or "")
+        if cache_kind == "search_snippet":
+            raise ValueError("search snippets are discovery-only and cannot be durable evidence")
+        title = str(payload.get("title") or "").strip()
+        publisher = str(payload.get("publisher") or "").strip()
+        as_of_bucket = str(payload.get("as_of_bucket") or "").strip()
+        source_class = str(payload.get("source_class") or "").strip()
+        policy_version = str(payload.get("policy_version") or POLICY_VERSION).strip()
+        retrieved_at = payload.get("retrieved_at")
+        expires_at = payload.get("expires_at")
+        if not all((content, title, publisher, as_of_bucket, source_class, policy_version)):
+            raise ValueError("public evidence cache fields cannot be blank")
+        if not isinstance(retrieved_at, datetime) or retrieved_at.utcoffset() is None:
+            raise ValueError("retrieved_at must include a timezone")
+        if not isinstance(expires_at, datetime) or expires_at.utcoffset() is None:
+            raise ValueError("expires_at must include a timezone")
+        if expires_at <= retrieved_at:
+            raise ValueError("public evidence must expire after it was retrieved")
+        publication = payload.get("publication")
+        if not isinstance(publication, Mapping):
+            raise ValueError("publication must be typed metadata")
+
+        identity = (
+            normalized_url,
+            digest,
+            as_of_bucket,
+            policy_version,
+        )
+        with self._session_factory() as session:
+            existing = session.execute(
+                select(AgentEvidenceCache).where(
+                    AgentEvidenceCache.canonical_url == identity[0],
+                    AgentEvidenceCache.content_sha256 == identity[1],
+                    AgentEvidenceCache.as_of_bucket == identity[2],
+                    AgentEvidenceCache.policy_version == identity[3],
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                return _evidence_cache_record(existing)
+            row = AgentEvidenceCache(
+                canonical_url=normalized_url,
+                content_sha256=digest,
+                as_of_bucket=as_of_bucket,
+                policy_version=policy_version,
+                cache_kind=cache_kind,
+                source_class=source_class,
+                title=title,
+                publisher=publisher,
+                content=content,
+                publication=dict(publication),
+                retrieved_at=retrieved_at,
+                expires_at=expires_at,
+            )
+            session.add(row)
+            try:
+                session.commit()
+            except IntegrityError:
+                # Two Turns may fetch the same public bytes at once.  Identity
+                # is immutable, so the row that won is exactly the result both
+                # callers meant to write.
+                session.rollback()
+                won = session.execute(
+                    select(AgentEvidenceCache).where(
+                        AgentEvidenceCache.canonical_url == identity[0],
+                        AgentEvidenceCache.content_sha256 == identity[1],
+                        AgentEvidenceCache.as_of_bucket == identity[2],
+                        AgentEvidenceCache.policy_version == identity[3],
+                    )
+                ).scalar_one()
+                return _evidence_cache_record(won)
+            return _evidence_cache_record(row)
+
+    async def read_cached_evidence(
+        self,
+        canonical: str,
+        as_of_bucket: str,
+        *,
+        policy_version: str = POLICY_VERSION,
+        now: datetime | None = None,
+    ) -> EvidenceCacheRecord | None:
+        return await asyncio.to_thread(
+            self._read_cached_evidence,
+            canonical_url(canonical),
+            as_of_bucket,
+            policy_version,
+            now or datetime.now(timezone.utc),
+        )
+
+    def _read_cached_evidence(
+        self,
+        canonical: str,
+        as_of_bucket: str,
+        policy_version: str,
+        now: datetime,
+    ) -> EvidenceCacheRecord | None:
+        if now.utcoffset() is None:
+            raise ValueError("cache read time must include a timezone")
+        with self._session_factory() as session:
+            row = session.execute(
+                select(AgentEvidenceCache)
+                .where(
+                    AgentEvidenceCache.canonical_url == canonical,
+                    AgentEvidenceCache.as_of_bucket == as_of_bucket,
+                    AgentEvidenceCache.policy_version == policy_version,
+                    AgentEvidenceCache.expires_at > now,
+                )
+                .order_by(AgentEvidenceCache.retrieved_at.desc(), AgentEvidenceCache.id.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            return None if row is None else _evidence_cache_record(row)
+
+    async def write_evidence_trajectory(
+        self,
+        user_id: int,
+        turn_id: uuid.UUID | str,
+        *,
+        stage: str,
+        payload: Mapping[str, Any],
+        now: datetime | None = None,
+    ) -> EvidenceTrajectoryRecord | None:
+        return await asyncio.to_thread(
+            self._write_evidence_trajectory,
+            user_id,
+            _uuid(turn_id),
+            stage,
+            dict(payload),
+            now or datetime.now(timezone.utc),
+        )
+
+    def _write_evidence_trajectory(
+        self,
+        user_id: int,
+        turn_id: uuid.UUID,
+        stage: str,
+        payload: Mapping[str, Any],
+        now: datetime,
+    ) -> EvidenceTrajectoryRecord | None:
+        if stage not in EVIDENCE_TRAJECTORY_STAGES:
+            raise ValueError(f"unsupported evidence trajectory stage: {stage}")
+        if now.utcoffset() is None:
+            raise ValueError("trajectory time must include a timezone")
+        encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(encoded) > MAX_TRAJECTORY_JSON_BYTES:
+            raise ValueError("evidence trajectory exceeds its 256KB bound")
+        with self._session_factory() as session:
+            if self._owned_turn(session, user_id, turn_id) is None:
+                return None
+            row = AgentEvidenceTrajectory(
+                turn_id=turn_id,
+                user_id=user_id,
+                stage=stage,
+                payload=dict(payload),
+                expires_at=now + timedelta(days=TRAJECTORY_RETENTION_DAYS),
+            )
+            session.add(row)
+            session.commit()
+            return _trajectory_record(row)
+
+    async def evidence_trajectories(
+        self, user_id: int, turn_id: uuid.UUID | str
+    ) -> tuple[EvidenceTrajectoryRecord, ...]:
+        return await asyncio.to_thread(
+            self._evidence_trajectories, user_id, _uuid(turn_id)
+        )
+
+    def _evidence_trajectories(
+        self, user_id: int, turn_id: uuid.UUID
+    ) -> tuple[EvidenceTrajectoryRecord, ...]:
+        with self._session_factory() as session:
+            rows = session.execute(
+                select(AgentEvidenceTrajectory)
+                .where(
+                    AgentEvidenceTrajectory.user_id == user_id,
+                    AgentEvidenceTrajectory.turn_id == turn_id,
+                )
+                .order_by(AgentEvidenceTrajectory.created_at, AgentEvidenceTrajectory.id)
+            ).scalars()
+            return tuple(_trajectory_record(row) for row in rows)
+
+    async def claim_ledger_for_message(
+        self, user_id: int, message_id: int
+    ) -> ClaimLedgerRecord | None:
+        return await asyncio.to_thread(
+            self._claim_ledger_for_message, user_id, message_id
+        )
+
+    def _claim_ledger_for_message(
+        self, user_id: int, message_id: int
+    ) -> ClaimLedgerRecord | None:
+        with self._session_factory() as session:
+            row = session.execute(
+                select(AgentClaimLedger).where(
+                    AgentClaimLedger.user_id == user_id,
+                    AgentClaimLedger.message_id == message_id,
+                )
+            ).scalar_one_or_none()
+            return None if row is None else _claim_ledger_record(row)
+
+    async def cleanup_expired_evidence(
+        self, *, now: datetime | None = None, limit: int = 500
+    ) -> Mapping[str, int]:
+        if limit < 1 or limit > 5_000:
+            raise ValueError("evidence cleanup limit must be between 1 and 5000")
+        return await asyncio.to_thread(
+            self._cleanup_expired_evidence,
+            now or datetime.now(timezone.utc),
+            limit,
+        )
+
+    def _cleanup_expired_evidence(self, now: datetime, limit: int) -> Mapping[str, int]:
+        if now.utcoffset() is None:
+            raise ValueError("evidence cleanup time must include a timezone")
+        with self._session_factory() as session:
+            cache_ids = tuple(
+                session.execute(
+                    select(AgentEvidenceCache.id)
+                    .where(AgentEvidenceCache.expires_at <= now)
+                    .order_by(AgentEvidenceCache.expires_at, AgentEvidenceCache.id)
+                    .limit(limit)
+                ).scalars()
+            )
+            trajectory_ids = tuple(
+                session.execute(
+                    select(AgentEvidenceTrajectory.id)
+                    .where(AgentEvidenceTrajectory.expires_at <= now)
+                    .order_by(AgentEvidenceTrajectory.expires_at, AgentEvidenceTrajectory.id)
+                    .limit(limit)
+                ).scalars()
+            )
+            if cache_ids:
+                session.execute(delete(AgentEvidenceCache).where(AgentEvidenceCache.id.in_(cache_ids)))
+            if trajectory_ids:
+                session.execute(
+                    delete(AgentEvidenceTrajectory).where(
+                        AgentEvidenceTrajectory.id.in_(trajectory_ids)
+                    )
+                )
+            session.commit()
+            return {"cache": len(cache_ids), "trajectory": len(trajectory_ids)}
+
     # -- the Turn lifecycle (#81) -----------------------------------------
 
     async def create_turn(
@@ -1390,6 +1753,7 @@ class AgentPersistence:
         draft: Mapping[str, Any] | None = None,
         last_event_seq: int | None = None,
         question: Mapping[str, Any] | None = None,
+        claim_ledger: Mapping[str, Any] | None = None,
     ) -> TurnRecord:
         """The one terminal transaction (#81).
 
@@ -1412,6 +1776,10 @@ class AgentPersistence:
             raise ValueError(
                 "a question is anchored to the assistant message that asked it"
             )
+        if claim_ledger is not None and message is None:
+            raise ValueError(
+                "a claim ledger is anchored to the assistant message it substantiates"
+            )
         normalized = tuple(dict.fromkeys(normalize_symbol(symbol) for symbol in symbols))
         return await asyncio.to_thread(
             self._finish_turn,
@@ -1423,6 +1791,7 @@ class AgentPersistence:
             None if draft is None else dict(draft),
             last_event_seq,
             None if question is None else dict(question),
+            None if claim_ledger is None else dict(claim_ledger),
         )
 
     def _finish_turn(
@@ -1435,6 +1804,7 @@ class AgentPersistence:
         draft: Mapping[str, Any] | None,
         last_event_seq: int | None,
         question: Mapping[str, Any] | None,
+        claim_ledger: Mapping[str, Any] | None,
     ) -> TurnRecord:
         def write(session: Session) -> TurnRecord:
             row = session.get(AgentTurn, turn_id)
@@ -1452,6 +1822,22 @@ class AgentPersistence:
                 if question is not None:
                     session.add(
                         _pending_question(session, row, written.id, question)
+                    )
+                if claim_ledger is not None:
+                    thread = session.execute(
+                        select(AgentThread).where(AgentThread.id == row.thread_id)
+                    ).scalar_one()
+                    session.add(
+                        AgentClaimLedger(
+                            turn_id=row.id,
+                            thread_id=row.thread_id,
+                            message_id=written.id,
+                            user_id=thread.user_id,
+                            policy_version=str(
+                                claim_ledger.get("policyVersion") or POLICY_VERSION
+                            ),
+                            payload=dict(claim_ledger),
+                        )
                     )
             if draft is not None:
                 row.draft_content = dict(draft)
@@ -1663,6 +2049,11 @@ __all__ = [
     "TURN_INCOMPLETE",
     "TURN_RUNNING",
     "AgentPersistence",
+    "ClaimLedgerRecord",
+    "EVIDENCE_TRAJECTORY_STAGES",
+    "EvidenceCacheRecord",
+    "EvidenceTrajectoryRecord",
+    "MAX_TRAJECTORY_JSON_BYTES",
     "MessageRecord",
     "QuestionAlreadyResolved",
     "QuestionOptionInvalid",
