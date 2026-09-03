@@ -180,6 +180,58 @@ async def test_a_page_read_returns_visible_text_and_the_configured_byte_cap():
 
 
 @pytest.mark.asyncio
+async def test_a_page_read_carries_typed_source_and_html_publication_metadata():
+    page = (
+        '<html><head><title>Official release</title>'
+        '<meta property="og:site_name" content="State Securities Commission">'
+        '<meta property="article:published_time" content="2026-08-20T09:30:00+07:00">'
+        '</head><body><p>Công bố chính thức.</p></body></html>'
+    ).encode()
+    tools = web.WebTools(
+        settings=settings(),
+        lane=DirectLane(),
+        download=download_returning(200, {"content-type": "text/html"}, page, seen=[]),
+        resolver=resolver_for("93.184.216.34"),
+    )
+
+    result = await tools.fetch_url(CONTEXT, {"url": "https://ssc.gov.vn/release?utm_source=x"})
+
+    assert result["canonical_url"] == "https://ssc.gov.vn/release"
+    assert result["publisher"] == "State Securities Commission"
+    assert result["source_class"] == "regulator"
+    assert result["source_tier"] == "primary"
+    assert result["tos_risk"] == "low"
+    assert result["durable_evidence"] is True
+    assert result["publication"] == {
+        "publishedAt": "2026-08-20T09:30:00+07:00",
+        "publicationMethod": "html_meta",
+        "publicationConfidence": "high",
+        "publicationPrecision": "instant",
+    }
+
+
+@pytest.mark.asyncio
+async def test_json_ld_publication_is_extracted_but_script_is_not_visible_evidence():
+    page = (
+        '<html><head><script type="application/ld+json">'
+        '{"@type":"NewsArticle","datePublished":"2026-08-19"}'
+        '</script></head><body><p>Nội dung bài viết.</p></body></html>'
+    ).encode()
+    tools = web.WebTools(
+        settings=settings(),
+        lane=DirectLane(),
+        download=download_returning(200, {"content-type": "text/html"}, page, seen=[]),
+        resolver=resolver_for("93.184.216.34"),
+    )
+
+    result = await tools.fetch_url(CONTEXT, {"url": "https://news.example/story"})
+
+    assert "datePublished" not in result["content"]
+    assert result["publication"]["publishedAt"] == "2026-08-19T00:00:00+07:00"
+    assert result["publication"]["publicationMethod"] == "json_ld"
+
+
+@pytest.mark.asyncio
 async def test_a_redirect_is_revalidated_and_cannot_reach_a_private_address():
     tools = web.WebTools(
         settings=settings(),
@@ -351,6 +403,31 @@ async def test_the_publication_date_still_comes_through_untouched():
     results = (await tools.web_search(CONTEXT, {"query": "q"}))["results"]
 
     assert results[0]["published_at"] == "2026-08-20"
+
+
+@pytest.mark.asyncio
+async def test_search_result_is_typed_as_discovery_only_even_for_a_primary_domain():
+    raw = [
+        {
+            "title": "A",
+            "url": "https://hnx.vn/report?utm_campaign=x",
+            "content": "snippet",
+            "published_date": "2026-08-20",
+        }
+    ]
+    tools = web.WebTools(
+        settings=settings(), lane=DirectLane(), search=lambda _query, _recency: raw
+    )
+
+    item = (await tools.web_search(CONTEXT, {"query": "q"}))["results"][0]
+
+    assert item["canonical_url"] == "https://hnx.vn/report"
+    assert item["source_class"] == "exchange"
+    assert item["source_tier"] == "primary"
+    assert item["evidence_tier"] == "snippet"
+    assert item["durable_evidence"] is False
+    assert item["material_min_publishers"] is None
+    assert item["publication"]["publicationMethod"] == "provider"
 
 
 # -- reading a page with a question in hand --------------------------------

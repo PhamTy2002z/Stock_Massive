@@ -35,6 +35,35 @@ class SourceClass(str, Enum):
     UNKNOWN = "unknown"
 
 
+class TosRisk(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    UNKNOWN = "unknown"
+
+
+class PublicationMethod(str, Enum):
+    PROVIDER = "provider"
+    HTML_META = "html_meta"
+    JSON_LD = "json_ld"
+    VISIBLE_TEXT = "visible_text"
+    URL_PATTERN = "url_pattern"
+    UNKNOWN = "unknown"
+
+
+class PublicationConfidence(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    UNKNOWN = "unknown"
+
+
+class TimePrecision(str, Enum):
+    INSTANT = "instant"
+    DATE = "date"
+    UNKNOWN = "unknown"
+
+
 class EvidenceRelation(str, Enum):
     SUPPORTS = "supports"
     CONTRADICTS = "contradicts"
@@ -105,6 +134,15 @@ class EvidenceRef:
     location: EvidenceLocation | None = None
     observed_at: datetime | None = None
     as_of: datetime | None = None
+    canonical_url: str | None = None
+    publisher: str | None = None
+    published_at: datetime | None = None
+    effective_at: datetime | None = None
+    publication_method: PublicationMethod = PublicationMethod.UNKNOWN
+    publication_confidence: PublicationConfidence = PublicationConfidence.UNKNOWN
+    publication_precision: TimePrecision = TimePrecision.UNKNOWN
+    tos_risk: TosRisk = TosRisk.UNKNOWN
+    excerpt_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if not self.evidence_id or len(self.evidence_id) > 128:
@@ -123,6 +161,16 @@ class EvidenceRef:
             raise ValueError("content_sha256 must be a SHA-256 hex digest") from exc
         _require_aware("observed_at", self.observed_at)
         _require_aware("as_of", self.as_of)
+        _require_aware("published_at", self.published_at)
+        _require_aware("effective_at", self.effective_at)
+        if self.canonical_url is not None and not self.canonical_url.strip():
+            raise ValueError("canonical_url cannot be blank")
+        if self.publisher is not None and not self.publisher.strip():
+            raise ValueError("publisher cannot be blank")
+        if self.excerpt_sha256 is not None:
+            expected = hashlib.sha256(self.excerpt.encode("utf-8")).hexdigest()
+            if self.excerpt_sha256 != expected:
+                raise ValueError("excerpt_sha256 must identify the exact excerpt")
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -136,6 +184,15 @@ class EvidenceRef:
             "location": self.location.to_payload() if self.location else None,
             "observedAt": self.observed_at.isoformat() if self.observed_at else None,
             "asOf": self.as_of.isoformat() if self.as_of else None,
+            "canonicalUrl": self.canonical_url,
+            "publisher": self.publisher,
+            "publishedAt": self.published_at.isoformat() if self.published_at else None,
+            "effectiveAt": self.effective_at.isoformat() if self.effective_at else None,
+            "publicationMethod": self.publication_method.value,
+            "publicationConfidence": self.publication_confidence.value,
+            "publicationPrecision": self.publication_precision.value,
+            "tosRisk": self.tos_risk.value,
+            "excerptSha256": self.excerpt_sha256,
         }
 
 
@@ -150,6 +207,14 @@ def build_evidence_ref(
     location: EvidenceLocation | None = None,
     observed_at: datetime | None = None,
     as_of: datetime | None = None,
+    canonical_url: str | None = None,
+    publisher: str | None = None,
+    published_at: datetime | None = None,
+    effective_at: datetime | None = None,
+    publication_method: PublicationMethod = PublicationMethod.UNKNOWN,
+    publication_confidence: PublicationConfidence = PublicationConfidence.UNKNOWN,
+    publication_precision: TimePrecision = TimePrecision.UNKNOWN,
+    tos_risk: TosRisk = TosRisk.UNKNOWN,
 ) -> EvidenceRef:
     """Build a stable ID from source content and its exact locator."""
 
@@ -158,7 +223,7 @@ def build_evidence_ref(
             "contentSha256": content_sha256,
             "kind": kind.value,
             "location": location.to_payload() if location else None,
-            "source": source,
+            "source": canonical_url or source,
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -176,7 +241,137 @@ def build_evidence_ref(
         location=location,
         observed_at=observed_at,
         as_of=as_of,
+        canonical_url=canonical_url,
+        publisher=publisher,
+        published_at=published_at,
+        effective_at=effective_at,
+        publication_method=publication_method,
+        publication_confidence=publication_confidence,
+        publication_precision=publication_precision,
+        tos_risk=tos_risk,
+        excerpt_sha256=hashlib.sha256(excerpt.encode("utf-8")).hexdigest(),
     )
+
+
+class ClaimKind(str, Enum):
+    FACT = "fact"
+    INFERENCE = "inference"
+    SCENARIO = "scenario"
+
+
+class VerificationVerdict(str, Enum):
+    VERIFIED = "verified"
+    SINGLE_SOURCE = "single_source"
+    CONFLICTING = "conflicting"
+    UNSUPPORTED = "unsupported"
+    TEMPORALLY_INVALID = "temporally_invalid"
+
+
+class VerifierOutcome(str, Enum):
+    VERIFIED = "verified"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+    VERIFIER_FAILED = "verifier_failed"
+    BUDGET_EXHAUSTED = "budget_exhausted"
+
+
+@dataclass(frozen=True)
+class DraftClaim:
+    claim_id: str
+    text: str
+    kind: ClaimKind
+    material: bool
+    candidate_evidence_ids: tuple[str, ...]
+    unit: str | None = None
+    currency: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.claim_id or len(self.claim_id) > 128:
+            raise ValueError("claim_id must contain 1..128 characters")
+        if not self.text.strip():
+            raise ValueError("claim text cannot be blank")
+        if len(set(self.candidate_evidence_ids)) != len(self.candidate_evidence_ids):
+            raise ValueError("candidate evidence IDs cannot contain duplicates")
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "claimId": self.claim_id,
+            "text": self.text,
+            "kind": self.kind.value,
+            "material": self.material,
+            "candidateEvidenceIds": list(self.candidate_evidence_ids),
+            "unit": self.unit,
+            "currency": self.currency,
+        }
+
+
+@dataclass(frozen=True)
+class VerifiedClaim:
+    claim_id: str
+    text: str
+    kind: ClaimKind
+    material: bool
+    verdict: VerificationVerdict
+    supporting_evidence_ids: tuple[str, ...]
+    contradicting_evidence_ids: tuple[str, ...] = ()
+    invalidation_text: str | None = None
+    unit: str | None = None
+    currency: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.claim_id or len(self.claim_id) > 128:
+            raise ValueError("claim_id must contain 1..128 characters")
+        if not self.text.strip():
+            raise ValueError("claim text cannot be blank")
+        combined = self.supporting_evidence_ids + self.contradicting_evidence_ids
+        if len(set(combined)) != len(combined):
+            raise ValueError("claim evidence IDs cannot contain duplicates")
+        if self.invalidation_text is not None and not self.invalidation_text.strip():
+            raise ValueError("invalidation_text cannot be blank")
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "claimId": self.claim_id,
+            "text": self.text,
+            "kind": self.kind.value,
+            "material": self.material,
+            "verdict": self.verdict.value,
+            "supportingEvidenceIds": list(self.supporting_evidence_ids),
+            "contradictingEvidenceIds": list(self.contradicting_evidence_ids),
+            "invalidationText": self.invalidation_text,
+            "unit": self.unit,
+            "currency": self.currency,
+        }
+
+
+@dataclass(frozen=True)
+class ClaimLedger:
+    version: str
+    policy_version: str
+    as_of: datetime
+    evidence: tuple[EvidenceRef, ...]
+    claims: tuple[VerifiedClaim, ...]
+    gaps: tuple[str, ...]
+    assumptions: tuple[str, ...]
+    verifier_outcome: VerifierOutcome
+
+    def __post_init__(self) -> None:
+        if not self.version.strip() or not self.policy_version.strip():
+            raise ValueError("ledger versions cannot be blank")
+        _require_aware("as_of", self.as_of)
+        if any(not item.strip() for item in self.gaps + self.assumptions):
+            raise ValueError("ledger gaps and assumptions cannot be blank")
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "version": self.version,
+            "policyVersion": self.policy_version,
+            "asOf": self.as_of.isoformat(),
+            "evidence": [item.to_payload() for item in self.evidence],
+            "claims": [item.to_payload() for item in self.claims],
+            "gaps": list(self.gaps),
+            "assumptions": list(self.assumptions),
+            "verifierOutcome": self.verifier_outcome.value,
+        }
 
 
 @dataclass(frozen=True)

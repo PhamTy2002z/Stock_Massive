@@ -49,6 +49,7 @@ const PROGRESS_KINDS: readonly ProgressKind[] = [
   "lane_selected",
   "model_attempt",
   "tool_round",
+  "pipeline_pass",
   "recovery",
   "context_pruned",
   "tools_halted",

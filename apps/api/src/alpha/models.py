@@ -2,6 +2,7 @@
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     Column,
     Computed,
     DDL,
@@ -431,6 +432,105 @@ class AgentQuestion(Base):
 
     def __repr__(self) -> str:
         return f"<AgentQuestion {self.id} {self.state}>"
+
+
+class AgentEvidenceCache(Base):
+    """A shareable copy of public web evidence, never a Turn or user artifact."""
+
+    __tablename__ = "agent_evidence_cache"
+
+    id = Column(BigInteger, Identity(always=True), primary_key=True)
+    canonical_url = Column(Text, nullable=False)
+    content_sha256 = Column(String(64), nullable=False)
+    as_of_bucket = Column(String(64), nullable=False)
+    policy_version = Column(String(32), nullable=False)
+    cache_kind = Column(String(32), nullable=False)
+    source_class = Column(String(32), nullable=False)
+    title = Column(Text, nullable=False)
+    publisher = Column(Text, nullable=False)
+    content = Column(Text, nullable=False)
+    publication = Column(JSONB, nullable=False)
+    retrieved_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "canonical_url",
+            "content_sha256",
+            "as_of_bucket",
+            "policy_version",
+            name="uq_agent_evidence_cache_identity",
+        ),
+        CheckConstraint("char_length(content_sha256) = 64", name="ck_agent_evidence_cache_sha256"),
+        Index("ix_agent_evidence_cache_lookup", "canonical_url", "as_of_bucket"),
+        Index("ix_agent_evidence_cache_expires", "expires_at"),
+    )
+
+
+class AgentEvidenceTrajectory(Base):
+    """Private, expiring research-pass material scoped directly to its owner."""
+
+    __tablename__ = "agent_evidence_trajectory"
+
+    id = Column(BigInteger, Identity(always=True), primary_key=True)
+    turn_id = Column(
+        Uuid,
+        ForeignKey("agent_turn.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    stage = Column(String(32), nullable=False)
+    payload = Column(JSONB, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_agent_evidence_trajectory_owner_turn", "user_id", "turn_id"),
+        Index("ix_agent_evidence_trajectory_expires", "expires_at"),
+    )
+
+
+class AgentClaimLedger(Base):
+    """The exact checked evidence contract behind one assistant message."""
+
+    __tablename__ = "agent_claim_ledger"
+
+    id = Column(BigInteger, Identity(always=True), primary_key=True)
+    turn_id = Column(
+        Uuid,
+        ForeignKey("agent_turn.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    thread_id = Column(
+        Uuid,
+        ForeignKey("agent_thread.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    message_id = Column(
+        BigInteger,
+        ForeignKey("agent_message.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    policy_version = Column(String(32), nullable=False)
+    payload = Column(JSONB, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_agent_claim_ledger_owner_message", "user_id", "message_id"),
+        Index("ix_agent_claim_ledger_thread", "thread_id"),
+    )
 
 
 class LlmCallUsage(Base):

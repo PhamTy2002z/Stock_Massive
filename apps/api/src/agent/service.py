@@ -131,6 +131,8 @@ def build_alpha_desk(
             # Wired the same way the checkpoint is: one short transaction per
             # write, and a Turn never holds a session.
             trace=persistence.record_tool_call,
+            trajectory=persistence.write_evidence_trajectory,
+            evidence_cache=persistence.cache_public_evidence,
         )
 
     return AlphaDeskService(

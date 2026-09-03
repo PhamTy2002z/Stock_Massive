@@ -1200,6 +1200,18 @@ class TranscriptTurn:
     #: changed what the model sees, which is exactly what leaving ``tool_calls``
     #: empty was protecting.
     tool_names: tuple[str, ...] = ()
+    #: Whether this Turn ended by asking the reader something.
+    #:
+    #: One bit, and it answers one question the *next* Turn has to ask: has this
+    #: thread already spent its round of elicitation. Roadmap §1 allows one round
+    #: before a memo, and because the reply to a card is a new Turn, the only
+    #: place that round can be counted is the transcript.
+    #:
+    #: Nothing in :func:`build_messages` reads this, for the same reason nothing
+    #: reads ``tool_names``: what the reader chose already reaches the model as
+    #: ordinary prose, and a field that changed the constructed context would be
+    #: a second, quieter way of saying it.
+    asked: bool = False
 
     @property
     def completed_calls(self) -> tuple[TurnToolCall, ...]:

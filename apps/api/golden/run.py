@@ -300,6 +300,7 @@ def runtime_constants(config: Any) -> dict[str, Any]:
     """
     from src.agent.domain import active_pack
     from src.agent.executor import MAX_EXTERNAL_CALLS_PER_ROUND
+    from src.agent.lanes import DEEP, LIGHT
     from src.agent.loop import MAX_EXTERNAL_TOOL_CALLS, MAX_TOOL_ROUNDS
     from src.agent.prompt.sections import PROMPT_VERSION
     from src.agent.tools.web import (
@@ -320,8 +321,23 @@ def runtime_constants(config: Any) -> dict[str, Any]:
         # starts adding them.
         "tool_catalog": list(catalogue),
         "toolsets": list(CHAT_TOOLSETS),
+        # The flat pair is the light lane's, and it is kept because every
+        # artifact recorded before lanes existed carries it under these names.
         "MAX_EXTERNAL_TOOL_CALLS": MAX_EXTERNAL_TOOL_CALLS,
         "MAX_TOOL_ROUNDS": MAX_TOOL_ROUNDS,
+        # Since Phase 3 a ceiling is a property of the lane, not of the build:
+        # a deep Turn is *supposed* to read more widely than a light one, so a
+        # grader holding both to one number reads the deep lane working as the
+        # deep lane breaching. Recorded per lane so the grader can ask which
+        # ceiling the case was actually given.
+        "lanes": {
+            lane.name: {
+                "max_tool_rounds": lane.max_tool_rounds,
+                "max_external_calls": lane.max_external_calls,
+                "deadline_seconds": lane.deadline_seconds,
+            }
+            for lane in (LIGHT, DEEP)
+        },
         "MAX_EXTERNAL_CALLS_PER_ROUND": MAX_EXTERNAL_CALLS_PER_ROUND,
         "MAX_RESULTS": MAX_RESULTS,
         "MAX_SNIPPET_CHARS": MAX_SNIPPET_CHARS,
@@ -471,6 +487,32 @@ def spend_for(request_message_id: int) -> dict[str, Any]:
     }
 
 
+#: How long the poll below is allowed to outlive the Turn's own wall clock.
+#:
+#: The Turn is already bounded by its lane, so this covers only the gap between
+#: the loop settling and the terminal write becoming visible to another session.
+TERMINAL_WRITE_MARGIN_SECONDS = 30.0
+
+
+def terminal_wait_for(question: str) -> float:
+    """How long to wait for this question's Turn, read off the lane it routes to.
+
+    A fixed wait was correct while every Turn was a light one and settled in
+    under a minute. The deep lane makes that false — it is given 1,800 seconds
+    on purpose — and a wait shorter than the Turn is not a slow harness but a
+    broken one: the poll gives up, the case moves on, and the Turn it abandoned
+    is *still active*, so admission refuses every case after it with
+    ``user_active_turn``. Measured on the first Phase 6 release attempt: one
+    unfinished deep Turn cost 112 of 120 case-trials.
+
+    Routed with the same function the service routes with, so the harness cannot
+    disagree with the runtime about which ceiling a question was given.
+    """
+    from src.agent.lanes import route_intent
+
+    return route_intent(question).deadline_seconds + TERMINAL_WRITE_MARGIN_SECONDS
+
+
 async def await_terminal(
     turn_id: uuid.UUID, *, timeout: float = 60.0
 ) -> tuple[str, str | None]:
@@ -481,7 +523,9 @@ async def await_terminal(
     return a moment before the terminal write is visible to another session, and
     in that window the next case is refused with ``user_active_turn`` — a case
     lost to the harness rather than to anything being measured. It cost two cases
-    of one run before this existed.
+    of one run before this existed, and 112 the first time a deep Turn ran under
+    a wait shorter than its own deadline. Callers pass ``terminal_wait_for`` so
+    the bound follows the lane rather than a constant.
 
     Polls rather than listens, because there is nothing to listen to from
     outside the process that owns the Turn, and a bounded poll is honest about
@@ -545,6 +589,8 @@ async def read_case(
     answer_text = ""
     payloads: tuple[Mapping[str, Any], ...] = ()
     turn_status = "unknown"
+    answer_message_id: int | None = None
+    question: Mapping[str, Any] | None = None
     for message in reversed(view.messages if view else ()):
         if message.role != "assistant":
             continue
@@ -554,7 +600,19 @@ async def read_case(
             item for item in (content.get("tool_calls") or ()) if isinstance(item, Mapping)
         )
         turn_status = str(content.get("status") or "unknown")
+        answer_message_id = int(message.id)
+        raw_question = content.get("question")
+        question = dict(raw_question) if isinstance(raw_question, Mapping) else None
         break
+
+    # The checked ledger, read from where the runtime wrote it rather than
+    # parsed back out of the prose. A grader that had to infer the contract
+    # from markdown would be measuring the renderer, not the contract.
+    ledger: Mapping[str, Any] | None = None
+    if answer_message_id is not None:
+        record = await store.claim_ledger_for_message(user_id, answer_message_id)
+        if record is not None:
+            ledger = dict(record.payload)
 
     full_text_by_call: dict[str, str] = {}
     trace_by_call: dict[str, Any] = {}
@@ -655,6 +713,10 @@ async def read_case(
         "model_visible_text": "\n".join(model_visible_parts),
         "external_calls": sum(1 for call in calls if call.get("kind") == "external"),
         "sources": sources,
+        # Present only on a Turn that produced one, so an artifact from a light
+        # lane stays byte-identical to what it was before the deep lane existed.
+        "claim_ledger": ledger,
+        "question": question,
         "external_evidence_text": "\n".join(external_chunks),
         "store_evidence_text": "\n".join(store_chunks),
         "cost": spend_for(request_message_id),
@@ -740,7 +802,9 @@ async def run_corpus(
             running = desk.turns.running(turn_id)
             if running is not None and running.task is not None:
                 await asyncio.shield(asyncio.gather(running.task, return_exceptions=True))
-            _settled, terminal_reason = await await_terminal(turn_id)
+            _settled, terminal_reason = await await_terminal(
+                turn_id, timeout=terminal_wait_for(str(case.get("question") or ""))
+            )
             wall_ms = int((time.monotonic() - began) * 1000)
 
             entry = await read_case(

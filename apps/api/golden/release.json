@@ -131,7 +131,681 @@
     }
   },
   "evidence_dates": {
-    "note": "Publication time per URL, frozen from the recorded tape. Still empty after the first baseline, and the measurement says why: of 57 distinct sources across the three cases that pin an as_of, the search provider dated 0 and exactly 1 URL carries a readable date in its path — the rest encode it per publisher (cafef's 188260815..., vnexpress's 15-8 slug) or not at all. Curating these needs publication time to exist as a field the runtime extracts, which is Phase 6 source-policy work; inventing dates here to turn the dimension green would be fabricating the ground truth it exists to check."
+    "note": "Publication time per URL, read off the cited pages by the Phase 6 extractor (src/agent/evidence/source_policy.extract_publication_stamp) rather than guessed. Coverage on the three cases that pin an as_of: 112 of 173 distinct sources carry a date, every one of them at high confidence and from structured metadata ([('html_meta', 98), ('json_ld', 14)]); the remaining 61 are {'no_date': 48, 'http_401': 2, 'http_404': 1, 'http_403': 8, 'ConnectError': 2}. A publication date is a property of the article and not of the fetch, so reading it again today gives the same answer the run's fetch would have given — which is why this map could be curated after the fact while the earlier attempt off the recorded tape could not: the tape stores extracted page text, and Vietnamese publishers put the date in HTML metadata, not in a labelled line of prose. Undated stays undated: no date here was inferred from a URL pattern, a site-wide 'today' header or a press-licence line, all of which appear near the top of these pages and none of which is a publication time.",
+    "https://acbs.com.vn/blog/thoi-gian-giao-dich-chung-khoan": "2025-05-06T09:54:25+07:00",
+    "https://anninhthudo.vn/lich-am-hom-nay-1582026-gio-hoang-dao-huong-xuat-hanh-tot-post663132.antd": "2026-08-15T08:09:45+07:00",
+    "https://baochinhphu.vn/hnx-thang-8-2025-thanh-khoan-tang-manh-phai-sinh-lap-ky-luc-moi-102250909202758411.htm": "2025-09-09T13:26:00+07:00",
+    "https://baomoi.com/chung-khoan-20-8-vn-index-tang-7-55-diem-thanh-khoan-thap-nhat-tu-dau-nam-c55878615.epi": "2026-08-21T10:00:00+07:00",
+    "https://baomoi.com/chung-khoan-20-8-vn-index-tang-7-55-diem-thanh-khoan-thap-nhat-tu-dau-nam-r55878615.epi": "2026-08-21T10:00:00+07:00",
+    "https://baomoi.com/chung-khoan-tuan-10-14-8-vn-index-roi-38-98-diem-khoi-ngoai-ban-rong-hon-2-100-ty-dong-c55840442.epi": "2026-08-15T19:37:00+07:00",
+    "https://baomoi.com/do-dam-phuc-hoi-hose-khop-lenh-duoi-10-000-ty-c55873483.epi": "2026-08-20T16:31:22+07:00",
+    "https://bizhub.vietnamnews.vn/stock-market-offers-tactical-opportunities-in-august-as-valuations-improve-ssi-post410045.html": "2026-08-12T09:01:45+07:00",
+    "https://bnews.vn/chung-khoan-hoi-phuc-gan-3-thi-truong-ky-vong-khoi-sac-trong-thang-8/431082.html": "2026-08-02T16:25:35+07:00",
+    "https://cafef.vn/chung-khoan-tuan-qua-dau-tuan-hoi-phuc-cuoi-tuan-lao-doc-188260815184956685.chn": "2026-08-15T18:52:00+07:00",
+    "https://cafef.vn/lich-chot-quyen-co-tuc-tuan-17-21-8-co-tuc-tien-mat-cao-nhat-44-mot-ong-lon-sap-chi-hon-5000-ty-dong-188260815224946265.chn": "2026-08-16T00:10:00+07:00",
+    "https://cafef.vn/lich-nghi-thanh-toan-giao-dich-tren-hnx-hsx-nhan-dip-tet-am-lich-nam-2026-188260215142552475.chn": "2026-02-15T14:25:00+07:00",
+    "https://cafef.vn/loat-tan-binh-do-bo-san-hose-trong-quy-iii-2026-188260901093411435.chn": "2026-09-01T09:34:00+07:00",
+    "https://cafef.vn/phien-20-8-khoi-ngoai-ban-rong-hon-600-ty-dong-tren-hose-co-phieu-nao-bi-xa-manh-nhat-188260820154406132.chn": "2026-08-20T15:45:00+07:00",
+    "https://cafef.vn/sau-dip-le-quoc-khanh-khi-nao-thi-truong-chung-khoan-giao-dich-tro-lai-binh-thuong-188260829154209089.chn": "2026-08-30T00:05:00+07:00",
+    "https://cafef.vn/thanh-khoan-chung-khoan-mat-hut-truoc-them-world-cup-188260611232811154.chn": "2026-06-12T00:01:00+07:00",
+    "https://cafef.vn/tien-vao-chung-khoan-mat-hut-gia-tri-khop-lenh-hose-thap-nhat-hon-2-thang-chuyen-gi-dang-xay-ra-188260819152723844.chn": "2026-08-19T15:45:00+07:00",
+    "https://congluan.vn/chung-khoan-hom-nay-1282026-vn-index-tang-manh-huong-toi-1800-diem-post357021.html": "2026-08-12T16:21:21+07:00",
+    "https://congluan.vn/chung-khoan-hom-nay-2082026-vn-index-tang-huong-ve-nang-hang-va-thoai-von-nha-nuoc-post357890.html": "2026-08-20T16:37:42+07:00",
+    "https://congluan.vn/thanh-khoan-chung-khoan-cham-day-trong-nam-2026-con-15000-ty-dongphien-post352808.html": "2026-07-08T11:37:38+07:00",
+    "https://cpchauxuannguyen.home.blog/2026/08/21/tien-vao-chung-khoan-mat-hut-gia-tri-khop-lenh-hose-thap-nhat-hon-2-thang-chuyen-gi-dang-xay-ra": "2026-08-21T09:51:04+00:00",
+    "https://danviet.vn/vn-index-mat-hon-36-diem-co-phieu-bat-dong-san-bi-ban-thao-tren-dien-rong-d1451464.html": "2026-08-14T15:30:39+07:00",
+    "https://dienmaycholon.com/kinh-nghiem-mua-sam/cap-nhat-lich-am-duong-day-du-chi-tiet-chinh-xac-nhat": "2024-01-23T15:19:51+07:00",
+    "https://doanhnhan.congly.vn/chung-khoan-chot-phien-25-8-vn-index-hut-moc-1-800-diem-225-ma-giam-tren-hose.html": "2026-08-25T10:45:52.561873+00:00",
+    "https://en.nhandan.vn/infographic-vn-index-down-207-on-august-14-post165503.html": "2026-08-14T17:00:00+07:00",
+    "https://en.sggp.org.vn/vn-index-plunges-2755-points-as-profit-taking-intensifies-post128852.html": "2026-08-13T18:34:28+07:00",
+    "https://etime.danviet.vn/hose-thanh-khoan-binh-quan-thang-1-gan-11-ty-cp-ngay-tang-41-so-voi-thang-truoc-d1401450.html": "2026-02-07T13:00:00+07:00",
+    "https://fili.vn/2026/08/vietstock-daily-20082026-ap-luc-chua-ha-nhiet-1636-1482738.htm": "2026-08-19T17:15:00+07:00",
+    "https://hdbs.vn/ban-tin-thi-truong-ngay-28-08-2026": "2026-08-28T08:50:49+07:00",
+    "https://kinhtexaydung.petrotimes.vn/tin-nhanh-chung-khoan-ngay-14-8-ap-luc-ban-lan-rong-vn-index-mat-gan-37-diem-744592.html": "2026-08-14T18:11:31+07:00",
+    "https://m.cafef.vn/sau-dip-le-quoc-khanh-khi-nao-thi-truong-chung-khoan-giao-dich-tro-lai-binh-thuong-188260829154209089.chn": "2026-08-30T00:05:00+07:00",
+    "https://m.nguoiduatin.vn/lps-chinh-thuc-giao-dich-tren-hose-tu-ngay-18-8-gia-tham-chieu-30000-dong-co-phieu-204260728104526458.htm": "2026-07-28T10:47:00+07:00",
+    "https://markettimes.vn/tien-vao-chung-khoan-mat-hut-gia-tri-khop-lenh-hose-thap-nhat-hon-2-thang-chuyen-gi-dang-xay-ra-128825.html": "2026-08-19T14:45:01+07:00",
+    "https://nhandan.vn/cac-doanh-nghiep-chot-tra-co-tuc-tuan-tu-ngay-17-den-218-post982353.html": "2026-08-17T11:00:51+07:00",
+    "https://nhandan.vn/chung-khoan-ngay-128-vn-index-tang-gan-20-diem-khoi-ngoai-mua-rong-tro-lai-post981416.html": "2026-08-12T16:28:09+07:00",
+    "https://nhandan.vn/chung-khoan-ngay-148-ap-luc-ban-gia-tang-vn-index-giam-gan-37-diem-post981915.html": "2026-08-14T16:52:59+07:00",
+    "https://nhandan.vn/infographic-chung-khoan-ngay-208-vn-index-tang-755-diem-khoi-luong-giao-dich-khop-lenh-giam-131-so-phien-truoc-post983140.html": "2026-08-20T19:01:40+07:00",
+    "https://nhandan.vn/lich-chot-tra-co-tuc-tuan-tu-ngay-24-den-288-post983875.html": "2026-08-24T08:33:35+07:00",
+    "https://nhandan.vn/thanh-khoan-co-giam-post678643.html": "2021-12-17T11:23:00+07:00",
+    "https://pinetree.vn/en/post/20260814/market-brief-14-08-2026": "2026-08-14T10:20:38+00:00",
+    "https://premiermove.com/august-2026-housing-market-update-what-buyers-and-sellers-should-know": "2026-08-10T17:55:30-04:00",
+    "https://suckhoedoisong.vn/am-lich-hom-nay-15-8-lich-am-15-8-lich-van-nien-ngay-15-8-2026-169260814152730866.htm": "2026-08-14T15:40:00+07:00",
+    "https://suckhoedoisong.vn/xu-huong-chung-khoan-12-8-nha-dau-tu-han-che-mua-moi-169260812071345185.htm": "2026-08-12T07:23:00+07:00",
+    "https://suckhoedoisong.vn/xu-huong-chung-khoan-13-8-nen-uu-tien-chot-loi-tai-vung-khang-cu-169260813070733684.htm": "2026-08-13T07:16:00+07:00",
+    "https://theinvestor.vn/vietnams-benchmark-vn-index-hits-three-month-low-as-broad-sell-off-grips-market-d19580.html": "2026-07-20T20:07:00+07:00",
+    "https://thoibaotaichinhvietnam.vn/chung-khoan-ngay-12-8-vn-index-tang-tien-sat-moc-1-800-diem-dong-tien-van-than-trong-202218.html": "2026-08-12T17:53:57+07:00",
+    "https://thoibaotaichinhvietnam.vn/chung-khoan-ngay-14-8-vn-index-giam-manh-phien-thu-hai-lien-tiep-202357.html": "2026-08-14T18:16:09+07:00",
+    "https://thoibaotaichinhvietnam.vn/chung-khoan-ngay-158-ap-luc-ban-manh-len-vn-index-ngat-mach-tang-181762.html": "2025-08-15T17:39:49+07:00",
+    "https://thoibaotaichinhvietnam.vn/chung-khoan-ngay-20-8-vn-index-lay-lai-sac-xanh-thanh-khoan-tiep-tuc-suy-giam-202625.html": "2026-08-20T17:29:59+07:00",
+    "https://thoibaotaichinhvietnam.vn/chung-khoan-tuan-dau-thang-8-2026-da-hoi-phuc-tiep-tuc-hay-di-len-trong-nghi-ngo-201610.html": "2026-08-01T17:52:44+07:00",
+    "https://thoibaotaichinhvietnam.vn/gan-30-doanh-nghiep-chot-quyen-co-tuc-tuan-nay-202438.html": "2026-08-17T16:34:49+07:00",
+    "https://thoibaotaichinhvietnam.vn/thanh-khoan-san-hose-thang-32026-tang-manh-hon-1-ty-co-phieu-sang-tay-moi-ngay-195194.html": "2026-04-07T20:12:30+07:00",
+    "https://thuonghieucongluan.com.vn/chung-khoan-phien-chieu-20-8-vn-index-hoi-phuc-nhe-thanh-khoan-thi-truong-giam-sau-a331194.html": "2026-08-19T17:10:00+07:00",
+    "https://thuonghieucongluan.com.vn/den-ngay-31-12-2026-hose-thong-nhat-to-chuc-thi-truong-giao-dich-co-phieu-chung-chi-quy-a206185.html": "2026-09-02T13:08:00+07:00",
+    "https://tuoitre.vn/chung-khoan-14-8-vn-index-rung-lac-vung-ho-tro-nao-dang-duoc-cho-doi-100260814074820245.htm": "2026-08-14T08:11:00+07:00",
+    "https://tuoitre.vn/chung-khoan-re-nhung-dong-tien-van-dung-ngoai-chuyen-gia-chi-ra-nguyen-nhan-100260728063042332.htm": "2026-07-28T08:05:00+07:00",
+    "https://tuoitre.vn/mot-nam-dao-lon-cua-top-10-cong-ty-chung-khoan-100260829080249243.htm": "2026-08-29T09:48:00+07:00",
+    "https://tuoitre.vn/sang-giam-gan-50-diem-chieu-bat-tang-vn-index-tau-luon-vi-dau-100260716225550451.htm": "2026-07-17T05:57:00+07:00",
+    "https://vietnambiz.vn/lich-nghi-giao-dich-chung-khoan-nam-2026-2025129145125668.htm": "2025-12-09T16:35:00+07:00",
+    "https://vietnamfinance.vn/san-hose-nghen-nghiem-trong-thanh-khoan-khop-lenh-vot-len-tren-24000-ty-d65697.html": "2021-06-02T15:48:23+07:00",
+    "https://vietstock.vn/2025/12/hose-thong-bao-lich-nghi-giao-dich-nam-2026-830-1379614.htm": "2025-12-09T11:15:33+07:00",
+    "https://vietstock.vn/2026/08/1708-doc-gi-truoc-gio-giao-dich-chung-khoan-830-1481276.htm": "2026-08-17T06:02:00+07:00",
+    "https://vietstock.vn/2026/08/chung-khoan-tuan-10-14082026-that-bai-truoc-nguong-1800-diem-1636-1480878.htm": "2026-08-14T18:22:49+07:00",
+    "https://vietstock.vn/2026/08/nhip-dap-thi-truong-1208-thi-truong-duy-tri-sac-xanh-1636-1479537.htm": "2026-08-12T16:52:00+07:00",
+    "https://vietstock.vn/2026/08/nhip-dap-thi-truong-1208-tiep-tuc-giang-co-co-phieu-vic-va-vhm-gop-hon-135-diem-tang-cho-vn-index-1636-1479537.htm": "2026-08-12T16:52:00+07:00",
+    "https://vietstock.vn/2026/08/theo-dau-dong-tien-ca-map-1208-tu-doanh-gom-rong-tren-ngan-ty-khoi-ngoai-cham-dut-chuoi-ban-rong-830-1479843.htm": "2026-08-12T19:26:14+07:00",
+    "https://vietstock.vn/2026/08/thoat-vung-trung-thanh-khoan-chung-khoan-se-khoi-sac-trong-thang-8-145-1476821.htm": "2026-08-05T13:02:00+07:00",
+    "https://vietstock.vn/2026/08/vietstock-daily-20082026-ap-luc-chua-ha-nhiet-1636-1482738.htm": "2026-08-19T18:17:00+07:00",
+    "https://vnbusiness.vn/24h/hose-dat-khoi-luong-khop-lenh-ky-luc-trong-phien-165-1025727.html": "2017-05-16T18:09:06+07:00",
+    "https://vneconomy.vn/chung-khoan-lao-doc-nha-dau-tu-chan-nan-tai-khoan-mo-moi-sut-ve-muc-thap-nhat-5-thang.htm": "2026-08-10T10:19:32+07:00",
+    "https://vneconomy.vn/cong-ty-chung-khoan-nhan-dinh-gi-ve-cu-xa-tai-moc-1700-diem.htm": "2025-09-06T14:05:23+07:00",
+    "https://vneconomy.vn/do-dam-phuc-hoi-hose-khop-lenh-duoi-10000-ty.htm": "2026-08-20T15:31:22+07:00",
+    "https://vneconomy.vn/dong-tien-roi-nhom-von-hoa-lon-luc-cau-trong-nuoc-can-lenh-xa-cua-khoi-ngoai.htm": "2026-08-17T08:53:38+07:00",
+    "https://vneconomy.vn/khoi-ngoai-day-manh-mua-rong-2300-ty-trong-tuan-qua-can-het-lenh-ban-cua-von-noi.htm": "2026-08-09T17:59:58+07:00",
+    "https://vneconomy.vn/nha-dau-tu-ca-nhan-lai-o-at-mo-tai-khoan-chung-khoan.htm": "2026-07-08T14:02:50+07:00",
+    "https://vneconomy.vn/thanh-khoan-hose-10-ngan-ty-dong-thi-truong-di-tren-bang-mong.htm": "2026-06-11T15:37:55+07:00",
+    "https://vneconomy.vn/thanh-khoan-hose-thang-2-giam-17.htm": "2026-03-06T09:15:15+07:00",
+    "https://vneconomy.vn/thanh-khoan-phuc-hoi-nhe-vn-index-chenh-venh-tai-moc-1800-diem.htm": "2026-06-12T12:03:33+07:00",
+    "https://vneconomy.vn/thanh-khoan-se-bung-no-trong-nam-2026-trung-binh-hon-36000-ty-moi-phien.htm": "2026-01-08T07:57:17+07:00",
+    "https://vneconomy.vn/vn-index-tang-gan-100-diem-trong-thang-8-chu-yeu-nho-vic-va-tcb.htm": "2026-08-31T09:26:49+07:00",
+    "https://vneconomy.vn/vn-index-tien-gan-vung-dinh-cu-1800-1810-diem.htm": "2026-08-12T21:56:20+07:00",
+    "https://vneconomy.vn/xu-huong-vn-index-chi-co-the-cai-thien-khi-vuot-len-khang-cu-quanh-1800-diem.htm": "2026-08-11T22:52:56+07:00",
+    "https://vnexpress.net/5-diem-den-tai-viet-nam-co-luong-dat-cho-cao-nhat-dip-2-9-5107945.html": "2026-08-12T08:04:03+07:00",
+    "https://vnexpress.net/cac-ngan-hang-tung-goi-vay-giam-lai-suat-0-5-2-5108293.html": "2026-08-12T16:03:46+07:00",
+    "https://vnexpress.net/chung-khoan-giam-them-37-diem-5109204.html": "2026-08-14T15:51:03+07:00",
+    "https://vnexpress.net/chung-khoan-hom-nay-15-8-vn-index-giam-manh-nhat-hai-tuan-4927335.html": "2025-08-15T16:00:54+07:00",
+    "https://vnexpress.net/gia-vang-hom-nay-15-4-5062639.html": "2026-04-15T11:53:02+07:00",
+    "https://vnexpress.net/gia-vang-moi-nhat-hom-nay-ngay-30-6-5091495.html": "2026-06-30T10:18:57+07:00",
+    "https://vnexpress.net/thanh-khoan-chung-khoan-giam-5-000-ty-dong-5110082.html": "2026-08-17T16:14:25+07:00",
+    "https://vnexpress.net/thanh-khoan-chung-khoan-thap-nhat-mot-thang-5098632.html": "2026-07-17T16:31:31+07:00",
+    "https://vnexpress.net/vn-index-tang-gan-20-diem-nho-co-phieu-ho-vingroup-5108394.html": "2026-08-12T16:35:15+07:00",
+    "https://vov.vn/thi-truong/chung-khoan/nhan-dinh-chung-khoan-128-vn-index-tiep-tuc-tang-diem-chinh-phuc-moc-1620-diem-post1221866.vov": "2025-08-12T06:15:00+07:00",
+    "https://vov.vn/thi-truong/nhan-dinh-chung-khoan-128-giang-co-trong-bien-do-hep-nha-dau-tu-uu-tien-nam-giu-post1323149.vov": "2026-08-12T06:15:00+07:00",
+    "https://worldperatio.com/area/vietnam": "2023-01-26T14:55:29+00:00",
+    "https://www.ceicdata.com/en/vietnam/ho-chi-minh-stock-exchange-monthly/ho-chi-minh-stock-exchange-index-vn-index": "2026-07-03T09:49:06+07:00",
+    "https://www.cotality.com/insights/articles/us-home-price-insights-august-2026": "2026-08-10T00:00:00+07:00",
+    "https://www.dnse.com.vn/senses/tin-tuc/goc-nhin-ky-thuat-phien-giao-dich-chung-khoan-ngay-158-vn-index-van-ang-trong-nhip-tang-iem-35112217": "2025-08-14T10:34:00+00:00",
+    "https://www.dnse.com.vn/senses/tin-tuc/lich-nghi-giao-dich-chung-khoan-nam-2026-35167278": "2025-12-09T09:35:00+00:00",
+    "https://www.dnse.com.vn/senses/tin-tuc/phien-ngay-148-vn-index-but-pha-gan-30-iem-bat-chap-khoi-ngoai-xa-manh-35112180": "2025-08-14T09:30:00+00:00",
+    "https://www.sggp.org.vn/gia-tri-von-hoa-san-hose-den-cuoi-thang-3-2026-dat-hon-787-trieu-ty-dong-post846773.html": "2026-04-07T17:32:37+07:00",
+    "https://www.sggp.org.vn/von-hoa-hose-giam-hon-545000-ty-dong-6-doanh-nghiep-roi-nhom-ty-usd-post867645.html": "2026-08-18T18:24:44+07:00",
+    "https://www.tinnhanhchungkhoan.vn/lich-nghi-giao-dich-chung-khoan-dip-le-quoc-khanh-29-post375326.html": "2025-08-22T17:11:34+07:00",
+    "https://www.tinnhanhchungkhoan.vn/lich-nghi-giao-dich-chung-khoan-dip-le-quoc-khanh-29-post396501.html": "2026-08-26T07:21:18+07:00",
+    "https://www.tinnhanhchungkhoan.vn/su-kien-chung-khoan-dang-chu-y-ngay-227-post394431.html": "2026-07-21T17:49:17+07:00",
+    "https://www.tradingview.com/symbols/HOSE-VNINDEX": "2026-07-07T07:51:21+00:00",
+    "https://www.vietnamplus.vn/tai-cau-truc-thi-truong-sap-chuyen-gan-300-ma-co-phieu-tu-hnx-sang-hose-post1121700.vnp": "2026-07-01T22:03:00+07:00",
+    "https://www.vietnamplus.vn/vn-index-chiu-ap-luc-dieu-chinh-cung-chien-luoc-tai-co-cau-danh-muc-post1130382.vnp": "2026-08-15T16:04:56+07:00",
+    "https://www.youtube.com/watch?v=-IHaHS996sY": "2026-08-14T03:29:44-07:00",
+    "https://www.youtube.com/watch?v=L8rdBfvboPc": "2026-06-22T05:17:50-07:00",
+    "https://www.youtube.com/watch?v=ProEoMZZKjo": "2026-08-12T00:51:34-07:00",
+    "https://www.youtube.com/watch?v=iW_M-F0G5Ik": "2026-08-12T09:56:00-07:00",
+    "https://www.youtube.com/watch?v=iWs3f9MauZA": "2026-08-12T00:56:06-07:00"
+  },
+  "evidence_date_provenance": {
+    "https://acbs.com.vn/blog/thoi-gian-giao-dich-chung-khoan": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://anninhthudo.vn/lich-am-hom-nay-1582026-gio-hoang-dao-huong-xuat-hanh-tot-post663132.antd": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://baochinhphu.vn/hnx-thang-8-2025-thanh-khoan-tang-manh-phai-sinh-lap-ky-luc-moi-102250909202758411.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://baomoi.com/chung-khoan-20-8-vn-index-tang-7-55-diem-thanh-khoan-thap-nhat-tu-dau-nam-c55878615.epi": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://baomoi.com/chung-khoan-20-8-vn-index-tang-7-55-diem-thanh-khoan-thap-nhat-tu-dau-nam-r55878615.epi": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://baomoi.com/chung-khoan-tuan-10-14-8-vn-index-roi-38-98-diem-khoi-ngoai-ban-rong-hon-2-100-ty-dong-c55840442.epi": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://baomoi.com/do-dam-phuc-hoi-hose-khop-lenh-duoi-10-000-ty-c55873483.epi": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://bizhub.vietnamnews.vn/stock-market-offers-tactical-opportunities-in-august-as-valuations-improve-ssi-post410045.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://bnews.vn/chung-khoan-hoi-phuc-gan-3-thi-truong-ky-vong-khoi-sac-trong-thang-8/431082.html": {
+      "method": "json_ld",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://cafef.vn/chung-khoan-tuan-qua-dau-tuan-hoi-phuc-cuoi-tuan-lao-doc-188260815184956685.chn": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://cafef.vn/lich-chot-quyen-co-tuc-tuan-17-21-8-co-tuc-tien-mat-cao-nhat-44-mot-ong-lon-sap-chi-hon-5000-ty-dong-188260815224946265.chn": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://cafef.vn/lich-nghi-thanh-toan-giao-dich-tren-hnx-hsx-nhan-dip-tet-am-lich-nam-2026-188260215142552475.chn": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://cafef.vn/loat-tan-binh-do-bo-san-hose-trong-quy-iii-2026-188260901093411435.chn": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://cafef.vn/phien-20-8-khoi-ngoai-ban-rong-hon-600-ty-dong-tren-hose-co-phieu-nao-bi-xa-manh-nhat-188260820154406132.chn": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://cafef.vn/sau-dip-le-quoc-khanh-khi-nao-thi-truong-chung-khoan-giao-dich-tro-lai-binh-thuong-188260829154209089.chn": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://cafef.vn/thanh-khoan-chung-khoan-mat-hut-truoc-them-world-cup-188260611232811154.chn": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://cafef.vn/tien-vao-chung-khoan-mat-hut-gia-tri-khop-lenh-hose-thap-nhat-hon-2-thang-chuyen-gi-dang-xay-ra-188260819152723844.chn": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://congluan.vn/chung-khoan-hom-nay-1282026-vn-index-tang-manh-huong-toi-1800-diem-post357021.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://congluan.vn/chung-khoan-hom-nay-2082026-vn-index-tang-huong-ve-nang-hang-va-thoai-von-nha-nuoc-post357890.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://congluan.vn/thanh-khoan-chung-khoan-cham-day-trong-nam-2026-con-15000-ty-dongphien-post352808.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://cpchauxuannguyen.home.blog/2026/08/21/tien-vao-chung-khoan-mat-hut-gia-tri-khop-lenh-hose-thap-nhat-hon-2-thang-chuyen-gi-dang-xay-ra": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://danviet.vn/vn-index-mat-hon-36-diem-co-phieu-bat-dong-san-bi-ban-thao-tren-dien-rong-d1451464.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://dienmaycholon.com/kinh-nghiem-mua-sam/cap-nhat-lich-am-duong-day-du-chi-tiet-chinh-xac-nhat": {
+      "method": "json_ld",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://doanhnhan.congly.vn/chung-khoan-chot-phien-25-8-vn-index-hut-moc-1-800-diem-225-ma-giam-tren-hose.html": {
+      "method": "json_ld",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://en.nhandan.vn/infographic-vn-index-down-207-on-august-14-post165503.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://en.sggp.org.vn/vn-index-plunges-2755-points-as-profit-taking-intensifies-post128852.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://etime.danviet.vn/hose-thanh-khoan-binh-quan-thang-1-gan-11-ty-cp-ngay-tang-41-so-voi-thang-truoc-d1401450.html": {
+      "method": "json_ld",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://fili.vn/2026/08/vietstock-daily-20082026-ap-luc-chua-ha-nhiet-1636-1482738.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://hdbs.vn/ban-tin-thi-truong-ngay-28-08-2026": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://kinhtexaydung.petrotimes.vn/tin-nhanh-chung-khoan-ngay-14-8-ap-luc-ban-lan-rong-vn-index-mat-gan-37-diem-744592.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://m.cafef.vn/sau-dip-le-quoc-khanh-khi-nao-thi-truong-chung-khoan-giao-dich-tro-lai-binh-thuong-188260829154209089.chn": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://m.nguoiduatin.vn/lps-chinh-thuc-giao-dich-tren-hose-tu-ngay-18-8-gia-tham-chieu-30000-dong-co-phieu-204260728104526458.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://markettimes.vn/tien-vao-chung-khoan-mat-hut-gia-tri-khop-lenh-hose-thap-nhat-hon-2-thang-chuyen-gi-dang-xay-ra-128825.html": {
+      "method": "json_ld",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://nhandan.vn/cac-doanh-nghiep-chot-tra-co-tuc-tuan-tu-ngay-17-den-218-post982353.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://nhandan.vn/chung-khoan-ngay-128-vn-index-tang-gan-20-diem-khoi-ngoai-mua-rong-tro-lai-post981416.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://nhandan.vn/chung-khoan-ngay-148-ap-luc-ban-gia-tang-vn-index-giam-gan-37-diem-post981915.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://nhandan.vn/infographic-chung-khoan-ngay-208-vn-index-tang-755-diem-khoi-luong-giao-dich-khop-lenh-giam-131-so-phien-truoc-post983140.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://nhandan.vn/lich-chot-tra-co-tuc-tuan-tu-ngay-24-den-288-post983875.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://nhandan.vn/thanh-khoan-co-giam-post678643.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://pinetree.vn/en/post/20260814/market-brief-14-08-2026": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://premiermove.com/august-2026-housing-market-update-what-buyers-and-sellers-should-know": {
+      "method": "json_ld",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://suckhoedoisong.vn/am-lich-hom-nay-15-8-lich-am-15-8-lich-van-nien-ngay-15-8-2026-169260814152730866.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://suckhoedoisong.vn/xu-huong-chung-khoan-12-8-nha-dau-tu-han-che-mua-moi-169260812071345185.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://suckhoedoisong.vn/xu-huong-chung-khoan-13-8-nen-uu-tien-chot-loi-tai-vung-khang-cu-169260813070733684.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://theinvestor.vn/vietnams-benchmark-vn-index-hits-three-month-low-as-broad-sell-off-grips-market-d19580.html": {
+      "method": "json_ld",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://thoibaotaichinhvietnam.vn/chung-khoan-ngay-12-8-vn-index-tang-tien-sat-moc-1-800-diem-dong-tien-van-than-trong-202218.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://thoibaotaichinhvietnam.vn/chung-khoan-ngay-14-8-vn-index-giam-manh-phien-thu-hai-lien-tiep-202357.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://thoibaotaichinhvietnam.vn/chung-khoan-ngay-158-ap-luc-ban-manh-len-vn-index-ngat-mach-tang-181762.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://thoibaotaichinhvietnam.vn/chung-khoan-ngay-20-8-vn-index-lay-lai-sac-xanh-thanh-khoan-tiep-tuc-suy-giam-202625.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://thoibaotaichinhvietnam.vn/chung-khoan-tuan-dau-thang-8-2026-da-hoi-phuc-tiep-tuc-hay-di-len-trong-nghi-ngo-201610.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://thoibaotaichinhvietnam.vn/gan-30-doanh-nghiep-chot-quyen-co-tuc-tuan-nay-202438.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://thoibaotaichinhvietnam.vn/thanh-khoan-san-hose-thang-32026-tang-manh-hon-1-ty-co-phieu-sang-tay-moi-ngay-195194.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://thuonghieucongluan.com.vn/chung-khoan-phien-chieu-20-8-vn-index-hoi-phuc-nhe-thanh-khoan-thi-truong-giam-sau-a331194.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://thuonghieucongluan.com.vn/den-ngay-31-12-2026-hose-thong-nhat-to-chuc-thi-truong-giao-dich-co-phieu-chung-chi-quy-a206185.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://tuoitre.vn/chung-khoan-14-8-vn-index-rung-lac-vung-ho-tro-nao-dang-duoc-cho-doi-100260814074820245.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://tuoitre.vn/chung-khoan-re-nhung-dong-tien-van-dung-ngoai-chuyen-gia-chi-ra-nguyen-nhan-100260728063042332.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://tuoitre.vn/mot-nam-dao-lon-cua-top-10-cong-ty-chung-khoan-100260829080249243.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://tuoitre.vn/sang-giam-gan-50-diem-chieu-bat-tang-vn-index-tau-luon-vi-dau-100260716225550451.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vietnambiz.vn/lich-nghi-giao-dich-chung-khoan-nam-2026-2025129145125668.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vietnamfinance.vn/san-hose-nghen-nghiem-trong-thanh-khoan-khop-lenh-vot-len-tren-24000-ty-d65697.html": {
+      "method": "json_ld",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vietstock.vn/2025/12/hose-thong-bao-lich-nghi-giao-dich-nam-2026-830-1379614.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vietstock.vn/2026/08/1708-doc-gi-truoc-gio-giao-dich-chung-khoan-830-1481276.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vietstock.vn/2026/08/chung-khoan-tuan-10-14082026-that-bai-truoc-nguong-1800-diem-1636-1480878.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vietstock.vn/2026/08/nhip-dap-thi-truong-1208-thi-truong-duy-tri-sac-xanh-1636-1479537.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vietstock.vn/2026/08/nhip-dap-thi-truong-1208-tiep-tuc-giang-co-co-phieu-vic-va-vhm-gop-hon-135-diem-tang-cho-vn-index-1636-1479537.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vietstock.vn/2026/08/theo-dau-dong-tien-ca-map-1208-tu-doanh-gom-rong-tren-ngan-ty-khoi-ngoai-cham-dut-chuoi-ban-rong-830-1479843.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vietstock.vn/2026/08/thoat-vung-trung-thanh-khoan-chung-khoan-se-khoi-sac-trong-thang-8-145-1476821.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vietstock.vn/2026/08/vietstock-daily-20082026-ap-luc-chua-ha-nhiet-1636-1482738.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vnbusiness.vn/24h/hose-dat-khoi-luong-khop-lenh-ky-luc-trong-phien-165-1025727.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vneconomy.vn/chung-khoan-lao-doc-nha-dau-tu-chan-nan-tai-khoan-mo-moi-sut-ve-muc-thap-nhat-5-thang.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vneconomy.vn/cong-ty-chung-khoan-nhan-dinh-gi-ve-cu-xa-tai-moc-1700-diem.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vneconomy.vn/do-dam-phuc-hoi-hose-khop-lenh-duoi-10000-ty.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vneconomy.vn/dong-tien-roi-nhom-von-hoa-lon-luc-cau-trong-nuoc-can-lenh-xa-cua-khoi-ngoai.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vneconomy.vn/khoi-ngoai-day-manh-mua-rong-2300-ty-trong-tuan-qua-can-het-lenh-ban-cua-von-noi.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vneconomy.vn/nha-dau-tu-ca-nhan-lai-o-at-mo-tai-khoan-chung-khoan.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vneconomy.vn/thanh-khoan-hose-10-ngan-ty-dong-thi-truong-di-tren-bang-mong.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vneconomy.vn/thanh-khoan-hose-thang-2-giam-17.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vneconomy.vn/thanh-khoan-phuc-hoi-nhe-vn-index-chenh-venh-tai-moc-1800-diem.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vneconomy.vn/thanh-khoan-se-bung-no-trong-nam-2026-trung-binh-hon-36000-ty-moi-phien.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vneconomy.vn/vn-index-tang-gan-100-diem-trong-thang-8-chu-yeu-nho-vic-va-tcb.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vneconomy.vn/vn-index-tien-gan-vung-dinh-cu-1800-1810-diem.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vneconomy.vn/xu-huong-vn-index-chi-co-the-cai-thien-khi-vuot-len-khang-cu-quanh-1800-diem.htm": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vnexpress.net/5-diem-den-tai-viet-nam-co-luong-dat-cho-cao-nhat-dip-2-9-5107945.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vnexpress.net/cac-ngan-hang-tung-goi-vay-giam-lai-suat-0-5-2-5108293.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vnexpress.net/chung-khoan-giam-them-37-diem-5109204.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vnexpress.net/chung-khoan-hom-nay-15-8-vn-index-giam-manh-nhat-hai-tuan-4927335.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vnexpress.net/gia-vang-hom-nay-15-4-5062639.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vnexpress.net/gia-vang-moi-nhat-hom-nay-ngay-30-6-5091495.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vnexpress.net/thanh-khoan-chung-khoan-giam-5-000-ty-dong-5110082.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vnexpress.net/thanh-khoan-chung-khoan-thap-nhat-mot-thang-5098632.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vnexpress.net/vn-index-tang-gan-20-diem-nho-co-phieu-ho-vingroup-5108394.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vov.vn/thi-truong/chung-khoan/nhan-dinh-chung-khoan-128-vn-index-tiep-tuc-tang-diem-chinh-phuc-moc-1620-diem-post1221866.vov": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://vov.vn/thi-truong/nhan-dinh-chung-khoan-128-giang-co-trong-bien-do-hep-nha-dau-tu-uu-tien-nam-giu-post1323149.vov": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://worldperatio.com/area/vietnam": {
+      "method": "json_ld",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.ceicdata.com/en/vietnam/ho-chi-minh-stock-exchange-monthly/ho-chi-minh-stock-exchange-index-vn-index": {
+      "method": "json_ld",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.cotality.com/insights/articles/us-home-price-insights-august-2026": {
+      "method": "json_ld",
+      "confidence": "high",
+      "precision": "date"
+    },
+    "https://www.dnse.com.vn/senses/tin-tuc/goc-nhin-ky-thuat-phien-giao-dich-chung-khoan-ngay-158-vn-index-van-ang-trong-nhip-tang-iem-35112217": {
+      "method": "json_ld",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.dnse.com.vn/senses/tin-tuc/lich-nghi-giao-dich-chung-khoan-nam-2026-35167278": {
+      "method": "json_ld",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.dnse.com.vn/senses/tin-tuc/phien-ngay-148-vn-index-but-pha-gan-30-iem-bat-chap-khoi-ngoai-xa-manh-35112180": {
+      "method": "json_ld",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.sggp.org.vn/gia-tri-von-hoa-san-hose-den-cuoi-thang-3-2026-dat-hon-787-trieu-ty-dong-post846773.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.sggp.org.vn/von-hoa-hose-giam-hon-545000-ty-dong-6-doanh-nghiep-roi-nhom-ty-usd-post867645.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.tinnhanhchungkhoan.vn/lich-nghi-giao-dich-chung-khoan-dip-le-quoc-khanh-29-post375326.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.tinnhanhchungkhoan.vn/lich-nghi-giao-dich-chung-khoan-dip-le-quoc-khanh-29-post396501.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.tinnhanhchungkhoan.vn/su-kien-chung-khoan-dang-chu-y-ngay-227-post394431.html": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.tradingview.com/symbols/HOSE-VNINDEX": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.vietnamplus.vn/tai-cau-truc-thi-truong-sap-chuyen-gan-300-ma-co-phieu-tu-hnx-sang-hose-post1121700.vnp": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.vietnamplus.vn/vn-index-chiu-ap-luc-dieu-chinh-cung-chien-luoc-tai-co-cau-danh-muc-post1130382.vnp": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.youtube.com/watch?v=-IHaHS996sY": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.youtube.com/watch?v=L8rdBfvboPc": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.youtube.com/watch?v=ProEoMZZKjo": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.youtube.com/watch?v=iW_M-F0G5Ik": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    },
+    "https://www.youtube.com/watch?v=iWs3f9MauZA": {
+      "method": "html_meta",
+      "confidence": "high",
+      "precision": "instant"
+    }
   },
   "cases": [
     {
@@ -723,8 +1397,20 @@
         "must_cite_external_numbers": true
       },
       "ground_truth": {
-        "status": "pending_record_run",
-        "values": []
+        "status": "frozen",
+        "frozen_on": "2026-09-02",
+        "note": "Charter capital actually registered, not the increase the 2026 AGM approved. The AGM of 24/04/2026 approved issuing up to 1,068 billion shares to reach ~94,238 tỷ; that issuance is a plan, and an answer stating it as the current figure has fallen into the case trap.",
+        "values": [
+          {
+            "key": "charter_capital",
+            "value": "83557",
+            "unit": "tỷ đồng",
+            "tolerance": "0.001",
+            "source": "https://www.vietcombank.com.vn/vi-VN/Trang-thong-tin-dien-tu/Articles/2025/07/26/20250725_DKT_VCB_Hoi-nghi-dau-tu-Khanh-",
+            "source_class": "issuer",
+            "published_at": "2025-07-26"
+          }
+        ]
       },
       "traps": [
         "charter capital changes on a stock dividend and the stale figure is widely republished"
@@ -742,8 +1428,21 @@
         "must_cite_external_numbers": true
       },
       "ground_truth": {
-        "status": "pending_record_run",
-        "values": []
+        "status": "frozen",
+        "frozen_on": "2026-09-02",
+        "note": "Shares outstanding after the 100:10 stock dividend paid 12/05/2026: 7,675,467,745 + 767,496,775 = 8,442,964,520, which reconciles with the 84,430 tỷ charter capital at a 10,000 đồng par value. The unit is the trap: an answer saying only \"8,44 tỷ\" has not stated the figure.",
+        "values": [
+          {
+            "key": "shares_outstanding",
+            "value": "8442964520",
+            "unit": "cổ phiếu",
+            "tolerance": "0.001",
+            "source": "https://finance.vietstock.vn/HPG-ctcp-tap-doan-hoa-phat.htm",
+            "source_class": "aggregator",
+            "published_at": "2026-09-02",
+            "corroboration": "https://vietstock.vn/2026/05/767-trieu-cp-hpg-sap-ve-tai-khoan-cua-co-dong-738-1441274.htm"
+          }
+        ]
       },
       "traps": [
         "outstanding, listed and charter-capital-implied share counts differ",
@@ -762,8 +1461,21 @@
         "must_cite_external_numbers": true
       },
       "ground_truth": {
-        "status": "pending_record_run",
-        "values": []
+        "status": "frozen",
+        "frozen_on": "2026-09-02",
+        "note": "Refinancing rate only. The rediscount rate (3.0%) and the interbank overnight rate (5.0%) are published in the same decision and are the case trap.",
+        "values": [
+          {
+            "key": "refinancing_rate",
+            "value": "4.5",
+            "unit": "%/năm",
+            "tolerance": "0",
+            "source": "https://luatvietnam.vn/tai-chinh/quyet-dinh-1123-qd-nhnn-2023-lai-suat-cho-vay-qua-dem-va-cho-vay-bu-dap-thieu-hut-von-255980-d1.html",
+            "source_class": "primary_document",
+            "decision": "1123/QĐ-NHNN, hiệu lực 19/06/2023",
+            "published_at": "2023-06-16"
+          }
+        ]
       },
       "traps": [
         "refinancing, rediscount and OMO rates are three different numbers published together"
@@ -781,7 +1493,9 @@
         "must_cite_external_numbers": true
       },
       "ground_truth": {
-        "status": "pending_record_run",
+        "status": "unfrozen_no_source_states_it",
+        "searched_on": "2026-09-02",
+        "note": "Deliberately left without values. Curation searched the issuer, HOSE and the aggregators and found no page that states HPG’s own published foreign-ownership ceiling; what the sources offer is the general rule (49% / 50% / up to 100% by shareholder decision), which is the very substitution this case was written to catch. Freezing any of those would make the corpus assert a figure no source states. The grader therefore scores this case None rather than a pass, and the honest reading is that a correct answer here refuses to name a ceiling.",
         "values": []
       },
       "traps": [

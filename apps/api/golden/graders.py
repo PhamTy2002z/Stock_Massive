@@ -362,6 +362,41 @@ def grade_refusal_policy(
     )
 
 
+def _ceilings_for(
+    case: Mapping[str, Any], limits: Mapping[str, Any]
+) -> tuple[str, Any, Any]:
+    """The round and external-call ceilings this case was actually given.
+
+    Since Phase 3 a ceiling belongs to the lane rather than to the build: a deep
+    Turn is allowed ten rounds and twenty external reads precisely so it can read
+    more widely than a light one. Holding both lanes to the single flat pair read
+    the deep lane doing its job as the deep lane breaching its budget — measured
+    on the first Phase 6 deep case, which was failed for 19 dispatched calls
+    against the light lane's cap of 7.
+
+    Routed with the same function the service routes with, so the grader cannot
+    disagree with the runtime about which ceiling a question was given. Falls
+    back to the flat pair for artifacts recorded before lanes were written down.
+    """
+    lanes = limits.get("lanes")
+    if isinstance(lanes, Mapping):
+        from src.agent.lanes import route_intent
+
+        name = route_intent(str(case.get("question") or "")).name
+        profile = lanes.get(name)
+        if isinstance(profile, Mapping):
+            return (
+                name,
+                profile.get("max_tool_rounds"),
+                profile.get("max_external_calls"),
+            )
+    return (
+        "build",
+        limits.get("MAX_TOOL_ROUNDS"),
+        limits.get("MAX_EXTERNAL_TOOL_CALLS"),
+    )
+
+
 def grade_budget(
     case: Mapping[str, Any], corpus: Mapping[str, Any], run: Mapping[str, Any]
 ) -> Finding:
@@ -393,12 +428,15 @@ def grade_budget(
     spent = int((case.get("cost") or {}).get("micro_usd") or 0)
 
     breaches: list[str] = []
-    max_rounds = limits.get("MAX_TOOL_ROUNDS")
+    lane, max_rounds, max_calls = _ceilings_for(case, limits)
     if max_rounds is not None and len(rounds) > int(max_rounds):
-        breaches.append(f"{len(rounds)} rounds over a cap of {max_rounds}")
-    max_calls = limits.get("MAX_EXTERNAL_TOOL_CALLS")
+        breaches.append(
+            f"{len(rounds)} rounds over the {lane} cap of {max_rounds}"
+        )
     if max_calls is not None and dispatched > int(max_calls):
-        breaches.append(f"{dispatched} dispatched external calls over a cap of {max_calls}")
+        breaches.append(
+            f"{dispatched} dispatched external calls over the {lane} cap of {max_calls}"
+        )
     if spent <= 0:
         breaches.append("the Turn reconciled no spend at all, so it did not run as measured")
     return _finding(

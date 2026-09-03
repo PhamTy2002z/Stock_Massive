@@ -66,7 +66,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProgressKind(str, Enum):
-    """The eight loop events a Turn reports progress for.
+    """The nine loop events a Turn reports progress for.
 
     A closed set, and closed for the same reason the payload keys are an
     allowlist: a kind nobody named is a kind nobody decided was fit for a
@@ -79,6 +79,8 @@ class ProgressKind(str, Enum):
     MODEL_ATTEMPT = "model_attempt"
     #: One round of tools dispatched, by shape rather than by content.
     TOOL_ROUND = "tool_round"
+    #: One deep-research pass actually completed, with only harness counters.
+    PIPELINE_PASS = "pipeline_pass"
     #: A bounded recovery the loop actually performed.
     RECOVERY = "recovery"
     #: A context built with less in it than the transcript holds: older Turns
@@ -132,6 +134,7 @@ PROGRESS_FIELDS: Mapping[ProgressKind, tuple[str, ...]] = {
     ProgressKind.LANE_SELECTED: ("lane", "reason"),
     ProgressKind.MODEL_ATTEMPT: ("status", "terminal_reason"),
     ProgressKind.TOOL_ROUND: ("calls", "external_used", "call_ids"),
+    ProgressKind.PIPELINE_PASS: ("stage", "outcome", "evidence", "claims"),
     ProgressKind.RECOVERY: ("action", "attempt", "bound"),
     #: Numbers only, and every one of them this harness's own arithmetic: which
     #: rung of the ladder built the context, what that rung cost the transcript,

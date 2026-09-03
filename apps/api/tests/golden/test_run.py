@@ -192,3 +192,27 @@ async def test_a_call_written_before_the_flag_existed_projects_nothing(owner):
     )
 
     assert projected["tool_calls"][0]["scan"] is None
+
+
+def test_the_terminal_wait_covers_the_lane_the_question_routes_to():
+    """A wait shorter than the Turn abandons it while it is still active.
+
+    Admission counts what the table says is active, and the harness runs one
+    Turn at a time, so a poll that gives up early does not merely lose its own
+    case — it leaves an active Turn behind and every case after it is refused
+    with ``user_active_turn``. The first Phase 6 release attempt lost 112 of 120
+    case-trials to exactly one unfinished deep Turn.
+    """
+    from src.agent.lanes import DEEP, LIGHT
+
+    from golden.run import TERMINAL_WRITE_MARGIN_SECONDS, terminal_wait_for
+
+    light = terminal_wait_for("VN-Index đóng cửa bao nhiêu điểm?")
+    deep = terminal_wait_for("Kiểm chứng luận điểm mua HPG giúp tôi")
+
+    assert light == LIGHT.deadline_seconds + TERMINAL_WRITE_MARGIN_SECONDS
+    assert deep == DEEP.deadline_seconds + TERMINAL_WRITE_MARGIN_SECONDS
+    # The property that matters is not the arithmetic but the ordering: the
+    # harness must never stop waiting before the Turn's own clock runs out.
+    assert deep > DEEP.deadline_seconds
+    assert light > LIGHT.deadline_seconds
