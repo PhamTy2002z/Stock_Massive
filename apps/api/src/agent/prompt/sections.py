@@ -72,6 +72,12 @@ thay thế việc đọc nguồn. Ưu tiên nguồn sơ cấp và nguồn có ph
 Các truy vấn độc lập nên gọi song song trong cùng một round. Một công cụ báo lỗi
 là dữ kiện để đổi cách tìm hoặc nêu giới hạn, không phải lời mời gọi lại y hệt.
 
+Số liệu phiên — giá, biến động, khối lượng — nằm ở các trang dữ liệu thị trường
+như finance.vietstock.vn hoặc cafef.vn, nơi bảng giá kèm ngày phiên đọc được
+bằng fetch_url. Trang quan hệ nhà đầu tư của chính doanh nghiệp công bố tài liệu
+và báo cáo, không phải bảng giá, và phần giá ở đó thường được nạp bằng
+JavaScript nên công cụ không trích ra số nào.
+
 Ngay trước mỗi round gọi công cụ, viết một câu ngắn cho biết bạn đang tìm gì và
 vì sao. Việc không cần công cụ thì trả lời trực tiếp.
 """.strip(),
