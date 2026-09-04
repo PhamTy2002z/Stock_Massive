@@ -3,13 +3,11 @@ title: "Signal Desk Visual Research Harness"
 description: "Build a quality-first agent loop that gathers web and Vnstock evidence, reaches a bounded readiness decision, and renders an original Flint visualization in the right-hand Signal Desk."
 status: pending
 priority: P1
-effort: "114h"
+effort: "49h"
 issue: null
 branch: "feat/signal-desk-mode"
 tags: [feature, backend, frontend, api, experimental]
 blockedBy: []
-blocks: [260829-2304-signal-desk-analysis-compiler]
-relatedTo: [260902-0026-phase-06-evidence-engine]
 created: 2026-09-05
 ---
 
@@ -26,8 +24,9 @@ trúc, kiểm tra readiness bằng code, rồi trả đồng thời:
    Flint chính thức compile và ECharts render ở pane phải Signal Desk.
 
 Agent được phép research sâu nhưng không được tự quyết định chạy vô hạn. Model
-đề xuất evidence need, tool call và trạng thái ready; host giữ quyền cuối cùng
-về permission, provenance, freshness, chart validity, budget và lý do dừng.
+khai gap và đề xuất tool call; host giữ quyền cuối cùng về permission,
+provenance, freshness, chart validity, budget và lý do dừng — và tự assemble
+chart từ market call, model không gửi số nào.
 
 ## Scope Decisions
 
@@ -35,14 +34,14 @@ về permission, provenance, freshness, chart validity, budget và lý do dừng
 |---|---|
 | Visual core | Chọn [Microsoft Flint](https://github.com/microsoft/flint-chart), pin release đã kiểm chứng; `lieflat-charts` chỉ là visual benchmark, không vào runtime. |
 | Flint integrity | Không fork, patch, copy template, sửa compiler output hoặc hậu xử lý ECharts option. Host chỉ chuẩn bị input và style khung panel. |
-| Demo | Dùng official `flint-chart-mcp` trước, chạy local với `--disable-file-reference` và ECharts backend; demo không trở thành production dependency. |
+| Demo | Spike bằng npm package `flint-chart` pinned + một vitest compile fixture. Không MCP: adapter thừa cho một thư viện sẽ import trực tiếp. |
 | Product integration | Dùng official `flint-chart` + ECharts trong web app; persist input, compile khi render, không persist generated ECharts option. |
 | Agent architecture | Mở rộng `AgentLoop` hiện có; không tạo orchestrator, dispatcher, budget ledger hoặc state machine thứ hai. |
 | Research source | `web_search`/`fetch_url` cho narrative và primary evidence; một tool `get_market_data` cho structured stock data. |
-| Vnstock scope | Chỉ `ohlcv`, `quote`, `trades`, read-only, một mã/call, bounded rows; không indicator, Study DSL, stock store, scheduler, watchlist hay order execution. |
+| Vnstock scope | Chỉ `ohlcv`, read-only, một mã/call, bounded rows. `quote`/`trades` cắt vì Phase 5–7 không consume và intraday 15m đã phủ độ mới. Không indicator, Study DSL, stock store, scheduler, watchlist hay order execution. |
 | Deployment | Vnstock Community chỉ bật ở profile personal/non-commercial internal. Production fail-closed cho tới khi có software license và quyền upstream bằng văn bản. |
 | UI contract | Chat chỉ render text/claim/evidence; visual chỉ render ở pane phải Signal Desk. Mode `chat` không tạo visual artifact. |
-| Readiness | Hybrid: model khai báo need/ready; deterministic host gate mới được kết thúc research và phát visual. |
+| Readiness | Không viết layer mới: host gate là `validate_claim_ledger` hiện có, state machine là `PipelineStage`, need là `ResearchDraft.gaps`. Model không bao giờ tự khai `ready`. |
 | Bounds | Khởi đầu bằng lane deep hiện có: tối đa 10 tool rounds, 20 external calls, 1.800 giây; mọi model/tool/recovery call dùng chung envelope hiện có. |
 
 ## Architecture
@@ -56,10 +55,10 @@ flowchart LR
     L --> V[get_market_data / Vnstock]
     W --> E[Evidence refs]
     V --> E
-    E --> R{Host readiness gate}
+    E --> R{validate_claim_ledger}
     R -->|gaps + progress| L
     R -->|no progress / ceiling| S[Bounded stop or refusal]
-    R -->|ready| C[Claim ledger + visual draft]
+    R -->|ready| C[Claim ledger + host-assembled visual]
     C --> A[Evidence-bound ChartAssemblyInput]
     A --> X[Persist assistant content]
     X --> H[Chat: text only]
@@ -76,48 +75,43 @@ model proposal
   → TurnGuardrails
   → ToolExecutor
   → trace + evidence normalization
-  → readiness coverage delta
+  → validate_claim_ledger
 ```
 
 ## Bounded Readiness Contract
 
-Each deep Signal Desk Turn carries a typed set of evidence needs. A need has an
-ID, kind (`narrative`, `primary`, `structured_market`), materiality, expected
-symbol/dataset/time range and evidence IDs that resolved it. The model may add
-or refine needs, but cannot mark a need resolved without evidence already in the
-Turn.
+Không có contract mới. Readiness đã là code đang chạy, và phase 4 chỉ dùng lại:
 
-The host returns one of three readiness states:
+| Thuộc tính | Cơ chế hiện có |
+|---|---|
+| Host quyết định ready, model không | `evidence/ledger.py::validate_claim_ledger` recompute mọi verdict từ evidence; label của model không có authority |
+| Trạng thái research | `PipelineStage` PLANNING → RESEARCH → COUNTEREVIDENCE → VERIFICATION → COMPLETE, deterministic |
+| Evidence need | `ResearchDraft.gaps` + `ClaimLedger.gaps` (gộp research, counter, verifier), buộc bởi `DRAFT_FORMAT` |
+| Refusal là first-class | `failed_ledger` + `_fail_deep_pipeline`: reason persisted, Turn settle terminal |
+| Số phải có nguồn | `_numbers_supported` yêu cầu số xuất hiện đúng unit trong excerpt evidence |
+| Thời gian phải hợp lệ | `_temporal_valid` + `is_temporally_admissible` |
+| Multi-source / primary | `_accepted_verdict`: primary class → `VERIFIED`, hai publisher → `VERIFIED`, còn lại `SINGLE_SOURCE` |
 
-- `continue`: at least one material gap remains and a legal, non-duplicate call
-  can plausibly close it;
-- `ready_answer`: material needs, temporal checks, provenance and visual data
-  requirements pass;
-- `ready_refusal`: further calls cannot close the gap within policy/bounds, so
-  the truthful result is “không đủ bằng chứng”.
-
-Finite stop reasons are persisted and exposed in progress: `ready`,
-`cancelled`, `deadline`, `round_ceiling`, `external_call_ceiling`,
-`spend_ceiling`, `permission_denied`, `provider_unavailable`, `no_progress`,
-`invalid_visual`, and `insufficient_evidence`.
+Hệ quả đã chốt: `SourceClass.STORE` **không** thuộc `_PRIMARY_CLASSES`, nên một
+material claim chỉ dựa vào số Vnstock ra `SINGLE_SOURCE` — và đó là nhãn đúng,
+vì số đến từ feed KB Securities/Vietcap, không phải HOSE/HNX. Không nới rule.
+Đường lên `VERIFIED` khi cần là cross-check hai provider độc lập (≥ 2 publisher,
+`_accepted_verdict` đã hỗ trợ), không phải amend truth contract. Chi tiết và bẫy
+publisher-count: Phase 3 §"Vì sao SINGLE_SOURCE là đúng".
 
 ### Anti-loop invariants
 
-- Exact calls use the existing canonical argument fingerprint. A successful
-  exact repeat reuses the in-Turn result; it is not dispatched upstream twice.
-- Existing repeated-failure `warn → block → halt` remains authoritative.
-- Existing result SHA detects a call that returned the same payload.
-- After every round, the host hashes resolved need IDs + evidence IDs + material
-  gap IDs. First unchanged round emits course-correction guidance; the second
-  consecutive unchanged round halts tools and forces synthesis/refusal.
-- Blocked, malformed and permission-denied calls do not consume an external
-  call, but they do consume loop progress and therefore cannot spin forever.
-- No retry, format repair, verifier or Flint correction may create a nested
-  unbudgeted loop. Every attempt consumes the same Turn envelope; at most one
-  strict-format repair is allowed per artifact.
-- The runtime does not start another research/tool call unless enough admitted
-  capacity remains to settle the Turn. Missing verifier capacity yields the
-  current typed incomplete reason, never an extra call outside the envelope.
+- Bound là `lanes.DEEP`: 10 round, 20 external call, 1.800s, với arithmetic
+  invariant tự refuse ở `LaneProfile.__post_init__`.
+- `TurnGuardrails` là ladder duy nhất: `call_signature` canonical args,
+  `result_signature` cho no-progress, warn → block → halt. Blocked call không
+  tốn external call nhưng vẫn tính vào ladder nên không quay vô hạn.
+- Retry, format repair, verifier và Flint correction dùng chung envelope của
+  Turn; đúng một strict-format repair mỗi artifact.
+- Không thêm layer thứ hai enforce cùng invariant. Coverage digest và bộ đếm
+  course-correct bị cắt: chúng chỉ bắt case "query khác, kiến thức như cũ",
+  vốn đã bounded và terminate có reason (roadmap §4: bound để dừng có lý do,
+  không để tiết kiệm tiền). Thêm lại khi corpus Phase 7 đo được round lãng phí.
 
 ## What Is Reused
 
@@ -139,13 +133,13 @@ retired Study/Board/widget stack.
 
 | # | Phase | Status | Effort | Dependency |
 |---|---|---|---:|---|
-| 1 | [Roadmap deviation and baseline](./phase-01-roadmap-deviation-and-baseline.md) | Todo | 6h | — |
-| 2 | [Official Flint MCP demo](./phase-02-official-flint-mcp-demo.md) | Todo | 8h | 1 |
-| 3 | [Vnstock market-data capability](./phase-03-vnstock-market-data-capability.md) | Todo | 20h | 1 |
-| 4 | [Evidence-readiness agent loop](./phase-04-evidence-readiness-agent-loop.md) | Todo | 24h | 3 |
-| 5 | [Flint visual-artifact core](./phase-05-flint-visual-artifact-core.md) | Todo | 20h | 2, 4 |
-| 6 | [Signal Desk right panel](./phase-06-signal-desk-right-panel.md) | Todo | 20h | 5 |
-| 7 | [End-to-end quality gate](./phase-07-end-to-end-quality-gate.md) | Todo | 16h | 6 |
+| 1 | [Roadmap deviation](./phase-01-roadmap-deviation.md) | Todo | 1h | — |
+| 2 | [Flint contract spike](./phase-02-flint-contract-spike.md) | Todo | 2h | 1 |
+| 3 | [Vnstock market-data capability](./phase-03-vnstock-market-data-capability.md) | Todo | 8h | 1 |
+| 4 | [Signal Desk mode + market evidence](./phase-04-evidence-readiness-agent-loop.md) | Todo | 6h | 3 |
+| 5 | [Flint visual-artifact core](./phase-05-flint-visual-artifact-core.md) | Todo | 10h | 2, 4 |
+| 6 | [Signal Desk right panel](./phase-06-signal-desk-right-panel.md) | Todo | 10h | 5 |
+| 7 | [End-to-end quality gate](./phase-07-end-to-end-quality-gate.md) | Todo | 12h | 6 |
 
 Phases are sequential at the roadmap level. Phase 2 and 3 may be developed in
 parallel only after Phase 1 is accepted because they do not share runtime files;
@@ -156,12 +150,12 @@ Phase 4 starts only after the market contract is fixed.
 | Surface | Existing owner | Planned change |
 |---|---|---|
 | Product authority | `CLAUDE.md`, `docs/roadmap.md` | Approve the narrow deviation before code. |
-| Runtime loop | `apps/api/src/agent/loop.py`, `lanes.py`, `guardrails.py` | Typed readiness and finite no-progress settlement; no second loop. |
+| Runtime loop | `apps/api/src/agent/turns.py`, `service.py`, `evidence/pipeline.py` | Mode chọn lane + toolset; biến thể planning note. `loop.py`, `lanes.py`, `guardrails.py` không đổi. |
 | Tool plane | `registry.py`, `toolsets.py`, `executor.py`, `tools/` | Register one bounded `get_market_data`. |
 | Evidence | `apps/api/src/agent/evidence/` | Convert market rows to `STORE_FIGURE` evidence and bind visual values to IDs. |
 | Durable message | `apps/api/src/agent/turns.py`, `persistence.py` | Add one optional versioned visual part to existing checkpoint/message JSON; no new artifact table. |
 | Request contract | `apps/api/src/agent/schemas.py`, web API client | Add `mode: chat | signal_desk` atomically; default legacy requests to `chat`. |
-| Visual runtime | `apps/web/src/lib/flint/`, `apps/web/package.json` | Thin official compile/validation wrapper only. |
+| Visual runtime | `apps/web/src/lib/flint/`, `apps/web/package.json` | Pin `flint-chart` in Phase 2; one compile/validate function in Phase 5, reused by Phase 6 and 7. |
 | Right pane | `inspector.tsx`, `desk-state.tsx`, `components/signal-desk/` | Render latest Turn visual at existing `Body` seam. |
 | Release evidence | API/web tests and `apps/api/golden/` | Combined text/evidence/visual corpus and bounded-loop adversarial cases. |
 
@@ -177,8 +171,11 @@ Phase 4 starts only after the market contract is fixed.
       every visual series names evidence IDs and `as_of` metadata.
 - [ ] Official Flint package is unmodified; no generated ECharts option is
       persisted or post-processed.
-- [ ] Duplicate/no-progress/failure adversarial tests prove no Turn exceeds 10
-      rounds, 20 external calls or 1.800 seconds, and every exit has a reason.
+- [ ] Duplicate/failure adversarial tests prove no Turn exceeds 10 rounds, 20
+      external calls or 1.800 seconds, and every exit has a reason — bằng
+      guardrail và lane hiện có, không bằng layer readiness thứ hai.
+- [ ] Material claim dựa trên số Vnstock ra `SINGLE_SOURCE`, không phải
+      `UNSUPPORTED`; `_PRIMARY_CLASSES` không bị sửa.
 - [ ] Vnstock is impossible to enable outside the personal internal profile;
       secrets never reach prompt, browser, trace or logs.
 - [ ] Existing truth-contract hard gates stay green; the remaining Phase 6 paid
@@ -191,9 +188,9 @@ Phase 4 starts only after the market contract is fixed.
 | Risk | Containment | Rollback |
 |---|---|---|
 | Flint API/version drift | Pin exact package, compile fixtures in CI, upgrade only through canary. | Remove optional visual part and dependencies; text/evidence path remains. |
-| Model emits plausible but invented chart values | Host hydrates datasets only from evidence IDs; reject literal data not present in trace. | Set visual status unavailable; never weaken ledger. |
+| Model emits plausible but invented chart values | Không thể xảy ra: model không gửi số nào, host assemble từ market call đã accepted. | Không có market call thì không có visual part; ledger không bao giờ bị nới. |
 | Vnstock schema/unit/time drift | Pin version, validate/post-filter, raw+normalized hashes, source-specific contract tests. | Disable `get_market_data`; web evidence remains. |
-| Tool storm/infinite loop | Shared ceilings, duplicate cache, failure ladder, coverage-delta halt. | Revert readiness extension; existing bounded AgentLoop remains. |
+| Tool storm/infinite loop | Ceiling của lane `DEEP` + ladder `TurnGuardrails`, cả hai đã ship và có test. | Gỡ mode + toolset market; loop hiện có không bị chạm. |
 | License/upstream rights | Internal-only runtime gate; production hard-disabled. | Uninstall optional provider and retain provider-neutral tool contract only if still used. |
 | Legacy Signal plan conflicts | This plan blocks and supersedes remaining work; no Study/Board code is reused. | Unblock old plan only by a new owner decision. |
 

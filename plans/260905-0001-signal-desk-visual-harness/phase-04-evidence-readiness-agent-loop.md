@@ -1,196 +1,151 @@
 ---
 phase: 4
-title: "Evidence Readiness Agent Loop"
+title: "Signal Desk Mode And Market Evidence In The Deep Pipeline"
 status: todo
 priority: P1
-effort: "24h"
+effort: "6h"
 dependencies: [3]
 ---
 
-# Phase 4: Evidence Readiness Agent Loop
+# Phase 4: Signal Desk Mode And Market Evidence In The Deep Pipeline
 
 ## Context Links
 
-- `apps/api/src/agent/loop.py::AgentLoop`
-- `apps/api/src/agent/guardrails.py::TurnGuardrails`
-- `apps/api/src/agent/lanes.py::DEEP`
-- `apps/api/src/agent/executor.py::ToolExecutor`
-- `apps/api/src/agent/evidence/pipeline.py`
-- `apps/api/src/agent/evidence/ledger.py`
-- `apps/api/src/agent/parts.py`
-- [Hermes Agent](https://github.com/NousResearch/hermes-agent)
-- [OpenCode](https://github.com/anomalyco/opencode)
-- [Oh My Pi](https://github.com/can1357/oh-my-pi)
+- `apps/api/src/agent/evidence/ledger.py::validate_claim_ledger`
+- `apps/api/src/agent/evidence/pipeline.py` — `PipelineStage`, `ResearchDraft`, `PLANNER_NOTE`, `RESEARCH_NOTE`, `failed_ledger`
+- `apps/api/src/agent/loop.py:1370` (`deep_pipeline`), `:1211` (`self._toolsets`), `:416` (`CHAT_MODE`)
+- `apps/api/src/agent/turns.py:483` — site duy nhất chọn lane
+- `apps/api/src/agent/persistence.py:1514` — `create_turn(mode=...)` **đã tồn tại**
+- `apps/api/src/agent/guardrails.py`, `apps/api/src/agent/lanes.py::DEEP`
+- `apps/api/src/agent/schemas.py::CreateTurnRequest`
 
 ## Overview
 
-Turn the existing deep three-pass pipeline into a result-aware research loop:
-the model states what evidence is missing and proposes calls; the host verifies
-that each call is legal/useful, measures whether evidence coverage changed and
-decides whether the Turn may synthesize. This phase does not add agents or an
-LLM-controlled `while true`; it adds one pure readiness controller inside the
-current finite `AgentLoop`.
+Bản trước của phase này định viết `readiness.py`: typed `EvidenceNeed`,
+`coverage_digest`, state machine `PLAN → CHECK → READY_*`, bộ đếm no-progress,
+mười stop reason mới. Đọc code xong thì **gần như toàn bộ đã tồn tại dưới tên
+khác**, và một layer thứ hai enforce cùng invariant là hai chỗ để một invariant
+lệch nhau.
+
+| Thứ plan gọi | Đã có trong code |
+|---|---|
+| Host readiness gate | `validate_claim_ledger` — recompute mọi verdict từ evidence, model label không có authority: numbers-on-page, temporal admissibility, primary/multi-source rule |
+| Readiness state machine | `PipelineStage` PLANNING → RESEARCH → COUNTEREVIDENCE → VERIFICATION → COMPLETE, deterministic, model không tự khai `ready` |
+| Typed evidence needs | `ResearchDraft.gaps` (schema `DRAFT_FORMAT` bắt buộc) + `ClaimLedger.gaps` gộp research + counter + verifier |
+| `ready_refusal` / `insufficient_evidence` | `failed_ledger` + `_fail_deep_pipeline` — refusal có reason, settle terminal, render ledger |
+| Duplicate-call reuse, failure ladder | `TurnGuardrails`: `call_signature` canonical args, `result_signature`, warn → block → halt |
+| Bounds 10/20/1.800 | `lanes.DEEP`, với arithmetic invariant tự refuse ở `LaneProfile.__post_init__` |
+| Mode persistence | `create_turn(mode=CHAT_MODE)` đã ghi mode vào idempotency payload chỉ khi khác default |
+
+Còn lại đúng ba việc: **đưa `mode` từ request tới lane/toolset**, **cho deep
+pipeline dùng được market data**, và **test rằng bound vẫn giữ khi surface có
+tool thứ ba**.
+
+## Đã cắt, và thêm lại khi nào
+
+| Cắt | Lý do | Thêm khi |
+|---|---|---|
+| `evidence/readiness.py` | `validate_claim_ledger` đã là host gate; module thứ hai = hai định nghĩa "ready". | Không bao giờ dưới hình dạng này. |
+| `coverage_digest` + course-correct counter | Chỉ bắt được case "query khác, kiến thức như cũ" — vốn đã bounded bởi 10 round / 20 call / 1.800s, terminate có reason. CLAUDE.md §4: bound để dừng có lý do, không để tiết kiệm tiền. | Corpus Phase 7 đo được số round lãng phí đáng kể. |
+| `EvidenceNeed` typed (ID, kind, materiality, expected symbol/range) | `DRAFT_FORMAT` đã buộc claims có `material`/`unit`/`currency` và `gaps`; thêm một schema song song = hai nơi khai cùng thiếu sót. | Verifier cần route gap theo dataset để tự chọn tool. |
+| Tri-state `continue`/`ready_answer`/`ready_refusal` | Stage machine đã quyết định; model chưa từng được phép khai `ready`. | Nếu pipeline chuyển sang vòng lặp mở — không thuộc plan này. |
+| 10 stop reason mới | Terminal reason hiện có (`TURN_DEADLINE`, `CANCELLED_BY_USER`, `verification_*`, `draft_recovery_failed`, guardrail `halt`) đã phủ mọi exit. | Một exit thật không map được vào reason nào đang có. |
+| `parts.py`, `turns.py` checkpoint readiness payload | Không còn readiness state để checkpoint. | Cùng lúc với mục trên. |
 
 ## Requirements
 
-- Functional: planner output carries typed evidence needs and proposed calls;
-  needs can be refined but resolved only by evidence IDs already gathered.
-- Functional: web is selected for narrative/primary claims; structured market
-  needs route to `get_market_data`. Search snippets never satisfy a material
-  claim that requires a fetched source or market row.
-- Functional: host readiness validates material gap closure, source class,
-  multi-source/primary rule, temporal validity, structured-data unit/time and
-  required visual fields.
-- Functional: final synthesis starts only on `ready_answer` or
-  `ready_refusal`; model-authored `ready=true` alone has no effect.
-- Functional: readiness state and stop reason survive checkpoints/reconnects in
-  existing draft/progress/trajectory payloads; no new mutable DB state machine.
-- Functional: every terminal path settles the Turn and outstanding tool calls.
-- Safety: untrusted tool text cannot create/resolve needs, change policy or
-  request capabilities outside the resolved surface.
-- Budget: keep lane `DEEP` hard bounds at 10 tool rounds, 20 external calls,
-  1.800 seconds and its existing aggregate LLM/cost ceilings.
-- Recovery: one strict-format repair per malformed planner/artifact; no nested
-  retry loop; recovery consumes the same Turn envelope.
-
-## Readiness State Machine
-
-```text
-PLAN
-  → execute admitted calls
-  → normalize evidence
-  → compare coverage digest
-      changed      → CHECK
-      unchanged #1 → COURSE_CORRECT
-      unchanged #2 → HALT_TO_SYNTHESIS
-  → CHECK
-      material gaps + viable call → PLAN
-      all host gates pass         → READY_ANSWER
-      gaps cannot close safely    → READY_REFUSAL
-      any hard ceiling            → STOP_WITH_REASON
-```
-
-`coverage_digest` is a hash of sorted resolved need IDs, evidence IDs, material
-gap IDs and accepted data field identities. It deliberately excludes prose and
-timestamps that change without adding knowledge.
-
-## Stop Policy
-
-| Condition | Host action | Terminal/progress reason |
-|---|---|---|
-| All material gates pass | Stop tools, verify ledger, synthesize | `ready` |
-| User cancels | Cancel in-flight work, settle | `cancelled` |
-| Wall clock expires | Stop dispatch, settle current evidence | `deadline` |
-| 10 tool rounds reached | Final bounded synthesis/refusal | `round_ceiling` |
-| 20 external calls reached | Refuse further external dispatch | `external_call_ceiling` |
-| Spend/admission refuses | No compensating hidden call | `spend_ceiling` |
-| Required capability denied | Try legal alternate once; otherwise refuse | `permission_denied` |
-| Provider unavailable | Try declared alternate route only; otherwise refuse | `provider_unavailable` |
-| Two unchanged coverage rounds | Halt tool use and synthesize/refuse | `no_progress` |
-| Evidence cannot support claim | First-class refusal | `insufficient_evidence` |
+- `mode` là enum strict `chat | signal_desk`; thiếu `mode` = `chat`,
+  byte-compatible với request cũ; mode lạ = 422.
+- `CreateTurnRequest` là `extra="forbid"`: field này phải đổi **cùng commit**
+  với web client, nếu không mọi Turn 422.
+- `signal_desk` → lane `DEEP` (bỏ qua heuristic keyword) + toolset
+  `(*CHAT_TOOLSETS, "market_data")`. `chat` giữ nguyên router và catalog hiện tại.
+- Deep pipeline planning pass được phép một `get_market_data` cho series
+  giá/khối lượng; snippet search không bao giờ thoả một claim cần row market.
+- Bound `DEEP` không đổi: 10 round, 20 external call, 1.800s, ceiling LLM/cost
+  hiện có. Không có tool nào được thêm capacity riêng.
+- Untrusted tool text không đổi được policy, permission hay tool surface.
+- Recovery giữ đúng một strict-format repair mỗi draft (`draft_recovery_messages`).
 
 ## File Inventory
 
 | Action | File | Purpose |
 |---|---|---|
-| Create | `apps/api/src/agent/evidence/readiness.py` | Pure needs, coverage and readiness decisions. |
-| Modify | `apps/api/src/agent/evidence/pipeline.py` | Parse planner needs and pass readiness guidance. |
-| Modify | `apps/api/src/agent/loop.py` | Store readiness in `_TurnState`; invoke gate at real round boundaries. |
-| Modify | `apps/api/src/agent/guardrails.py` | Reuse exact/result signatures; add successful-repeat reuse and round no-progress halt only if not owned in readiness module. |
-| Modify | `apps/api/src/agent/parts.py` | Add allowlisted readiness/stop progress payload fields. |
-| Modify | `apps/api/src/agent/turns.py` | Checkpoint optional readiness summary without changing transcript text. |
-| Modify | `apps/api/src/agent/schemas.py` | Add backward-compatible `mode: chat | signal_desk` to Turn creation contract. |
-| Modify | `apps/api/src/agent/router.py` | Route Signal Desk request to deep lane + market toolset; chat remains existing route. |
-| Create | `apps/api/tests/test_agent_readiness.py` | Pure state-machine and adversarial loop tests. |
-| Modify | `apps/api/tests/test_agent_guardrails.py` | Duplicate success and coverage no-progress cases. |
-| Modify | `apps/api/tests/test_agent_loop.py` | Settlement, budgets, recovery and checkpoint integration. |
-| Modify | `apps/api/tests/test_agent_transport.py` | Request default/mode and progress replay contract. |
+| Modify | `apps/api/src/agent/schemas.py` | `mode: Literal["chat","signal_desk"] = "chat"` trên `CreateTurnRequest`. |
+| Modify | `apps/api/src/agent/turns.py` | Truyền `mode` vào `create_turn` (param đã có) và chọn lane ở site duy nhất `:483`. |
+| Modify | `apps/api/src/agent/service.py` | Truyền toolset selection vào `AgentLoop(toolsets=...)` (ctor param đã có). |
+| Modify | `apps/api/src/agent/evidence/pipeline.py` | Biến thể `PLANNER_NOTE`/`RESEARCH_NOTE` cho signal_desk: cho phép một market call, giữ nguyên counter pass. |
+| Modify | `apps/api/src/agent/router.py` | Nhận `mode` từ body, không suy từ text. |
+| Modify | `apps/web/src/lib/alpha-desk/*` (client gửi Turn) | Gửi `mode` — cùng commit với schema. |
+| Modify | `apps/api/tests/test_agent_transport.py` | Default/omitted/invalid mode; replay contract. |
+| Modify | `apps/api/tests/test_agent_loop.py` | signal_desk → DEEP + surface có `get_market_data`; chat thì không. |
+| Modify | `apps/api/tests/test_agent_evidence_pipeline.py` | Planning note biến thể; market gap không bị snippet thoả. |
 
-## Function And Interface Checklist
-
-- [ ] `EvidenceNeed` validates ID, kind, materiality, source/dataset requirements
-      and bounded symbol/time range.
-- [ ] `ResearchReadiness` is immutable and contains state, gaps, evidence IDs,
-      coverage digest and reason code; no chain-of-thought text is stored.
-- [ ] `evaluate_readiness(needs, evidence, visual_intent, as_of)` is pure and
-      deterministic for the same inputs.
-- [ ] `observe_coverage(previous, current)` owns consecutive no-progress count;
-      first miss gives guidance, second halts.
-- [ ] Tool result reuse is scoped to one Turn and exact canonical arguments;
-      reused result keeps original call/evidence identity and costs no dispatch.
-- [ ] Tool planning is constrained to the resolved surface; unknown tool names
-      remain ordinary executor refusals.
-- [ ] `mode` enum is strict; omitted mode means `chat`; no arbitrary client
-      string reaches toolset selection.
-- [ ] `signal_desk` routes to `DEEP` and includes market toolset; `chat` keeps
-      current intent router and exact existing catalog.
-- [ ] Progress payload contains codes/counts/need IDs only, never page text,
-      hidden reasoning or market rows.
-- [ ] Existing verifier still gets a clean context and fail-closes verified
-      labels; readiness does not replace claim-ledger validation.
+Không file mới. Không bảng mới. Không state machine thứ hai.
 
 ## Implementation Steps
 
-1. Freeze transcripts for chat light/deep behavior and add request schema tests:
-   omitted mode is byte-compatible; unknown mode is 422.
-2. Write pure tests for evidence needs, source routing and readiness outcomes
-   before touching `AgentLoop`.
-3. Extend existing research draft schema with needs/readiness proposal; retain
-   the current one bounded strict-schema recovery for malformed output.
-4. Evaluate readiness after each executor batch and evidence normalization.
-   Store only typed summaries in `_TurnState`, checkpoint and trajectory.
-5. Add exact successful result reuse using existing call/result signatures; do
-   not add a cache service or cross-Turn cache.
-6. Add coverage-delta course correction/halt. A blocked/malformed batch counts
-   as unchanged coverage, preventing a zero-dispatch round loop.
-7. Enforce terminal call reserve inside existing admission arithmetic; verifier,
-   format repair and synthesis all consume the same owner budget.
-8. Add fault-injection cases for cancellation, deadline, provider error,
-   permission denial, malformed planner and every ceiling.
-9. Replay existing Phase 6 evidence tests to prove the truth contract and
-   three-pass behavior remain intact.
+1. Freeze transcript chat light/deep hiện tại làm baseline; thêm schema test:
+   omitted mode byte-compatible, mode lạ = 422.
+2. Thêm `mode` vào `CreateTurnRequest` + router + client trong **một commit**.
+3. `turns.py`: `mode == "signal_desk"` → `(DEEP, "mode:signal_desk")`; log
+   reason như hiện tại. Không sửa `route_reason` — signal_desk không phải
+   heuristic.
+4. `service.py`: toolset selection theo mode; chat vẫn `CHAT_TOOLSETS`.
+5. Biến thể planning/research note cho signal_desk: nêu rõ số giá/khối lượng
+   phải đến từ `get_market_data`, snippet chỉ để discovery. Không đổi
+   `DRAFT_FORMAT`.
+6. Test: mọi ceiling vẫn giữ với ba tool trong surface; cancel/deadline/
+   permission-denied/provider-unavailable vẫn settle terminal có reason.
+7. Chạy lại suite evidence/untrusted/cancellation của Phase 6 để chứng minh
+   truth contract và three-pass không đổi.
 
 ## Test Matrix
 
-| Scenario | Expected dispatch/termination |
+| Scenario | Expected |
 |---|---|
-| Web narrative gap | Search then fetch; snippet alone remains unresolved. |
-| OHLCV/quote/trade gap | Only `get_market_data`; no speculative web replacement for exact rows. |
-| Mixed event analysis | Web and market calls may run in parallel if declarations allow; stable result order. |
-| Exact successful call repeated | One upstream dispatch; original result reused. |
-| Same payload from changed queries | Coverage unchanged; one correction, halt on second unchanged round. |
-| Exact failures | Existing warn/block/halt ladder; no external calls after halt. |
-| Malformed planner twice | One strict repair only, then typed incomplete/refusal. |
-| Permission denied required data | Legal alternative once or `permission_denied`; no retry storm. |
-| Round/call/deadline limit | Never exceed 10/20/1.800; final reason persisted. |
-| Cancellation during batch | Settled calls remain ordered; undispatched calls cancelled; Turn terminal. |
-| Model says ready with unresolved need | Host returns `continue` or `ready_refusal`, never `ready_answer`. |
-| Evidence sufficient but model keeps calling | Host stops tools and synthesizes. |
+| Request không có `mode` | Hành vi hiện tại, byte-compatible, không mode trong idempotency payload. |
+| `mode` lạ | 422, không tạo Turn. |
+| `mode=signal_desk` | Lane `DEEP`, reason `mode:signal_desk`, surface có `get_market_data`. |
+| `mode=chat` | Catalog và lane hiện tại, không có tool market. |
+| Gap giá/khối lượng | Chỉ `get_market_data` thoả; snippet để `gaps`. |
+| Market claim thiếu evidence | `validate_claim_ledger` hạ verdict; không có đường nào lên `VERIFIED`. |
+| Exact call lặp thất bại | Ladder warn → block → halt hiện có; không external call sau halt. |
+| Round / call / deadline ceiling | Không vượt 10 / 20 / 1.800; reason persisted. |
+| Cancel giữa batch | Call đã settle giữ thứ tự, call chưa dispatch bị cancel, Turn terminal. |
+| Verifier fail | `failed_ledger` render, Turn `COMPLETE` với gap là reason. |
 
 ## Verification Commands
 
 ```bash
-cd apps/api && pytest -q tests/test_agent_readiness.py tests/test_agent_guardrails.py tests/test_agent_loop.py tests/test_agent_evidence_pipeline.py tests/test_agent_transport.py tests/test_agent_turn_lifecycle.py
+cd apps/api && pytest -q tests/test_agent_transport.py tests/test_agent_loop.py tests/test_agent_evidence_pipeline.py tests/test_agent_guardrails.py tests/test_agent_turn_lifecycle.py
 python -m compileall -q apps/api/src apps/api/tests
+pnpm --dir apps/web type-check
 git diff --check
 ```
 
 ## Success Criteria
 
-- [ ] Every test Turn terminates with a stable reason; no path can schedule an
-      eleventh tool round or twenty-first external call.
-- [ ] A no-progress fixture gets exactly one course correction and then halts
-      on the second unchanged round.
-- [ ] Exact successful repeats dispatch upstream once per Turn.
-- [ ] Ready is impossible with unresolved material need, unsupported visual
-      data, ambiguous time/unit or invalid ledger evidence.
-- [ ] Existing Phase 6 evidence, untrusted-content and cancellation suites pass.
+- [ ] Request cũ (không `mode`) chạy y như trước, chứng minh bằng transcript
+      baseline.
+- [ ] `signal_desk` là đường duy nhất tới toolset market; chat không chạm được.
+- [ ] Mọi Turn test terminate với reason ổn định; không path nào lên round thứ
+      11 hay external call thứ 21.
+- [ ] Không file `readiness.py`, không digest, không state machine thứ hai
+      trong diff.
+- [ ] Suite evidence/untrusted/cancellation của Phase 6 xanh.
 
 ## Risks And Rollback
 
-**Readiness too strict:** answer becomes honest refusal more often. Measure gap
-codes; tune only against corpus evidence, never by bypassing a hard gate.
+**`extra="forbid"` phá mọi Turn:** schema và client lệch commit. Chặn bằng test
+transport chạy trước khi client đổi; rollback là revert cả hai cùng lúc.
 
-**Readiness too loose:** visual/claim appears without provenance. This is a hard
-failure; disable Signal Desk mode and market toolset. Rollback removes the
-readiness extension and request mode while preserving the existing AgentLoop.
+**Planning note quá cứng:** model tiêu round vào market call không cần thiết.
+Đo bằng corpus Phase 7, sửa note — không sửa bound.
+
+**Ledger quá nghiêm với số market:** xem Phase 3 Ledger Findings; hệ quả đúng
+là `SINGLE_SOURCE`, không phải nới `_PRIMARY_CLASSES`. Nếu answer refuse quá
+nhiều thì đó là deviation về truth contract, dừng và hỏi owner.
+
+Rollback toàn phase: gỡ `mode` khỏi schema/client và toolset selection; deep
+pipeline trở lại web-only, không mất capability nào đang có.

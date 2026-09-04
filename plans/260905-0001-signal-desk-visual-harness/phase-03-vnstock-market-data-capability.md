@@ -3,7 +3,7 @@ phase: 3
 title: "Vnstock Market Data Capability"
 status: todo
 priority: P1
-effort: "20h"
+effort: "8h"
 dependencies: [1]
 ---
 
@@ -12,48 +12,99 @@ dependencies: [1]
 ## Context Links
 
 - `plans/reports/research-260904-2254-vnstock-personal-to-saas-production.md`
-- `apps/api/src/agent/registry.py`
-- `apps/api/src/agent/toolsets.py`
-- `apps/api/src/agent/executor.py`
-- `apps/api/src/agent/evidence/contracts.py`
-- `apps/api/src/agent/evidence/pipeline.py`
+- `apps/api/src/agent/tools/web.py` — pattern của một tool đã ship (declaration, trust, cap)
+- `apps/api/src/agent/registry.py::ToolEntry` — `check_fn`, `requires_env`, `is_async`, `content_trust`, `max_result_size_chars`
+- `apps/api/src/agent/evidence/pipeline.py::evidence_from_calls`
+- `apps/api/src/agent/evidence/ledger.py` — `_PRIMARY_CLASSES`, `_temporal_valid`, `_numbers_supported`
+- `apps/api/src/agent/toolsets.py`, `apps/api/src/agent/domain/vn_equity.py`
 - `apps/api/src/core/config.py`
-- `apps/api/requirements.txt`
 
 ## Overview
 
-Add the smallest structured-data surface that closes web search's real gap:
-one read-only `get_market_data` tool backed by pinned Vnstock Community for
-personal internal use. The model chooses symbol, dataset and bounds; the host
-chooses provider route, validates semantics, normalizes units/time and converts
-the result to durable `STORE_FIGURE` evidence.
+Một tool read-only `get_market_data`, **một dataset `ohlcv`**, một symbol mỗi
+call, bounded rows, backed by Vnstock Community pinned, chỉ bật ở profile
+personal internal.
 
-This is not a market terminal or local analytics engine. No bulk ingestion,
-cache, scheduler or derived indicator is created.
+Không phải market terminal: không ingestion, cache, scheduler, indicator.
+
+**Chỉ `ohlcv`.** `trades` không có consumer nào trong Phase 5–7 (visual là
+candlestick + volume). `quote` bị intraday ohlcv 15m phủ (vnstock có lịch sử
+intraday tới 1 năm, một request, tier free) — cắt nó xoá luôn bài toán hai thang
+giá (ohlcv nghìn VND vs quote VND đầy đủ), case "quote không có timestamp", hai
+normalizer và một nửa test matrix. Thêm `quote` khi một câu hỏi thật cần độ mới
+dưới 15 phút; thêm `trades` khi có claim về order flow.
+
+## Ledger Findings (đọc code, không suy đoán)
+
+Ba fact quyết định hình dạng evidence. Sai một cái là mọi số market thành
+`UNSUPPORTED` và chart không bao giờ render:
+
+| Fact trong code | Hệ quả bắt buộc |
+|---|---|
+| `SourceClass.STORE` **không** nằm trong `_PRIMARY_CLASSES` (`ledger.py:30`) | Material claim chỉ có market evidence → verdict `SINGLE_SOURCE`, không bao giờ `VERIFIED`. **Chốt: không sửa `_PRIMARY_CLASSES`** — xem "Vì sao SINGLE_SOURCE là đúng" bên dưới. Phase 5 visual gate nhận `SINGLE_SOURCE` trở lên. |
+| `_temporal_valid`: `published_at is None` + material → `False` | Mỗi market evidence phải set `published_at` = thời điểm đóng của bar (ICT). Không set = mọi claim material thành `TEMPORALLY_INVALID`. |
+| `_numbers_supported` yêu cầu số xuất hiện trong `evidence.excerpt` và khớp unit | `excerpt` là **các dòng bar đã render thành text** với đúng thang số claim dùng, không phải JSON dump. |
+
+`EvidenceKind.STORE_FIGURE` và `SourceClass.STORE` đã có trong enum, chưa ai
+dùng — phase này là consumer đầu tiên, không cần sửa `contracts.py`.
+
+### Vì sao `SINGLE_SOURCE` là đúng, không phải hạn chế
+
+Số đến từ `kbbuddywts.kbsec.com.vn` (KB Securities) và `trading.vietcap.com.vn`
+(Vietcap) — feed công ty chứng khoán, **không phải HOSE/HNX**. Research report:
+"Vnstock là technical connector, không bán/trao quyền source data" và "Không
+được trả lời 'nguồn chính thức' chỉ vì Vnstock đã normalize row". Gọi nó
+`EXCHANGE`/primary là dán nhãn sai đường đi dữ liệu — đúng thứ
+`_PRIMARY_CLASSES` tồn tại để chặn.
+
+`SINGLE_SOURCE` không chặn sản phẩm: `report.valid` chỉ phụ thuộc
+duplicate/invalid evidence/errors, và `render_claim_ledger` hiện nó là "Một
+nguồn" **trong phần kết luận** (chỉ `UNSUPPORTED` bị đẩy xuống "Chưa kiểm
+chứng").
+
+**Đường lên `VERIFIED` đã có, không cần amend:** `_accepted_verdict` cho
+`VERIFIED` khi có ≥ 2 publisher độc lập. KBS và VCI là hai publisher, và probe
+đã thấy rows khớp nhau. Nếu Phase 7 đo được "Một nguồn" làm chất lượng answer
+yếu thì bật cross-check hai provider cho số material — vẫn không chạm truth
+contract.
+
+**Bẫy khi làm cross-check:** đừng phó cho publisher-count. `_numbers_supported`
+chỉ cần MATCHED ở *một* evidence và `_accepted_verdict` chỉ đếm publisher, nên
+hai provider lệch số mà một cái khớp thì vẫn ra `VERIFIED`. So sánh phải xảy ra
+ở tầng tool: lệch quá tolerance → `quality=conflict` + gap, emit **một**
+evidence, không emit hai.
+
+## Toolset Wiring
+
+Đăng ký bundle trong `TOOLSETS` nhưng **không** thêm vào
+`domain/vn_equity.py::PACK.toolsets`. `_check_the_selection_matches_the_pack`
+buộc `CHAT_TOOLSETS == CORE_TOOLSETS + pack.toolsets`, nên thêm vào pack =
+chat cũng nhận được tool. Phase 4 chọn bundle này riêng cho signal_desk.
+
+Không sửa `registry.py`: `ToolEntry` đã có `check_fn` (availability probe có
+cache, exception = unavailable), `requires_env`, `is_async=False` cho handler
+blocking, `content_trust`, `max_result_size_chars`, `permission_rules`.
 
 ## Requirements
 
-- Functional: datasets are exactly `ohlcv`, `quote`, `trades`; one normalized
-  HOSE/HNX/UPCOM symbol per call; no arbitrary provider/URL/method argument.
-- Functional: `ohlcv` requires bounded start/end and supports only the interval
-  proven by contract tests; `quote` is one snapshot; `trades` has a hard row cap.
-- Functional: reject reversed dates, unsupported interval, ambiguous unit,
-  stale/absent observation time and provider output outside requested bounds.
-- Functional: return source, package/version, provider, requested/actual bounds,
-  retrieved/observed/as-of times, timezone, currency, unit/scale, adjustment,
-  row count, quality state and raw/normalized SHA-256.
-- Functional: preserve raw provider field names for hashing/audit, but expose
-  only normalized allowlisted fields to the model and visual layer.
-- Functional: transform accepted rows into evidence IDs; numeric claims and
-  visual series cite those IDs rather than Vnstock documentation.
-- Security: key/credential is backend-only and never appears in tool schema,
-  model context, result, trace, browser or logs.
-- Deployment: capability availability is true only when explicit profile is
-  `personal_internal`, provider flag is on and package/version check passes.
-- Licensing: production/staging/shared SaaS profiles fail closed even if a key
-  exists; enabling them requires a later written-rights deviation.
-- Budget: declaration is network/read/idempotent, external-call counted,
-  finite timeout, bounded result size and no hidden `get_all`/pagination loop.
+- Arguments đúng `symbol` (HOSE/HNX/UPCOM đã normalize), `start`, `end`,
+  `interval` trong allowlist đã chứng minh bằng contract test. Không có
+  provider, URL, method hay method-name nào model chọn được.
+- Từ chối: ngày đảo, range vượt cap, interval ngoài allowlist, symbol không
+  hợp lệ, output provider ngoài bounds đã hỏi.
+- Envelope trả về: source, package version, provider, requested/actual bounds,
+  retrieved_at, timezone, currency, unit/scale, adjustment, row count, quality
+  state, `content_sha256` của **raw payload** provider.
+- Một hash, không hai: `build_evidence_ref` tự dẫn `excerpt_sha256`; normalized
+  rows suy ra deterministic từ raw nên hash thứ hai là con số không ai so.
+- Giữ tên field raw để hash/audit; chỉ expose field normalized đã allowlist ra
+  model và visual.
+- Security: credential backend-only — không vào schema, model context, result,
+  trace, browser, log.
+- Availability: `True` chỉ khi profile là `personal_internal` **và** flag bật
+  **và** import/version check pass. Production/staging fail-closed dù có key.
+- Budget: network/read/idempotent, đếm external call, timeout hữu hạn, cap
+  rows và serialized chars, không `get_all`/pagination loop.
 
 ## Tool Contract
 
@@ -62,95 +113,68 @@ cache, scheduler or derived indicator is created.
   "name": "get_market_data",
   "arguments": {
     "symbol": "FPT",
-    "dataset": "ohlcv | quote | trades",
-    "start": "YYYY-MM-DD (ohlcv only)",
-    "end": "YYYY-MM-DD (ohlcv only)",
-    "limit": "bounded integer (trades only)"
+    "start": "YYYY-MM-DD",
+    "end": "YYYY-MM-DD",
+    "interval": "1D | 15m (allowlist đã verify)"
   }
 }
 ```
 
-The response has one host-authored envelope and dataset-specific rows. Provider
-messages/errors are mapped to codes (`invalid_request`, `no_data`,
-`provider_unavailable`, `rate_limited`, `schema_drift`, `ambiguous_time`,
-`ambiguous_unit`) and never passed through as trusted prose.
+Lỗi provider map sang code (`invalid_request`, `no_data`,
+`provider_unavailable`, `rate_limited`, `schema_drift`, `ambiguous_time`),
+không bao giờ pass-through prose provider như văn bản đáng tin.
 
 ## File Inventory
 
 | Action | File | Purpose |
 |---|---|---|
-| Create | `apps/api/src/agent/tools/market_data.py` | Vnstock adapter, validation, normalization and registration. |
-| Modify | `apps/api/src/agent/tools/__init__.py` | Import registration using existing pattern. |
-| Modify | `apps/api/src/agent/toolsets.py` | Add a `market_data` bundle selected only for Signal Desk deep Turns. |
-| Modify | `apps/api/src/agent/registry.py` | Only if existing declarations cannot express the verified availability check; no new dispatch path. |
-| Modify | `apps/api/src/agent/evidence/contracts.py` | Use/clarify `STORE_FIGURE` locator semantics without weakening web evidence. |
-| Modify | `apps/api/src/agent/evidence/pipeline.py` | Convert successful market calls into evidence refs. |
-| Modify | `apps/api/src/core/config.py` | Explicit internal profile/provider gate. |
-| Modify | `apps/api/requirements.txt` | Pin the exact Community version proven in preflight. |
-| Create | `apps/api/tests/test_agent_market_data.py` | Contract, normalization, availability and error tests. |
-| Modify | `apps/api/tests/test_agent_toolsets.py` | Prove chat does not inherit market capability. |
-| Modify | `apps/api/tests/test_agent_evidence_contract.py` | Prove structured row provenance and hashes. |
+| Create | `apps/api/src/agent/tools/market_data.py` | Adapter + validate + normalize + registration. |
+| Modify | `apps/api/src/agent/tools/__init__.py` | Import registration theo pattern hiện có. |
+| Modify | `apps/api/src/agent/toolsets.py` | Một bundle `market_data`, không vào pack. |
+| Modify | `apps/api/src/agent/evidence/pipeline.py` | Một branch `get_market_data` trong `evidence_from_calls` → `STORE_FIGURE`. |
+| Modify | `apps/api/src/core/config.py` | Profile + flag gate. |
+| Modify | `apps/api/requirements.txt` | Pin đúng version đã probe. |
+| Create | `apps/api/tests/test_agent_market_data.py` | Contract, normalization, availability, error, ledger-shape. |
+| Modify | `apps/api/tests/test_agent_toolsets.py` | Chat không thừa hưởng bundle. |
 
-No migration is expected: full tool results already persist in
-`agent_tool_call`, and claim ledgers already persist `EvidenceRef`. If preflight
-finds either payload cannot replay a bounded result, stop and amend this plan
-before adding a table.
-
-## Function And Interface Checklist
-
-- [ ] `normalize_market_request(arguments)` validates dataset-specific fields
-      before any package call.
-- [ ] `get_market_data(context, arguments)` is the only registered handler.
-- [ ] Blocking Vnstock work is declared `is_async=False` so executor moves it
-      off the event loop.
-- [ ] `market_data_available()` checks profile, flag and exact import/version;
-      failures hide the tool rather than crash the catalog.
-- [ ] `normalize_ohlcv`, `normalize_quote`, `normalize_trades` return one typed,
-      deterministic JSON shape and reject unknown required-field drift.
-- [ ] Dates are post-filtered because VCI was observed ignoring `start`.
-- [ ] Price scale differences are explicit: OHLCV/trades thousand-VND versus
-      quote full VND are normalized to VND and retain original scale metadata.
-- [ ] Naive timestamps are assigned only by a documented Asia/Ho_Chi_Minh rule;
-      no timestamp is invented for quote rows that do not provide one.
-- [ ] Retry wrappers are unwrapped; validation/no-data never retry as outage.
-- [ ] Handler issues no `get_all`, multi-symbol request or unbounded page loop.
-- [ ] Registry trust is `TRUSTED_STRUCTURED` only after provider strings are
-      removed/allowlisted and all numbers pass validation.
-- [ ] Permission resource is a normalized symbol/dataset, not model-supplied URL.
+Không migration: `agent_tool_call` đã persist full result, ledger đã persist
+`EvidenceRef`. Nếu preflight thấy payload không replay được bounded result thì
+dừng và sửa plan trước khi thêm bảng.
 
 ## Implementation Steps
 
-1. In the project venv, verify current Vnstock Community API with package-native
-   discovery/docs; pin the tested version (research baseline `4.0.5`) only if
-   the exact calls still match. Do not guess renamed methods.
-2. Add failing tests with saved **shape metadata**, not fake market values, for
-   KBS/VCI observations in the research report: scale mismatch, ignored start,
-   `limit`/`page_size`, `va` alias and wrapped no-data errors.
-3. Add internal profile settings and fail-closed availability tests first.
-4. Implement request validation and one direct package operation per dataset;
-   record provider operation count and refuse any path requiring pagination.
-5. Normalize values, time and units; cap rows/serialized chars before returning.
-6. Register through the current declaration and permission plane, then expose
-   the tool only in the Signal Desk-selected toolset.
-7. Build `STORE_FIGURE` evidence from normalized payload + call ID + hashes;
-   preserve multi-source conflicts instead of silently selecting a value.
-8. Run live read-only canary against one liquid and one illiquid symbol, with
-   explicit rate ceilings from the internal entitlement; redact all credentials.
+1. Trong venv, verify API Vnstock Community hiện tại bằng discovery của chính
+   package; pin version đã test (baseline research `4.0.5`) chỉ khi call còn
+   khớp. Không đoán tên method đã đổi.
+2. Test đỏ trước, dùng **shape metadata** đã ghi trong research report (không
+   fake giá trị thị trường): thang giá, `start` bị bỏ qua, alias `va`,
+   no-data bọc trong retry wrapper.
+3. Profile/flag settings + availability fail-closed test trước implementation.
+4. Validate request → một package operation → post-filter ngày (VCI đã bị quan
+   sát bỏ qua `start`) → normalize sang VND, gắn timezone ICT tường minh, cap
+   rows và chars.
+5. Register qua declaration + permission plane hiện có; permission resource là
+   symbol đã normalize, không phải string model gửi.
+6. `evidence_from_calls`: build `STORE_FIGURE` từ raw hash + rendered rows
+   excerpt + `published_at` = bar close, `source_class=STORE`. Giữ conflict
+   nhiều nguồn, không im lặng chọn một giá trị.
+7. Live canary read-only, một mã thanh khoản cao + một mã thanh khoản thấp,
+   rate ceiling từ entitlement internal, redact credential.
 
 ## Test Matrix
 
-| Dataset/case | Expected |
+| Case | Expected |
 |---|---|
-| OHLCV valid range | Rows sorted, bounded, post-filtered, VND-normalized, timezone explicit. |
-| Quote valid | Snapshot fields typed; absent observation timestamp yields degraded/unavailable, never “live now”. |
-| Trades valid limit | Returned rows never exceed host cap even if provider ignores `limit`. |
-| Invalid symbol/reversed dates/weekend | Stable input/no-data code; no retry storm. |
-| KBS vs VCI conflict | Both identities preserved; quality is conflict/degraded. |
-| Schema drift/missing field | Fail closed with `schema_drift`; raw hash retained in trace. |
-| Tool called in chat mode | Not in resolved surface / unknown tool, no dispatch. |
-| Non-internal profile | Tool unavailable even with credentials installed. |
-| Result too large | Deterministic cap/refusal before model context. |
-| Secret scanner | No key in schema, result, trace, SSE or logs. |
+| Range hợp lệ | Rows sorted, bounded, post-filtered, VND, timezone tường minh. |
+| `start` bị provider bỏ qua | Host post-filter, actual bounds ≤ requested. |
+| Symbol sai / ngày đảo / cuối tuần | Code input/no-data ổn định, không retry storm. |
+| Schema drift / thiếu field | Fail closed `schema_drift`, raw hash còn trong trace. |
+| Result quá lớn | Cap/refusal deterministic trước khi vào model context. |
+| Evidence shape | `published_at` có, excerpt chứa số đúng unit, `_numbers_supported` trả rỗng. |
+| Ledger verdict | Material claim chỉ có market evidence → `SINGLE_SOURCE` (không `UNSUPPORTED`, không `VERIFIED`). |
+| Tool gọi ở chat mode | Không có trong resolved surface, không dispatch. |
+| Profile không internal | Tool unavailable dù credential đã cài. |
+| Secret scanner | Không có key trong schema, result, trace, SSE, log. |
 
 ## Verification Commands
 
@@ -160,24 +184,27 @@ python -m compileall -q apps/api/src apps/api/tests
 git diff --check
 ```
 
-Live canary is manual, read-only and budgeted; its exact command belongs in the
-phase report and must refuse to start without `personal_internal` profile.
+Live canary là manual, read-only, budgeted; command cụ thể ghi trong phase
+report và phải refuse khi profile không phải `personal_internal`.
 
 ## Success Criteria
 
-- [ ] All three datasets pass deterministic contract tests and bounded live
-      canary, or unsupported providers/datasets remain disabled explicitly.
-- [ ] One market call equals one admitted provider operation; no hidden fan-out.
-- [ ] Every accepted number has unit, time, source and two hashes.
-- [ ] Existing web/memory tools and chat tool surface are unchanged.
-- [ ] Production cannot expose the package or tool by configuration accident.
+- [ ] `ohlcv` pass contract test deterministic + bounded live canary.
+- [ ] Một market call = một provider operation admitted; không fan-out ẩn.
+- [ ] Mỗi số accepted có unit, time, source, một raw hash.
+- [ ] Market evidence đi qua `validate_claim_ledger` ra `SINGLE_SOURCE`, chứng
+      minh bằng test — không phải `UNSUPPORTED` vì thiếu `published_at` hay số
+      không có trong excerpt.
+- [ ] Web/memory tool và tool surface của chat không đổi.
+- [ ] Production không thể expose tool bằng nhầm lẫn config.
 
 ## Risks And Rollback
 
-**Schema/provider drift:** capability returns `schema_drift` and stops; it never
-coerces unknown fields. Roll back by removing the `market_data` bundle and
-dependency; web evidence remains functional.
+**Schema/provider drift:** trả `schema_drift` và dừng, không coerce field lạ.
+Rollback: gỡ bundle `market_data` + dependency; web evidence vẫn chạy.
 
-**License scope changes:** immediately disable the internal availability flag.
-Tool traces/ledger remain historical evidence under the retention policy; any
-required deletion is a separate reviewed data decision.
+**License scope đổi:** tắt flag internal. Trace/ledger vẫn là evidence lịch sử
+theo retention policy; xoá dữ liệu là một quyết định review riêng.
+
+**Chỉ `ohlcv` không đủ trả lời:** thêm `quote` như một dataset thứ hai trong
+cùng tool (thang giá là khác biệt duy nhất phải xử lý), không phải tool mới.

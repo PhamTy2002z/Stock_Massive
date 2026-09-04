@@ -3,7 +3,7 @@ phase: 6
 title: "Signal Desk Right Panel"
 status: todo
 priority: P1
-effort: "20h"
+effort: "10h"
 dependencies: [5]
 ---
 
@@ -11,147 +11,140 @@ dependencies: [5]
 
 ## Context Links
 
-- `apps/web/src/components/shell/inspector.tsx::Body`
+- `apps/web/src/components/shell/inspector.tsx:224` — `Body`, đúng chỗ `if (signalDesk) return <SignalDeskEmpty />`
+- `apps/web/src/components/shell/shell-state.tsx` — `state.signalDesk` đã tồn tại
+- `apps/web/src/components/signal-desk/signal-desk-empty.tsx` — docstring đã tham chiếu `SignalDeskPanel`'s skeleton
+- `apps/web/src/lib/alpha-desk/api.ts:118` — `createTurn` body, chưa có `mode`
 - `apps/web/src/components/shell/desk-state.tsx::DeskProvider`
-- `apps/web/src/components/signal-desk/signal-desk-empty.tsx`
-- `apps/web/src/lib/alpha-desk/{api,types,read-content,live-turn,transcript}.ts`
-- `apps/api/src/agent/schemas.py::CreateTurnRequest`
-- Phase 5 `VisualPart` and Flint compile wrapper
+- Phase 5 `VisualPart` + `compile-visual.ts`
 
 ## Overview
 
-Wire the existing Signal Desk mode to the backend and replace only the existing
-right-pane empty body with the latest visual for the active Signal Desk Turn.
-The conversation column stays text-only. The chart is the primary pane content;
-metadata and failures are compact, not a second explanatory answer.
+Nối mode Signal Desk (đã có trên composer) với backend, và thay **đúng một
+nhánh** ở `Body`: `signalDesk` đang trả `<SignalDeskEmpty />` thì giờ trả panel
+khi Thread có visual hoặc đang chạy Turn. Cột chat vẫn text-only.
+
+Geometry, resize, sources toggle, compact behavior của pane đã có và không đổi.
+
+## Một file, không phải hai
+
+Bản trước tách `signal-desk-panel.tsx` (state switch) và `flint-chart-view.tsx`
+(compile/render boundary). Cả hai cùng vòng đời, cùng client-only, và
+`compile-visual.ts` của Phase 5 đã là boundary thật với Flint. Một file
+`signal-desk-panel.tsx` giữ state switch + error boundary + lazy render.
+
+Cũng cắt "retry render control" khi compile lỗi: refresh là retry, và một nút
+retry cho một hàm pure compile chỉ chạy lại đúng cùng input.
 
 ## Requirements
 
-- Functional: Turn creation sends strict `mode: chat | signal_desk` from the
-  existing composer toggle; server default remains `chat` for older clients.
-- Functional: Chat mode renders existing transcript exactly and never mounts
-  Flint. Signal Desk mode shows running, ready, unavailable and error states in
-  the pane right of the chat column.
-- Functional: a new Signal Desk Turn clears the previous chart from “current”
-  status and shows live progress; no stale chart is presented as its result.
-- Functional: terminal/refetch and page refresh select the latest visual part
-  belonging to the active Thread; switching Threads cannot leak another chart.
-- Functional: sources remain reachable through the existing pane/header path;
-  the chart itself does not duplicate long evidence prose.
-- Visual integrity: use Phase 5 official Flint component/output unchanged; CSS
-  controls only outer width, height, padding, loading/error framing.
-- Accessibility: pane and figure have stable labels, loading/error announcements
-  are readable, keyboard resize/close behavior stays intact, reduced motion is
-  respected.
-- Responsive: desktop uses right pane; compact viewport uses the existing
-  full-width inspector behavior without a second layout implementation.
+- `createTurn` gửi `mode` là một enum value; server default vẫn `chat` cho
+  client cũ.
+- Chat mode render transcript y như hiện tại và **không load runtime chart**.
+- Signal Desk mode hiện bốn trạng thái ở pane phải: chưa hỏi, đang chạy, có
+  chart, xong nhưng không có chart.
+- Trạng thái "xong nhưng không có chart" suy ra từ state đã có (Turn terminal ở
+  mode signal_desk + không có key `visual`) — không cần field mới từ backend.
+- Turn Signal Desk mới không được để chart cũ đứng làm kết quả hiện tại.
+- Refresh và switch Thread chọn đúng visual của Thread đang mở; không leak
+  chart của Thread khác.
+- Sources vẫn tới được qua đường pane/header hiện có; chart không nhân đôi
+  evidence prose.
+- Dùng nguyên output Flint của Phase 5. CSS chỉ set width/height/padding và
+  khung loading/error.
+- Accessibility: pane và figure có label ổn định, loading/error announce được,
+  keyboard resize/close giữ nguyên, reduced motion được tôn trọng.
+- Responsive: desktop dùng pane phải; compact dùng đúng inspector behavior hiện
+  có, không viết layout thứ hai.
 
 ## UI State Table
 
 | Turn state | Right pane | Chat column |
 |---|---|---|
-| No Signal Desk question yet | Existing `SignalDeskEmpty` | Existing transcript |
-| Active Signal Desk Turn | Compact progress/loading state; no old chart as current | Normal text/thought/tool progress |
-| Complete + ready visual | Flint chart, title/as-of/source count | Text answer only |
-| Complete + insufficient evidence | Short unavailable state with stable reason | Text refusal/gaps |
-| Compile/runtime error | Isolated chart error + retry render control | Text remains usable |
-| Chat mode | Desk closed or no desk view | Existing behavior, no Flint mount |
+| Chưa có câu hỏi Signal Desk | `SignalDeskEmpty` hiện có | Transcript hiện có |
+| Turn Signal Desk đang chạy | Skeleton/progress gọn; chart cũ không mang nhãn "hiện tại" | Text/thought/tool progress bình thường |
+| Xong + có visual | Flint chart, title/as-of/số nguồn | Chỉ text answer |
+| Xong + không có visual | Một dòng ngắn: câu trả lời này không có chart đủ bằng chứng | Text refusal + ledger gaps |
+| Compile lỗi | Error trong pane, isolated | Chat vẫn dùng được |
+| Chat mode | Desk đóng, hoặc dòng `noDeskView` hiện có | Hành vi hiện tại, không mount Flint |
 
 ## File Inventory
 
 | Action | File | Purpose |
 |---|---|---|
-| Modify | `apps/web/src/lib/alpha-desk/api.ts` | Send mode on Turn creation. |
-| Modify | `apps/web/src/components/shell/desk-state.tsx` | Bind current toggle to request and select active visual. |
-| Modify | `apps/web/src/lib/alpha-desk/live-turn.ts` | Carry current visual/progress through terminal refetch without stale fallback. |
-| Modify | `apps/web/src/lib/alpha-desk/read-content.ts` | Read persisted visual while preserving text parsing. |
-| Modify | `apps/web/src/lib/alpha-desk/transcript.ts` | Explicitly exclude visual from chat entries. |
-| Create | `apps/web/src/components/signal-desk/signal-desk-panel.tsx` | State switch and outer figure shell. |
-| Create | `apps/web/src/components/signal-desk/flint-chart-view.tsx` | Client-only official compile/render boundary. |
-| Modify | `apps/web/src/components/shell/inspector.tsx` | Attach panel at existing `Body` seam. |
-| Modify | `apps/web/src/components/signal-desk/signal-desk-empty.tsx` | Only if copy must distinguish never-run from unavailable; no redesign. |
-| Create | `apps/web/src/components/signal-desk/signal-desk-panel.test.tsx` | Mode/state/thread/replay/accessibility tests. |
-| Modify | `apps/web/src/components/shell/shell.test.tsx` | Geometry, toggle, sources and compact behavior. |
-| Modify | `apps/web/src/lib/alpha-desk/api.test.ts` | Request mode compatibility. |
+| Modify | `apps/web/src/lib/alpha-desk/api.ts` | Gửi `mode` khi tạo Turn. |
+| Modify | `apps/web/src/components/shell/desk-state.tsx` | Snapshot mode lúc submit; chọn visual theo Thread. |
+| Modify | `apps/web/src/lib/alpha-desk/live-turn.ts` | Mang visual/progress qua terminal refetch, không fallback về chart cũ. |
+| Create | `apps/web/src/components/signal-desk/signal-desk-panel.tsx` | State switch + error boundary + lazy Flint render. |
+| Modify | `apps/web/src/components/shell/inspector.tsx` | Một nhánh ở `Body`. |
+| Modify | `apps/web/src/components/signal-desk/signal-desk-empty.tsx` | Chỉ copy phân biệt "chưa hỏi" với "không có chart"; không redesign. |
+| Create | `apps/web/src/components/signal-desk/signal-desk-panel.test.tsx` | Mode, state, thread, replay, a11y. |
+| Modify | `apps/web/src/components/shell/shell.test.tsx` | Geometry, toggle, sources, compact. |
+| Modify | `apps/web/src/lib/alpha-desk/api.test.ts` | Mode compatibility. |
 
-## Function And Interface Checklist
-
-- [ ] `createTurn(..., mode)` always sends one enum value; no UI-only truth is
-      inferred on the server.
-- [ ] `DeskProvider.submit` snapshots mode with the submitted question so a
-      toggle changed during request cannot relabel the running Turn.
-- [ ] `selectSignalDeskVisual(thread, liveTurn)` is pure, thread-scoped and
-      prefers the active Turn state over prior completed artifacts.
-- [ ] `SignalDeskPanel` owns only state selection; `FlintChartView` owns only
-      official validate/compile/render.
-- [ ] Flint/ECharts imports are client-only and lazy enough that Chat mode does
-      not load or execute the chart runtime.
-- [ ] Compilation error boundary cannot unmount Chat, inspector controls or
-      source access.
-- [ ] No component turns `visual` into markdown/text or inserts a chart card in
-      transcript.
-- [ ] Figure label uses host metadata; tool/provider raw strings are not used as
-      HTML and no `dangerouslySetInnerHTML` is introduced.
-- [ ] Existing keyboard separator semantics and responsive sizing remain.
+Không sửa `transcript.ts` (xem Phase 5: nó chỉ đọc key nó biết) và không sửa
+`read-content.ts` (Phase 5 đã thêm `readVisual`).
 
 ## Implementation Steps
 
-1. Add API client contract tests first: chat default/explicit mode, Signal Desk
-   mode, invalid mode and retry preserving original mode.
-2. Snapshot `signalDesk` at submit/queue/resend and carry it through all create
-   paths; do not read the toggle later when the request finally dispatches.
-3. Add a pure selector for active/live/persisted visual state and test Thread
-   switching plus new-Turn stale clearing.
-4. Build `FlintChartView` around Phase 5 wrapper with an isolated error boundary;
-   apply no chart option/theme transformation.
-5. Build the small panel state switch and attach it at `Inspector.Body`, keeping
-   existing pane geometry and source toggle behavior.
-6. Add compact/reduced-motion/keyboard/ARIA tests and a production build to
-   catch browser-only ECharts import mistakes.
-7. Run a real internal Signal Desk Turn, refresh mid-run and after completion,
-   then switch Threads; record screenshots and result hashes in the phase report.
+1. Test API client trước: default chat, explicit chat, signal_desk, mode sai,
+   và retry giữ đúng mode gốc.
+2. Snapshot `signalDesk` tại submit/queue/resend và mang theo request object;
+   không đọc lại toggle lúc request thật sự dispatch.
+3. Selector thuần cho visual (live → persisted → không có), scope theo Thread.
+   Test switch Thread và Turn mới xoá nhãn "hiện tại" của chart cũ.
+4. `signal-desk-panel.tsx`: bốn state, error boundary, `compile-visual.ts` của
+   Phase 5, không transform option/theme.
+5. Gắn ở `Inspector.Body`, giữ nguyên geometry và sources toggle.
+6. Test compact/reduced-motion/keyboard/ARIA + một production build để bắt lỗi
+   import ECharts phía server.
+7. Chạy một Turn Signal Desk thật, refresh giữa lúc chạy và sau khi xong, rồi
+   switch Thread; ghi screenshot vào phase report.
 
 ## Test Matrix
 
 | Scenario | Expected |
 |---|---|
-| Toggle off + submit | `mode=chat`; no visual runtime/mount. |
-| Toggle on + submit | `mode=signal_desk`; pane shows current progress. |
-| Toggle changes while queued | Request uses submit-time snapshot. |
-| New visual Turn after old chart | Old chart not labelled current; loading then new artifact. |
-| Refresh during run | Reattaches to Turn/progress; no duplicate Turn/tool call. |
-| Refresh after completion | Same visual hash compiles without backend work. |
-| Switch Thread | Only selected Thread visual appears. |
-| Invalid persisted visual | Pane error only; chat answer remains. |
-| Flint compile throws | Error boundary remains inside pane. |
-| Compact/keyboard/reduced motion | Existing inspector behavior and labels pass. |
+| Toggle off + submit | `mode=chat`; không mount, không load chart runtime. |
+| Toggle on + submit | `mode=signal_desk`; pane hiện progress. |
+| Toggle đổi khi đang queue | Request dùng snapshot lúc submit. |
+| Turn mới sau chart cũ | Chart cũ mất nhãn hiện tại; loading rồi chart mới. |
+| Refresh giữa lúc chạy | Reattach Turn/progress; không tạo Turn hay tool call trùng. |
+| Refresh sau khi xong | Cùng assembly compile lại, không backend work. |
+| Switch Thread | Chỉ visual của Thread đang chọn. |
+| Turn xong không có visual | Dòng ngắn trong pane; text answer nguyên vẹn. |
+| Visual persisted hỏng | Chỉ pane lỗi; chat vẫn đọc được. |
+| Flint compile throw | Error boundary nằm trong pane. |
+| Compact/keyboard/reduced motion | Behavior và label inspector hiện có pass. |
 
 ## Verification Commands
 
 ```bash
-pnpm --dir apps/web test -- src/lib/alpha-desk/api.test.ts src/lib/alpha-desk/live-turn.test.ts src/lib/alpha-desk/transcript.test.ts src/components/signal-desk/signal-desk-panel.test.tsx src/components/shell/shell.test.tsx
+pnpm --dir apps/web test -- src/lib/alpha-desk/api.test.ts src/lib/alpha-desk/live-turn.test.ts src/components/signal-desk/signal-desk-panel.test.tsx src/components/shell/shell.test.tsx
 pnpm --dir apps/web lint
 pnpm --dir apps/web type-check
 pnpm --dir apps/web build
 git diff --check
 ```
 
+Build production trong worktree dev đụng `.next` — dùng
+`E2E_NEXT_DIST_DIR=.next-verify pnpm build` để không phải dừng dev server.
+
 ## Success Criteria
 
-- [ ] A real Signal Desk prompt produces text in Chat and only the Flint visual
-      in the right pane.
-- [ ] Chat mode does not request, parse into transcript or mount a visual.
-- [ ] Refresh/reconnect/Thread switching preserve ownership and deterministic
-      visual selection without duplicate backend work.
-- [ ] Flint output is unmodified and compile failures are isolated.
-- [ ] Existing source drawer, pane resize, compact layout and accessibility tests
-      remain green.
+- [ ] Một prompt Signal Desk thật cho text ở Chat và **chỉ** Flint visual ở pane phải.
+- [ ] Chat mode không request, không parse vào transcript, không mount visual;
+      chunk chart không nằm trong bundle của chat path.
+- [ ] Refresh/reconnect/switch Thread giữ đúng ownership, chọn visual
+      deterministic, không backend work trùng.
+- [ ] Output Flint không bị sửa; compile failure isolated trong pane.
+- [ ] Sources drawer, pane resize, compact layout và a11y test hiện có còn xanh.
 
 ## Risks And Rollback
 
-**Mode race:** queued send reads current toggle instead of submit-time value.
-Prevent with immutable queued request object and regression test.
+**Mode race:** queued send đọc toggle hiện tại thay vì giá trị lúc submit. Chặn
+bằng request object immutable + regression test.
 
-**Heavy chart bundle in Chat:** dynamic import is accidentally eager. Check build
-chunks and a Chat-mode mount spy. Roll back `Body` to `SignalDeskEmpty` and stop
-sending `signal_desk`; backend text/evidence path remains valid.
+**Chart bundle lọt vào Chat:** dynamic import bị eager. Kiểm bằng build chunk +
+spy mount ở chat mode. Rollback: `Body` trả lại `SignalDeskEmpty` và ngừng gửi
+`signal_desk`; đường text/evidence backend vẫn hợp lệ.

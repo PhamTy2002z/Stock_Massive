@@ -3,7 +3,7 @@ phase: 7
 title: "End To End Quality Gate"
 status: todo
 priority: P1
-effort: "16h"
+effort: "12h"
 dependencies: [6]
 ---
 
@@ -11,168 +11,149 @@ dependencies: [6]
 
 ## Context Links
 
-- `apps/api/golden/README.md`
-- `apps/api/golden/`
-- `plans/260902-0026-phase-06-evidence-engine/plan.md`
-- `docs/roadmap.md` truth contract and Phase 6 gate
-- All Phase 2–6 reports and fixtures in this plan
+- `apps/api/golden/README.md` — sở hữu dimension, threshold, và vì sao host khác container
+- `apps/api/golden/release.json` — corpus: `families`, `dimensions` (có `class`), `markers`
+- `apps/api/golden/graders.py::DIMENSIONS` (hard) và `grade.py::LEGACY_GRADERS` (soft)
+- `apps/api/golden/gate.py` — đọc `class` từ report; hard fix ở 100%, không tunable
+- `apps/api/golden/thresholds.json` — "No threshold before a distribution", soft đều `null`
+- Toàn bộ Findings và fixture của Phase 2–6
 
 ## Overview
 
-Graduate the complete path, not isolated components: prompt → durable Turn →
-bounded web/Vnstock research → readiness → verified claim ledger → persisted
-visual part → official Flint compile → right-pane render. This phase absorbs the
-remaining paid Phase 6 evidence run so one corpus measures answer quality,
-evidence truth, tool discipline and visual validity together.
+Tốt nghiệp cả đường đi, không phải từng mảnh: prompt → durable Turn → research
+web/Vnstock bounded → ledger đã validate → visual part persisted → Flint compile
+chính thức → render pane phải. Phase này hấp thu luôn paid run còn lại của Phase
+6 evidence engine để **một** corpus đo đồng thời chất lượng answer, độ thật của
+evidence, kỷ luật tool và tính hợp lệ của visual.
 
-## Requirements
+## Mở rộng harness hiện có, không dựng cái thứ hai
 
-- Functional: extend the existing release corpus with bounded Signal Desk cases
-  covering OHLCV, event explanation, quote/trades, source conflict, no-data,
-  stale data, chat mode and insufficient evidence.
-- Functional: artifacts record mode, lane ceilings, stop reason, tool-call
-  fingerprints, need-to-call mapping, readiness history, evidence ledger,
-  visual part and Flint compile verdict; no generated option is recorded.
-- Functional: grading is offline after the paid run and uses the persisted claim
-  ledger/visual part, never reverse-parsed answer prose.
-- Budget: paid command requires explicit `CEILING_USD`; no default, no automatic
-  rerun and no live Vnstock call outside the internal profile/rate budget.
-- Quality: preserve all current truth-contract hard gates and existing Phase 6
-  rubric threshold; no threshold is lowered to make the new path pass.
-- Safety: fault injection proves cancellation, restart, malformed model output,
-  duplicate calls, provider failure, permission denial and every finite ceiling.
+Đọc `golden/` trước khi lên kế hoạch đổi nó:
+
+| Việc | Cách rẻ nhất trong kiến trúc hiện tại |
+|---|---|
+| Thêm case | Thêm family vào `release.json`; runner đọc corpus, không hard-code |
+| Thêm dimension | Một grader function + tên vào `graders.py::DIMENSIONS` + entry `dimensions` trong `release.json` với `class` |
+| Bật/tắt gate | **Không sửa `gate.py`**: nó đọc `class` từ report và fix hard ở 100% |
+| Threshold soft mới | **Không set**: `thresholds.json` giữ `null` cho tới khi có distribution nhiều trial |
+| Kiểm Flint compile | Một vitest đọc artifact JSON, đúng cách Phase 2 đã compile |
+| Chạy paid | `make golden-release CEILING_USD=… TRIALS=…` hiện có |
+
+Nên cắt khỏi bản trước: `golden/visual_grade.py`, `apps/web/src/lib/flint/grade-visuals.ts`
+(một trong hai là đủ, và web là nơi Flint chạy được), sửa `gate.py`, sửa
+`Makefile`.
+
+**Cắt một hard gate không chạy được.** "Call intent: 100% external call map tới
+một evidence need đang mở tại thời điểm admission" không đo được: `gaps` chỉ tồn
+tại *sau* research pass, còn call xảy ra *trước* nó. CLAUDE.md: một gate không
+quy về được command chạy được hay ngưỡng số là một roadmap bug — nên nó bị bỏ,
+không phải viết grader đoán. Kỷ luật tool vẫn được đo bằng duplicate dispatch,
+bound tuyệt đối và no-progress ladder.
 
 ## Release Corpus
 
-Keep the existing 40-case evidence corpus as denominator. Add a focused visual
-slice (minimum 12 cases) without replacing existing jobs:
+Giữ nguyên 40 case evidence hiện có làm mẫu số. Thêm một slice visual tối thiểu
+12 case như family mới trong `release.json`:
 
-| Family | Minimum cases | Required sources/output |
+| Family | Case tối thiểu | Nguồn/output bắt buộc |
 |---|---:|---|
-| Price/volume history | 3 | Vnstock OHLCV + evidence-bound Flint chart |
-| Event explanation | 3 | Primary/web narrative + OHLCV/quote/trades as needed |
-| Multi-symbol comparison | 2 | Same unit/time basis; Flint comparison or honest refusal |
-| Source/provider conflict | 1 | Both identities shown; no silent winner |
-| No-data/stale/ambiguous | 2 | Text refusal/unavailable visual |
-| Chat-mode control | 1 | Text/evidence only; zero visual work |
+| Price/volume history | 3 | Vnstock OHLCV + Flint chart có evidence |
+| Event explanation | 3 | Narrative primary/web + OHLCV khi cần |
+| Multi-symbol comparison | 2 | Cùng unit/interval → multi-series line, hoặc refusal trung thực |
+| Source/provider conflict | 1 | Cả hai identity hiện; không âm thầm chọn một |
+| No-data/stale/ambiguous | 2 | Text refusal, không có visual part |
+| Chat-mode control | 1 | Chỉ text/evidence; zero visual work |
 
-Live values are frozen into the paid artifact/tape for repeatable grading. Tests
-use these recorded real outputs; they do not fabricate market responses merely
-to satisfy gates.
+Giá trị live được freeze vào artifact/tape để grade lại không tốn tiền. Test
+dùng output thật đã ghi; không fabricate market response để thoả gate.
 
 ## Hard Gates
 
 | Dimension | Gate |
 |---|---|
-| Terminality | 100% Turns settle with typed status and stop reason. |
-| Absolute bounds | 0 Turns exceed lane limit: 10 tool rounds, 20 external calls, 1.800 seconds; per-round executor cap also holds. |
-| Call intent | 100% dispatched external calls map to an unresolved evidence need at admission time. |
-| Duplicate dispatch | 0 successful exact call fingerprints dispatched upstream twice in one Turn. |
-| No progress | 100% unchanged-coverage fixtures receive at most one correction and halt on the second consecutive unchanged round. |
-| Truth contract | Existing fabrication/disclosure/temporal/multi-source hard dimensions remain at their locked values (fabrication 0%). |
-| Visual grounding | 100% persisted visual numbers map to accepted tool-call field + evidence ID + unit + `as_of`. |
-| Flint validity | 100% `status=ready` visuals pass official pinned Flint validation/compile offline. |
-| Flint integrity | 0 modified/vendored Flint source files; 0 persisted or post-processed generated ECharts options. |
-| Mode isolation | 100% chat controls have no visual key, Flint compile or market toolset selected only because of UI state. |
-| Internal-only data | 100% non-internal profile cases hide/refuse Vnstock capability. |
-| Replay | Same persisted artifact produces the same visual input/hash after refresh/restart with 0 model/tool calls. |
+| Terminality | 100% Turn settle với typed status và stop reason. |
+| Absolute bounds | 0 Turn vượt lane: 10 tool round, 20 external call, 1.800s; cap per-round của executor cũng giữ. |
+| Duplicate dispatch | 0 exact call fingerprint thành công bị dispatch upstream hai lần trong một Turn. |
+| No progress | 100% fixture trả kết quả giống nhau đi tới ladder `TurnGuardrails` và dừng với reason của nó. |
+| Truth contract | Hard dimension fabrication/disclosure/temporal/multi-source giữ đúng giá trị đã lock (fabrication 0%). |
+| Visual grounding | 100% số trong visual persisted map về field của một tool call accepted + evidence ID + unit + `as_of`. |
+| Flint validity | 100% visual part persisted pass validate/compile của package Flint đã pin, offline. |
+| Flint integrity | 0 file Flint source bị sửa/vendor; 0 ECharts option được persist hay post-process. |
+| Mode isolation | 100% chat control không có key `visual`, không compile Flint, không nhận market toolset. |
+| Internal-only data | 100% case profile không internal đều ẩn/refuse capability Vnstock. |
+| Replay | Cùng artifact persisted cho cùng assembly sau refresh/restart, với 0 model/tool call. |
 
-Soft metrics—useful call rate, latency, cost, number of evidence gaps and visual
-selection quality—are reported as distributions first. They may get thresholds
-only after this baseline; they never override the hard ceilings above.
+Soft metric — useful call rate, latency, cost, số evidence gap, chất lượng chọn
+shape visual — báo ở dạng distribution trước. Chỉ được đặt threshold sau khi có
+baseline, và không bao giờ override ceiling ở trên. Đây là chính sách đã có
+trong `thresholds.json`, không phải quy tắc mới của phase này.
 
 ## File Inventory
 
 | Action | File | Purpose |
 |---|---|---|
-| Modify | `apps/api/golden/corpus.json` or current corpus owner | Add Signal Desk cases without replacing existing evidence cases. |
-| Modify | `apps/api/golden/run.py` | Record mode/readiness/visual fields and honor lane/provider ceilings. |
-| Modify | `apps/api/golden/grade.py` | Aggregate mechanical visual/tool-discipline dimensions. |
-| Modify | `apps/api/golden/gate.py` or current gate owner | Add hard gates using persisted structured fields. |
-| Create | `apps/api/golden/visual_grade.py` | Only if Flint compile verdict cannot live in existing grader without mixing Python/Node concerns. |
-| Modify | `apps/api/Makefile` | One combined release command only if current `golden-release` cannot select Signal Desk slice. |
-| Modify | `apps/api/tests/golden/test_release_corpus.py` | Corpus source/ground-truth/mode validation. |
-| Modify | `apps/api/tests/golden/test_grade.py` | Hard dimension fixtures. |
-| Modify | `apps/api/tests/golden/test_gate.py` | Fail-closed gate and missing-field behavior. |
-| Create | `apps/web/src/lib/flint/grade-visuals.ts` | Offline official Flint compile check, if needed by combined command. |
-| Create | `plans/260905-0001-signal-desk-visual-harness/reports/graduation-report.md` | Commands, versions, distributions, verdict and known limits. |
-| Modify after pass | `docs/roadmap.md`, `CLAUDE.md` | Mark capability current and record measured gates only. |
+| Modify | `apps/api/golden/release.json` | Thêm family Signal Desk + dimension mới kèm `class`; không bỏ case cũ. |
+| Modify | `apps/api/golden/run.py` | Ghi mode, stage history, visual part, lane ceiling thật theo case. |
+| Modify | `apps/api/golden/graders.py` | Grader cho visual grounding, mode isolation, replay. |
+| Modify | `apps/api/golden/grade.py` | Gắn dimension mới vào `DIMENSIONS`/report. |
+| Create | `apps/web/src/lib/flint/grade-artifact.test.ts` | Compile mọi visual part trong artifact bằng package đã pin, rồi bỏ output. |
+| Modify | `apps/api/tests/golden/test_release_corpus.py` | Validate source rights marker, mode, expected visual/refusal, bounded symbol/range. |
+| Modify | `apps/api/tests/golden/test_grade.py` | Fixture cho dimension mới. |
+| Create | `apps/api/tests/test_agent_fault_injection.py` | Cancel, deadline, provider fail, permission denied, mọi ceiling. |
+| Create | `plans/260905-0001-signal-desk-visual-harness/reports/graduation-report.md` | Command, version, distribution, verdict, giới hạn đã biết. |
+| Modify sau khi pass | `docs/roadmap.md`, `CLAUDE.md` | Ghi capability là current và các gate đã đo. |
 
-The implementation must first attempt to extend existing `golden-release`; a
-separate visual grader/module is created only if invoking the TypeScript Flint
-compiler cannot fit its current runner cleanly.
-
-## Function And Interface Checklist
-
-- [ ] Release artifact schema versions optional visual/readiness fields and
-      rejects unknown future shapes fail-closed for hard dimensions.
-- [ ] `run` records actual lane ceilings selected per case, not module constants.
-- [ ] Call-intent grader joins planned call ID → need ID → pre-call unresolved
-      state; prose similarity is not accepted as proof.
-- [ ] Duplicate grader canonicalizes arguments through production
-      `call_signature`, not a second implementation.
-- [ ] No-progress grader reads production coverage digests/reasons.
-- [ ] Visual grounding grader walks assembly data and proves exact membership in
-      normalized tool result/evidence; string labels are not treated as numbers.
-- [ ] Flint compile grader uses the exact pinned package and assembly input, then
-      discards compile output.
-- [ ] Missing market data/license/provider is a scored refusal, not a skipped
-      case that shrinks denominator.
-- [ ] Paid runner cancels/awaits every started Turn before releasing its slot;
-      no unfinished Turn leaks into later cases.
-- [ ] Release command refuses missing ceiling and records actual spend.
+Không sửa `gate.py`, `Makefile`, `thresholds.json`.
 
 ## Implementation Steps
 
-1. Add offline corpus validation first: source rights marker, mode, expected
-   visual/refusal and bounded symbol/time range for every new case.
-2. Extend structured run artifact with readiness/call-intent/visual fields;
-   preserve backward parsing for earlier artifacts where dimensions are `N/A`,
-   never falsely passing.
-3. Add adversarial offline fixtures for exact duplicate success, changed-query
-   same-result, repeated failure, malformed planner, permission denial, deadline,
-   restart and corrupt visual.
-4. Implement grounding and official Flint compile graders; verify they fail when
-   one value/evidence ID is deliberately changed.
-5. Run all free focused tests, then API suite, compileall and web gates. Fix
-   product defects; never weaken a gate or exclude a failing case.
-6. Run one internal read-only canary to ensure Vnstock provider/version/profile
-   is available and within explicit request budget.
-7. Run `golden-release` once with owner-provided `CEILING_USD` and trial count.
-   The first trial records web/market tape; later trials replay external data.
-8. Grade offline repeatedly until byte/dimension deterministic. If quality fails,
-   fix and request a new paid-run decision rather than silently spending again.
-9. Write graduation report with all hard gates, soft distributions, package/data
-   versions and unresolved production-license boundary.
-10. Only when every hard gate passes, update roadmap status and close the old
-    Signal Desk compiler plan as superseded.
+1. Validate corpus offline trước: mọi case mới có source rights marker, mode,
+   expected visual/refusal và bounded symbol/time range.
+2. Mở rộng artifact với field mode/stage/visual; giữ parse ngược cho artifact cũ
+   ở dạng `N/A`, không bao giờ pass giả.
+3. Thêm fixture offline adversarial: exact duplicate thành công, repeated
+   failure, malformed draft, permission denied, deadline, restart, visual hỏng.
+4. Viết grader grounding + vitest compile; verify chúng **fail** khi cố ý đổi
+   một value hoặc một evidence ID.
+5. Chạy hết test free, rồi API suite, compileall, web gate. Sửa defect sản
+   phẩm; không bao giờ nới gate hay loại case fail.
+6. Một canary internal read-only để chắc provider/version/profile Vnstock còn
+   dùng được, trong request budget tường minh.
+7. Chạy `golden-release` một lần với `CEILING_USD` và trial count do owner đưa.
+   Trial đầu ghi tape web/market; trial sau replay.
+8. Grade offline tới khi deterministic. Nếu chất lượng fail thì sửa rồi xin
+   quyết định paid run mới, không âm thầm tiêu tiếp.
+9. Viết graduation report: mọi hard gate, distribution soft, version package/dữ
+   liệu, và ranh giới license production còn treo.
+10. Chỉ khi mọi hard gate pass mới update roadmap status và đóng plan Signal Desk
+    compiler cũ là superseded.
 
 ## Test Scenario Matrix
 
 | Scenario | Assertions |
 |---|---|
-| FPT historical trend | Vnstock need, bounded OHLCV, source/time/unit, valid Flint chart. |
-| Sudden three-session drop | Web primary narrative plus relevant market data; claims distinguish fact/inference. |
-| Quote vs recent trades | Observation semantics explicit; no false “live” timestamp. |
-| Two-symbol comparison | Common unit/range or refusal; no mixed scale. |
-| KBS/VCI conflict | Conflict disclosed in ledger and visual metadata. |
-| Invalid symbol/weekend | No retry storm; no-data refusal and unavailable visual. |
-| Web sufficient, no structured need | No Vnstock call merely because capability exists. |
-| Structured need, web insufficient | Vnstock called; agent does not invent or stop early. |
-| Exact successful repeat | One provider dispatch, reused result, finite Turn. |
-| Endless changed searches, same evidence | One correction, then `no_progress`. |
-| 21 proposed external calls | First 20 maximum; tail refused/settled; reason recorded. |
-| 11th proposed tool round | Never dispatched. |
-| Simulated 1.800-second expiry | Deadline settlement with outstanding calls resolved. |
-| Cancel during parallel batch | No orphan process/call; stable order and terminal cancel. |
-| Invalid chart draft twice | One repair maximum; text survives, visual unavailable. |
-| Refresh/restart | Same message/visual hash, zero duplicate work. |
-| Chat mode control | No market bundle due to mode, no visual, existing text quality. |
+| FPT historical trend | OHLCV bounded, source/time/unit, Flint chart hợp lệ. |
+| Giảm ba phiên liên tiếp | Narrative primary + market data; claim phân biệt fact/inference. |
+| Intraday vs daily bar | Semantics quan sát tường minh; không có timestamp "live" giả. |
+| So sánh hai mã | Cùng unit/interval → multi-series, lệch → refusal; không trộn thang. |
+| KBS/VCI conflict | Conflict hiện trong ledger và metadata visual. |
+| Symbol sai / cuối tuần | Không retry storm; refusal no-data, không visual part. |
+| Web đủ, không cần structured | Không gọi Vnstock chỉ vì capability tồn tại. |
+| Cần structured, web không đủ | Gọi Vnstock; agent không bịa và không dừng sớm. |
+| Exact repeat thành công | Một dispatch provider, result reuse, Turn hữu hạn. |
+| Search đổi query, evidence không đổi | Ladder guardrail dừng với reason của nó. |
+| 21 external call đề xuất | Tối đa 20; phần dư refuse/settle; reason ghi lại. |
+| Round thứ 11 | Không bao giờ dispatch. |
+| Hết 1.800s | Deadline settlement, call còn treo được resolve. |
+| Cancel giữa parallel batch | Không orphan; thứ tự ổn định; terminal cancel. |
+| Visual không dựng được | Không có key visual; text sống nguyên. |
+| Refresh/restart | Cùng message/visual, zero công việc trùng. |
+| Chat mode control | Không market bundle, không visual, chất lượng text hiện có. |
 
 ## Verification Commands
 
 ```bash
-cd apps/api && pytest -q tests/test_agent_guardrails.py tests/test_agent_readiness.py tests/test_agent_market_data.py tests/test_agent_visual.py tests/test_agent_fault_injection.py tests/golden
+cd apps/api && pytest -q tests/test_agent_guardrails.py tests/test_agent_market_data.py tests/test_agent_visual.py tests/test_agent_fault_injection.py tests/golden
 cd apps/api && pytest -q tests/
 python -m compileall -q apps/api/src apps/api/golden apps/api/tests
 pnpm --dir apps/web lint
@@ -183,33 +164,34 @@ git diff --check
 rg -n 'src\.(stocks|studies)|Study DSL|Board DSL|widget catalog|global watchlist' apps/api/src apps/web/src
 ```
 
-Paid gate, run only with explicit owner ceiling:
+Paid gate, chỉ chạy với ceiling owner đưa:
 
 ```bash
 make -C apps/api golden-release CEILING_USD=<amount> TRIALS=<n>
+make -C apps/api golden-release CEILING_USD=1 RELEASE_ARGS="--grade-only golden/artifacts/<file>.json"
 ```
 
 ## Success Criteria
 
-- [ ] Every hard gate passes on one complete combined artifact; no case is
-      skipped to improve denominator.
-- [ ] Existing Phase 6 paid quality requirement is satisfied by this artifact
-      and is not left as a second pending run.
-- [ ] Tool count distributions show bounded, need-linked calls; duplicate and
-      no-progress adversarial cases terminate exactly as specified.
-- [ ] Every ready visual compiles with official Flint and is grounded in market
-      evidence; Chat controls have no visual work.
-- [ ] Full API/web/build/security/replay checks pass and graduation report is
-      sufficient to reproduce the verdict without another paid call.
-- [ ] Roadmap remains explicit that SaaS/production Vnstock is disabled pending
-      written software and upstream-data rights.
+- [ ] Mọi hard gate pass trên một artifact hợp nhất; không case nào bị skip để
+      làm đẹp mẫu số.
+- [ ] Yêu cầu paid quality của Phase 6 được thoả bằng artifact này, không còn
+      một paid run treo thứ hai.
+- [ ] Distribution tool count cho thấy call bounded; duplicate và no-progress
+      adversarial terminate đúng như đặc tả.
+- [ ] Mọi visual part compile được bằng Flint chính thức và mọi số có evidence;
+      chat control không có visual work.
+- [ ] Toàn bộ API/web/build/security/replay check pass, và graduation report đủ
+      để tái lập verdict mà không cần gọi paid lần nữa.
+- [ ] Roadmap ghi rõ SaaS/production Vnstock vẫn disabled tới khi có quyền phần
+      mềm và quyền dữ liệu upstream bằng văn bản.
 
 ## Risks And Rollback
 
-**Live corpus cost or unfinished Turns:** runner refuses without ceiling and
-awaits/cancels every Turn. Stop after the first systemic failure; do not burn the
-rest of the budget collecting known-bad evidence.
+**Corpus live tốn kém hoặc Turn không kết thúc:** runner refuse khi thiếu
+ceiling và await/cancel mọi Turn. Dừng sau failure hệ thống đầu tiên; không đốt
+phần budget còn lại để thu thập evidence đã biết là xấu.
 
-**Gate reveals quality regression:** keep plan open and Signal Desk behind its
-internal flag. Rollback order is UI panel → visual part → market toolset; the
-existing text/evidence engine remains deployable throughout.
+**Gate lộ ra regression chất lượng:** giữ plan mở và Signal Desk sau flag
+internal. Thứ tự rollback là UI panel → visual part → market toolset; engine
+text/evidence hiện có deploy được suốt quá trình.
