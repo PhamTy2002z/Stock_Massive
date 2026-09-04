@@ -80,7 +80,11 @@ describe("the Turn id", () => {
     expect(keys).toEqual([turnId, turnId])
   })
 
-  it("carries the mode the reader switched to, so the desk is asked for", async () => {
+  it("sends no mode, because the schema forbids a field it does not declare", async () => {
+    // `CreateTurnRequest` is `extra="forbid"` and declares no mode, so a body
+    // carrying one fails the whole Turn with a 422 — and because the mode was
+    // sent whether the desk was on or off, that was every Turn. The desk is a
+    // state of the surface until the request learns to carry it.
     fetchMock.mockResolvedValue(json({ id: "t-1", created: true }))
 
     await createTurn({
@@ -90,18 +94,7 @@ describe("the Turn id", () => {
       signalDesk: true,
     })
 
-    expect(sentBody().mode).toBe("signal_desk")
-  })
-
-  it("says chat rather than saying nothing, because the mode is part of the key", async () => {
-    // Omitted, the server would default it — and two Turns asked in two
-    // different modes under one id would resolve to each other. The value is
-    // stated so the idempotency payload can tell them apart.
-    fetchMock.mockResolvedValue(json({ id: "t-1", created: true }))
-
-    await createTurn({ threadId: "thread-1", turnId: newTurnId(), text: "VCB?" })
-
-    expect(sentBody().mode).toBe("chat")
+    expect(sentBody()).not.toHaveProperty("mode")
   })
 
   it("sends no analysis lens, because nothing behind the request reads one", async () => {

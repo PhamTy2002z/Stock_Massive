@@ -93,10 +93,10 @@ export interface CreateTurnInput {
   /**
    * Whether the reader threw the Signal Desk switch for this question.
    *
-   * The boolean is the surface's word and `mode` is the wire's. Translated here
-   * rather than upstream so the two vocabularies meet at exactly one line: the
-   * composer switches a mode it can name, and the request carries the value the
-   * schema owns.
+   * Read by the surface and not sent — see the note on `createTurn` below. It
+   * stays on the input because the callers already know the answer, and the
+   * line that puts it on the wire should be added where it is translated rather
+   * than rediscovered.
    */
   signalDesk?: boolean
   /**
@@ -119,10 +119,13 @@ export interface CreateTurnInput {
  * network: the same id with the same payload resolves to the Turn that already
  * exists instead of starting a second one.
  *
- * `mode` is part of that payload, which is why it is always sent rather than
- * sent only when it is on: the same sentence asked from the desk is a different
- * request from the same sentence asked in chat, because only one of them is owed
- * a picture.
+ * The desk mode is deliberately **not** on the wire. ``CreateTurnRequest``
+ * forbids fields it does not declare and it declares no mode, so sending one
+ * fails every Turn with a 422 — whether the desk is on or off, since the field
+ * was sent either way. Until the backend has a mode to be told about, the desk
+ * is a state of the surface: `signalDesk` on the input below is what the
+ * composer and the pane read, and putting it back on the body is one line on
+ * the day the request learns to carry it.
  */
 export function createTurn(input: CreateTurnInput): Promise<CreatedTurn> {
   return alphaFetch<CreatedTurn>(`/threads/${encodeURIComponent(input.threadId)}/turns`, {
@@ -131,7 +134,6 @@ export function createTurn(input: CreateTurnInput): Promise<CreatedTurn> {
       turn_id: input.turnId,
       text: input.text,
       symbols: input.symbols ?? [],
-      mode: input.signalDesk ? "signal_desk" : "chat",
       attachments: input.attachments ?? [],
       retry_of_turn_id: input.retryOfTurnId ?? null,
     }),
