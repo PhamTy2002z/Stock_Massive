@@ -5,8 +5,8 @@
  *
  * The proportions are inverted from what this panel used to be. It began as a
  * 408px inspector squeezed against the right edge, which is the right shape for
- * a list of citations and the wrong one for a chart with an axis: the picture
- * the answer was written about ended up the smallest thing on screen. So the
+ * a list of citations and the wrong one for a workspace: whatever the answer
+ * was written about ended up the smallest thing on screen. So the
  * **chat column is now the fixed one** — 420px and a hairline — and the desk
  * takes what is left. The seam between them is still draggable; what it moves is
  * the conversation's width, because the desk is defined as the remainder.
@@ -28,11 +28,9 @@ import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
 
 import { SignalDeskEmpty } from "@/components/signal-desk/signal-desk-empty";
-import { SignalDeskHeader } from "@/components/signal-desk/signal-desk-header";
 import { SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy";
 import { cn } from "@/lib/utils";
 
-import { useDesk } from "./desk-state";
 import { IconButton } from "./primitives";
 import {
   chatColumnWidth,
@@ -92,7 +90,7 @@ export function Inspector() {
   if (!open && phase !== "leaving") return null;
   // One tree in both phases. Wrapping only the leaving pane would make React
   // tear the open one down and mount a fresh copy to slide out — a remount
-  // the reader would see as the board redrawing itself on its way off.
+  // the reader would see as the pane redrawing itself on its way off.
   return (
     <ShellSnapshot value={open ? shell : last}>
       <Pane leaving={!open} onGone={onGone} />
@@ -102,7 +100,6 @@ export function Inspector() {
 
 function Pane({ leaving, onGone }: { leaving: boolean; onGone: () => void }) {
   const { state, dispatch, panelWidth } = useShell();
-  const desk = useDesk();
   const onDrag = useChatColumnDrag();
 
   // The fallback clock for a slide whose `animationend` never arrives.
@@ -114,13 +111,10 @@ function Pane({ leaving, onGone }: { leaving: boolean; onGone: () => void }) {
 
   const compact = isCompact(state.viewport);
   const showingSources =
-    state.inspector !== null && state.inspector !== "deskView";
+    state.inspector !== null && state.inspector !== "desk";
   const chatSources = showingSources && !state.signalDesk;
-  const activeDeskViewId = showingSources ? null : state.deskViewArtifactId;
 
   const chatWidth = chatColumnWidth(state);
-  // The build state and the composer's pill are one fact read in two places.
-  const building = desk.building;
 
   return (
     <aside
@@ -188,66 +182,17 @@ function Pane({ leaving, onGone }: { leaving: boolean; onGone: () => void }) {
           compact || chatSources ? "" : "rounded-[18px]",
         )}
       >
-        {chatSources ? (
-          <header className="flex flex-none items-center justify-between border-b border-border px-4 py-2.5">
-            <h2 className="text-sm font-medium text-ink-1">{SIGNAL_DESK_COPY.sources}</h2>
-            <IconButton
-              label="Đóng nguồn"
-              onClick={() => dispatch({ type: "close-inspector" })}
-            >
-              <X className="size-4" />
-            </IconButton>
-          </header>
-        ) : (
-          <div className="flex items-start gap-1">
-            <div className="min-w-0 flex-1">
-              <SignalDeskHeader
-                boards={state.deskBoards}
-                pinned={state.deskPinned}
-                activeDeskViewId={activeDeskViewId}
-                showingSources={showingSources}
-                canExport={false}
-                menuOpen={state.overlay === "board-menu"}
-                onOpenDeskView={(artifactId) =>
-                  dispatch({ type: "open-desk-view", artifactId })
-                }
-                onOpenSources={() =>
-                  dispatch({ type: "open-inspector", tab: "sources" })
-                }
-                onToggleMenu={(open) =>
-                  dispatch({
-                    type: "overlay",
-                    overlay: open ? "board-menu" : null,
-                  })
-                }
-                onTogglePin={(artifactId, pinned) =>
-                  dispatch({ type: "pin-desk-view", artifactId, pinned })
-                }
-                onOpenSwitcher={() =>
-                  dispatch({ type: "overlay", overlay: "boards" })
-                }
-                onShare={() => dispatch({ type: "overlay", overlay: "share" })}
-                onExport={() => {}}
-              />
-            </div>
-            {/* A hairline between the header's own controls and the way out.
-                Closing the desk is not one of the things the reader does *to* the
-                board, and without a rule the X reads as the fourth item in that
-                row. */}
-            <div className="flex flex-none items-center gap-1.5 pr-2 pt-3">
-              <span
-                aria-hidden
-                className="block h-4 w-px flex-none bg-foreground/[0.1]"
-              />
-              <IconButton
-                label="Close Signal Desk"
-                onClick={() => dispatch({ type: "close-inspector" })}
-              >
-                <X className="size-4" />
-              </IconButton>
-            </div>
-          </div>
-        )}
+        <header className="flex flex-none items-center justify-between px-4 py-2.5">
+          <h2 className="text-sm font-medium text-ink-1">
+            {chatSources ? SIGNAL_DESK_COPY.sources : SIGNAL_DESK_COPY.name}
+          </h2>
+          <IconButton
+            label={chatSources ? "Đóng nguồn" : "Đóng Signal Desk"}
+            onClick={() => dispatch({ type: "close-inspector" })}
+          >
+            <X className="size-4" />
+          </IconButton>
+        </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
           {/* `min-h-full` and a column, so the empty state's own `m-auto` has a
@@ -255,10 +200,10 @@ function Pane({ leaving, onGone }: { leaving: boolean; onGone: () => void }) {
               from the top exactly as it did before: a flex column with one
               child is block layout with extra steps. */}
           {/* Keyed on what the pane is showing, so a change of subject —
-              sources to board, build state to picture — fades the new one in
+              sources to desk — fades the new one in
               rather than swapping it under the reader between two frames. */}
           <div
-            key={bodyKey(showingSources, building, activeDeskViewId)}
+            key={showingSources ? "sources" : "desk"}
             className="mx-auto flex min-h-full max-w-[1120px] flex-col px-6 pb-[60px] pt-5 motion-safe:animate-vg-fade-in"
           >
             <Body
@@ -272,16 +217,6 @@ function Pane({ leaving, onGone }: { leaving: boolean; onGone: () => void }) {
   );
 }
 
-/** One key per subject the pane can show; the fade above restarts on change. */
-function bodyKey(
-  showingSources: boolean,
-  building: string | null,
-  activeDeskViewId: string | null,
-): string {
-  if (showingSources) return "sources";
-  if (building !== null) return "building";
-  return activeDeskViewId ?? "empty";
-}
 
 /**
  * What fills the column: the sources behind an answer, or the desk itself.

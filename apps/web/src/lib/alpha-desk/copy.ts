@@ -162,116 +162,21 @@ export const SIGNAL_DESK_COPY = {
   emptyUniverseHint: "Hiện hỗ trợ 30 mã VN30 — sẽ mở rộng dần.",
   /** What the pane says with the desk off and no picture in the conversation. */
   noDeskView: "Chưa có Signal Desk nào trong hội thoại này.",
-  /** An artifact this reader may not open, which is almost always another Thread's. */
-  unreachable: "Không mở được bảng này. Nó có thể thuộc một hội thoại khác.",
-  /**
-   * Everything else that can go wrong reaching this row is said by
-   * `lib/failure.ts`, in the same words the rest of the product uses for it.
-   * Only the 404 keeps a sentence here, because only this surface knows that an
-   * artifact which resolves to nothing is almost always another Thread's.
-   */
-  /**
-   * A run that produced no block to draw.
-   *
-   * Reachable, frozen, and empty is a different fact from unreachable, and the
-   * provenance strip above it stays: when the picture is missing, where the
-   * numbers would have come from and when they were frozen is the only thing
-   * left that a reader can weigh.
-   */
-  noBlocks: "Lần chạy này không dựng được khối nào để vẽ.",
-  /**
-   * The two modes the composer switches between, and what the desk says while a
-   * Study is running.
-   *
-   * Named rather than implied: the control used to be one pill that was either
-   * lit or not, and "lit" is not a state a first-time reader can read off a
-   * single button. Two labelled segments say what the other mode *is*, which is
-   * the whole reason a segmented control beats a switch for a pair of named
-   * modes.
-   */
   chatMode: "Chat",
   toggle: "Signal Desk",
-  running: "Đang dựng…",
-  /**
-   * The line over the build skeleton.
-   *
-   * Used when the tool call carries no sentence of its own. The backend writes
-   * one per call and it names the Study, which is more than this layer could
-   * say without interpreting arguments it does not own.
-   */
-  building: "Đang dựng deskView",
-  /** The tab that is not a desk view: what one answer rested on. */
   sources: "Nguồn",
-  /** Takes the numbers out of the browser as a file. See the note above. */
-  export: "Xuất",
-  /**
-   * The line the narrow column carries before the first question.
-   *
-   * English, and the one place in the transcript that is: it is the product
-   * naming itself, the same way the wordmark does, rather than the system
-   * narrating. The greeting it replaces stays on the ordinary chat opening —
-   * a reader who has switched the desk on has told us what they came for, and
-   * being greeted a second time is not it.
-   */
   deskEmptyHeadline: "Signal on your Desk",
-  /**
-   * What a block says when it cannot be drawn.
-   *
-   * **Neither sentence names anything from the machinery.** They used to: one
-   * quoted the frame's key and the other the widget and its version, so a
-   * reader met `bar_series v2` in a product that had promised them an analysis.
-   * A name only the server uses tells the reader nothing they can act on and
-   * everything about how the sausage is made, so what is left is the fact —
-   * this part has no numbers, or this part is a table today.
-   */
   blockNoData: "Phần này chưa có số liệu.",
   blockAsTable: "Hiển thị dạng bảng — bản này chưa vẽ được biểu đồ.",
 } as const
 
-/**
- * Everything the board switcher says.
- *
- * Its own record rather than more keys on `SIGNAL_DESK_COPY`, because these are
- * about *finding* a board rather than about a board — and because the switcher
- * is where the vocabulary rule is easiest to break. A row here shows a title, a
- * ticker, and the Vietnamese name of the analysis. It never shows the id it
- * opens by, and never the slug the server keys the recipe under.
- */
-export const BOARD_SWITCHER_COPY = {
-  /** The control that opens it, and the chord that does the same thing. */
-  open: "Tất cả bảng",
-  shortcut: "⌘K",
-  title: "Chuyển bảng",
-  placeholder: "Tìm theo tên bảng, mã hoặc phân tích…",
-  pinnedGroup: "Đã ghim",
-  recentGroup: "Gần đây",
-  allGroup: "Tất cả bảng",
-  /** The row that widens the list from "recent" to the whole conversation. */
-  showAll: "Xem tất cả bảng",
-  pin: "Ghim lên đầu danh sách",
-  unpin: "Bỏ ghim",
-  empty: "Hội thoại này chưa dựng bảng nào.",
-  noMatch: "Không có bảng nào khớp.",
-  /** How "Tất cả" groups: by the round of the answer that drew them. */
-  round: (round: number) => (round > 0 ? `Lượt hỏi ${round}` : "Trước đó"),
-  /** The dropdown's last row: the way to the searchable list. */
-  search: "Tìm bảng…",
-  /** The header's control before any board is open. */
-  choose: "Chọn bảng",
-  /** How many boards the conversation holds, beside the open one's name. */
-  count: (count: number) => `${count} bảng`,
-  /** The dropdown's group for every board that is not pinned, newest first. */
-  othersGroup: "Bảng khác",
-} as const
 
 /**
  * The three questions the desk offers before it has been asked anything.
  *
- * One per registered Study — intraday liquidity, condition review, earnings
- * dislocation — because the point of the row is to say what the desk can *draw*.
- * A starter that leads somewhere no Study answers teaches the reader the wrong
- * shape of question, and the empty column is the only place they have to learn
- * it from.
+ * Written to the shape of question the desk is for — one figure, in context,
+ * with its sources — because the point of the row is to teach that shape. The
+ * empty column is the only place a reader has to learn it from.
  *
  * They are offered into the field **unsent**. Two of them name a symbol, and
  * which symbols exist is a deployment's Universe rather than something this

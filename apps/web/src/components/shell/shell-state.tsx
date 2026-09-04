@@ -12,7 +12,6 @@ import {
   type ReactNode,
 } from "react"
 
-import { SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy"
 import { readPreferences, writePreferences } from "@/lib/alpha-desk/preferences"
 
 // URL-state helpers for the market-monitor views were removed with those
@@ -34,14 +33,14 @@ import { readPreferences, writePreferences } from "@/lib/alpha-desk/preferences"
 
 /** What fills the main column. Client state, deliberately: the reference switches
  *  these without a navigation, and the composer must survive the switch. */
-export type ShellView = "chat" | "board" | "new" | "news"
+export type ShellView = "chat"
 
 // See top-of-file comment: only "chat" is ever rendered now.
 const writeShellViewToHistory = (_view: ShellView): void => {}
 const shellViewFromSearch = (_search: string): ShellView | null => null
 
 /** Which tab the right-hand pane shows, or `null` when it is closed. */
-export type InspectorTab = "market" | "symbol" | "news" | "sources" | "deskView"
+export type InspectorTab = "sources" | "desk"
 
 /** The things that float above the surface. One at a time, always. */
 export type Overlay =
@@ -51,8 +50,6 @@ export type Overlay =
   | "share"
   | "palette"
   | "settings"
-  /** The board switcher: every picture this conversation drew, searchable. */
-  | "boards"
   /**
    * The screen capture, waiting to be looked at.
    *
@@ -61,48 +58,11 @@ export type Overlay =
    * and a capture-then-send flow sends things nobody meant to send.
    */
   | "capture"
-  /** The dropdown under the header's own control: the same boards, one click away. */
-  | "board-menu"
 
 export interface SelectedSymbol {
   symbol: string
   name: string
   exchange: string
-}
-
-/**
- * One desk view the conversation has produced, as the header needs it.
- *
- * An id and a name, never the numbers: the cells are a row the pane fetches by
- * id, and a copy of them here would be a second version of one picture that
- * could disagree with the one being drawn.
- *
- * The rest is what the switcher needs to *find* it again. A working
- * conversation makes twenty boards, so the way back that scales is search —
- * which needs more than a title to search on: a reader looking for "the
- * liquidity one for STB" remembers the ticker and the recipe, not the sentence
- * the server composed out of them.
- *
- * Those four are optional because they arrive from the announcement, and an
- * announcement written by a build that predates them carries none. A board with
- * no symbol is still a board; it is only harder to type your way back to.
- */
-export interface SignalDeskBoard {
-  artifactId: string
-  title: string
-  /** The ticker the board is about, or undefined for a whole-market one. */
-  symbol?: string
-  /**
-   * The recipe's stable name — matched against, never drawn.
-   *
-   * A reader who pasted a slug out of an exported file should find their board;
-   * a reader who did not should never learn the slug exists.
-   */
-  studyName?: string
-  /** The recipe's Vietnamese name. The only recipe name a person may see. */
-  studyDisplayName?: string
-  /** Which round of the tool loop produced it. How "Tất cả" groups. */
-  round?: number
 }
 
 interface ShellState {
@@ -139,45 +99,12 @@ interface ShellState {
    */
   attachRequests: number
   /**
-   * Every board this conversation has produced, in the order it announced them.
-   *
-   * The record, and the only list of boards the chrome draws from: the header's
-   * dropdown and the switcher both show the lot, so nothing a Turn drew is ever
-   * out of reach while the Thread is on screen.
-   */
-  deskBoards: SignalDeskBoard[]
-  /**
-   * The boards the reader keeps at the top of the list, in the order they were
-   * pinned.
-   *
-   * Ids rather than boards, because a pin outlives the board's arrival: it is
-   * restored from this browser before the Thread's messages have been read, so
-   * for a moment it names boards this state has not met yet.
-   */
-  deskPinned: string[]
-  /**
-   * The same boards as ids, newest first.
-   *
-   * What "the newest picture" means after a restore, where the boards arrive as
-   * a batch rather than one announcement at a time: the pane lands on the head
-   * of this list rather than on the desk's empty state.
-   */
-  deskRecent: string[]
-  /**
-   * Which of them the pane is showing, or null.
-   *
-   * An artifact id rather than the spec: the numbers are a TanStack Query
-   * resource keyed by that id, and a copy here would be a second version of one
-   * picture that could disagree with the one being fetched.
-   */
-  deskViewArtifactId: string | null
-  /**
    * Whether the reader chose what they are looking at.
    *
    * Set by any tab the reader opens themselves *and by dismissing the pane*,
-   * because both are a decision about what this conversation should show. A
-   * deskView arriving mid-answer then appends its tab without taking the surface
-   * off a reader who has gone back to Sources — or put it away.
+   * because both are a decision about what this conversation should show. The
+   * desk opening mid-answer then takes the surface only where the reader has
+   * not already put it somewhere else — or put it away.
    */
   inspectorPinned: boolean
   /**
@@ -190,7 +117,7 @@ interface ShellState {
    */
   signalDesk: boolean
   selected: SelectedSymbol
-  /** The symbol the composer sends as the Turn's analysis context. */
+  /** The symbol the composer sends as the Turn's context. */
   contextSymbol: string | null
   overlay: Overlay | null
   /** Viewport width, measured after mount. 0 until then — see `useViewport`. */
@@ -200,21 +127,11 @@ interface ShellState {
    *
    * Two surfaces mount a composer — the opening screen and the docked one — and
    * switching between them must not lose a half-typed question. It is also what
-   * lets another panel *offer* a question: the board's "Hỏi VisgniteAI" fills
+   * lets another panel *offer* a question: a panel's "Hỏi VisgniteAI" fills
    * the field and leaves the user to press send, rather than sending on their
    * behalf.
    */
   draft: string
-  /**
-   * Which article the news view has open, as `"SYMBOL:id"`, or `null` for the feed.
-   *
-   * Here rather than in the news view for the same reason as `draft`: reading an
-   * article is not a navigation, so glancing at the board and coming back must
-   * return to the paragraph the reader was on rather than to the top of the
-   * feed. It is also what lets the inspector's source tab exist at all — that
-   * panel is a second surface describing the same open article.
-   */
-  newsArticle: string | null
 }
 
 type Action =
@@ -225,20 +142,6 @@ type Action =
   | { type: "open-sources"; messageId: number }
   // The same for a desk view: which picture, opened by the reader. Everything
   // but the id is optional because the transcript's card knows only the id.
-  | ({ type: "open-desk-view"; artifactId: string } & Partial<SignalDeskBoard>)
-  // A desk view the Turn produced. Always filed; the pane switches to it only
-  // where the desk is on and the reader has not chosen something else.
-  | ({ type: "signal-desk-ready"; artifactId: string } & Partial<SignalDeskBoard>)
-  | { type: "desk-views-restored"; tabs: SignalDeskBoard[] }
-  // Keep one board at the top of the list, or stop keeping it there.
-  | { type: "pin-desk-view"; artifactId: string; pinned: boolean }
-  // What this browser remembered about *this* Thread's pins. Separate from the
-  // gesture for the reason `restore-layout` is: a restore is not a choice, and
-  // must not be written straight back.
-  | { type: "desk-pins-restored"; artifactIds: string[] }
-  // The name a fetched artifact turned out to carry, for a tab that was opened
-  // out of the transcript and so had only an id to go on.
-  | { type: "signal-desk-title"; artifactId: string; title: string }
   | { type: "close-inspector" }
   | { type: "signal-desk"; on: boolean }
   | { type: "resize-chat"; width: number }
@@ -257,8 +160,6 @@ type Action =
   | { type: "overlay"; overlay: Overlay | null }
   | { type: "viewport"; width: number }
   | { type: "draft"; text: string }
-  /** Open one article in the news view, or `null` to go back to the feed. */
-  | { type: "news-article"; article: string | null }
   /** Fill the composer and put the user in front of it, without sending. */
   | { type: "ask"; text: string }
   | { type: "pick-attachment" }
@@ -270,14 +171,14 @@ const SOURCE_DRAWER_WIDTH = 408
 /**
  * The chat column once the desk is open.
  *
- * The design's 420 read too narrow beside a board: an answer with two evidence
- * blocks wrapped every line. Raised by a third so the conversation stays
- * readable while the desk still has room on a 1440 viewport.
+ * The design's 420 read too narrow beside the pane: an answer with two
+ * evidence blocks wrapped every line. Raised by a third so the conversation
+ * stays readable while the desk still has room on a 1440 viewport.
  */
 const CHAT_DEFAULT = 556
 /** Below this the conversation stops being a conversation and becomes a gutter. */
 const CHAT_MIN = 380
-/** Below this the pane cannot hold a chart beside its own axis labels. */
+/** Below this the pane is too narrow to be a workspace rather than a strip. */
 const SIGNAL_DESK_MIN = 480
 /** One column from here down: two of them would each be too narrow to read. */
 const COMPACT_VIEWPORT = 768
@@ -297,7 +198,7 @@ export function isCompact(viewport: number): boolean {
  * shrink the workspace, it breaks it.
  *
  * That is what the reader was seeing. Pulling the list out over an open desk
- * squeezed the conversation and the chart into whatever was left, and the fix
+ * squeezed the conversation and the pane into whatever was left, and the fix
  * is not to forbid the list but to stop it taking the room: floating, it costs
  * the layout nothing and closes again on the next click outside.
  *
@@ -385,19 +286,14 @@ const INITIAL: ShellState = {
   chatWidth: null,
   sourcesMessageId: null,
   attachRequests: 0,
-  deskBoards: [],
-  deskPinned: [],
-  deskRecent: [],
-  deskViewArtifactId: null,
   inspectorPinned: false,
   signalDesk: false,
   dragging: false,
-  selected: { symbol: "VCB", name: "Ngân hàng TMCP Ngoại thương Việt Nam", exchange: "HOSE" },
+  selected: { symbol: "VNINDEX", name: "VN-Index", exchange: "HOSE" },
   contextSymbol: null,
   overlay: null,
   viewport: 0,
   draft: "",
-  newsArticle: null,
 }
 
 /**
@@ -420,56 +316,6 @@ function foldSidebarIfCramped(state: ShellState): ShellState {
   if (state.viewport === 0 || isCompact(state.viewport)) return state
   if (state.viewport - SIDEBAR_WIDTH >= CHAT_MIN + SIGNAL_DESK_MIN) return state
   return { ...state, sidebarOpen: false }
-}
-
-/**
- * The record with this board in it, or the record itself when nothing changed.
- *
- * Identity is the contract: `desk-views-restored` runs on every change to the
- * message list, and a fresh array each time would re-render the whole shell for
- * a list that is word for word the one already held.
- */
-function withBoard(boards: SignalDeskBoard[], board: SignalDeskBoard): SignalDeskBoard[] {
-  const index = boards.findIndex((existing) => existing.artifactId === board.artifactId)
-  if (index === -1) return [...boards, board]
-  const known = boards[index]
-  if (
-    known.title === board.title &&
-    known.symbol === board.symbol &&
-    known.studyName === board.studyName &&
-    known.studyDisplayName === board.studyDisplayName &&
-    known.round === board.round
-  ) {
-    return boards
-  }
-  // A republished announcement is the same run, so it replaces rather than
-  // adding a second board for one picture.
-  const next = [...boards]
-  next[index] = board
-  return next
-}
-
-/** What the caller said about a board, filled in from what is already known. */
-function boardFrom(
-  state: ShellState,
-  action: { artifactId: string } & Partial<SignalDeskBoard>,
-): SignalDeskBoard {
-  const known = state.deskBoards.find((board) => board.artifactId === action.artifactId)
-  const title = action.title?.trim()
-  return {
-    artifactId: action.artifactId,
-    // A desk view with no title still gets a name a person can read.
-    title: title || known?.title || SIGNAL_DESK_COPY.name,
-    symbol: action.symbol ?? known?.symbol,
-    studyName: action.studyName ?? known?.studyName,
-    studyDisplayName: action.studyDisplayName ?? known?.studyDisplayName,
-    round: action.round ?? known?.round,
-  }
-}
-
-/** The recency list with a board this conversation has not seen at its head. */
-function fileRecent(recent: string[], artifactId: string): string[] {
-  return recent.includes(artifactId) ? recent : [artifactId, ...recent]
 }
 
 function reduce(state: ShellState, action: Action): ShellState {
@@ -499,127 +345,11 @@ function reduce(state: ShellState, action: Action): ShellState {
         overlay: null,
       })
 
-    case "open-desk-view": {
-      // A card in the transcript is another deliberate way into the desk, so
-      // it owns the same column transition as throwing the switch: the list
-      // folds even where all three columns would technically fit. Unlike the
-      // switch on a phone, the card then opens the full-screen pane because the
-      // reader explicitly asked to see this picture.
-      const withDesk = reduce(state, { type: "signal-desk", on: true })
-      return {
-        ...withDesk,
-        inspector: "deskView",
-        deskBoards: withBoard(state.deskBoards, boardFrom(state, action)),
-        // A card in the transcript can name a picture this state has not met —
-        // the transcript is read before the boards are restored off it.
-        deskRecent: fileRecent(state.deskRecent, action.artifactId),
-        deskViewArtifactId: action.artifactId,
-        inspectorPinned: true,
-        overlay: null,
-      }
-    }
-
-    case "signal-desk-ready": {
-      // The board is filed whatever the reader is looking at: they may open it
-      // a minute later, and the switcher has to know the picture exists.
-      const next: ShellState = {
-        ...state,
-        deskBoards: withBoard(state.deskBoards, boardFrom(state, action)),
-        deskRecent: fileRecent(state.deskRecent, action.artifactId),
-      }
-      // The desk is the trigger now. A desk view arriving while it is off leaves a
-      // card in the transcript and nothing else — the reader decides when the
-      // layout changes under them.
-      if (!state.signalDesk) return next
-      // On a phone the pane would be the whole screen, which is the answer
-      // taking the conversation off the reader mid-sentence.
-      if (isCompact(state.viewport)) return next
-      // The reader is somewhere they chose. Appending a tab is telling them;
-      // switching to it would be deciding for them.
-      if (state.inspectorPinned && state.inspector !== "deskView") return next
-      return foldSidebarIfCramped({
-        ...next,
-        inspector: "deskView",
-        deskViewArtifactId: action.artifactId,
-        overlay: null,
-      })
-    }
-
-    case "desk-views-restored": {
-      // Putting back what this conversation already made, and nothing else.
-      //
-      // Opening a Thread clears the boards — they belonged to the conversation
-      // being left. What was missing is the other half: the Thread being
-      // *entered* has its own pictures, stored on its messages, and they were
-      // being thrown away on every reopen.
-      //
-      // Deliberately inert about layout. It does not open the inspector, does
-      // not switch tab, does not pin, and does not turn the desk on: a reader
-      // returning to an old conversation asked for the conversation, not for a
-      // panel to take a third of it. All this does is make the pictures
-      // reachable in one click instead of by scrolling for the card.
-      const deskBoards = action.tabs.reduce(withBoard, state.deskBoards)
-      // Identity when there is nothing new, because this runs on every change
-      // to the message list and a fresh array each time would re-render the
-      // whole shell for no reason.
-      if (deskBoards === state.deskBoards) return state
-      // The boards arrive oldest first, so unshifting each one leaves the
-      // recency list newest first. Only boards this conversation had not filed
-      // yet are filed, so a re-announcement of the whole list on every message
-      // change leaves the order the reader already has alone.
-      const known = new Set(state.deskBoards.map((board) => board.artifactId))
-      const deskRecent = action.tabs
-        .filter((board) => !known.has(board.artifactId))
-        .reduce((recent, board) => fileRecent(recent, board.artifactId), state.deskRecent)
-      return {
-        ...state,
-        deskBoards,
-        deskRecent,
-        // The newest is what the header opens onto, so that reaching for the
-        // desk answers immediately rather than with its own empty state. Never
-        // overrides a picture already on screen.
-        deskViewArtifactId: state.deskViewArtifactId ?? deskRecent[0] ?? null,
-      }
-    }
-
-    case "signal-desk-title": {
-      const index = state.deskBoards.findIndex(
-        (board) => board.artifactId === action.artifactId,
-      )
-      if (index === -1 || state.deskBoards[index].title === action.title) return state
-      const deskBoards = [...state.deskBoards]
-      deskBoards[index] = { ...deskBoards[index], title: action.title }
-      return { ...state, deskBoards }
-    }
-
-    case "pin-desk-view": {
-      const pinned = state.deskPinned.includes(action.artifactId)
-      if (pinned === action.pinned) return state
-      // Only the pin moves. Releasing one leaves the board where the list
-      // already had it, because the list holds every board either way — a
-      // release that also reordered would move a row out from under the cursor
-      // that had just pressed it.
-      return {
-        ...state,
-        deskPinned: action.pinned
-          ? [...state.deskPinned, action.artifactId]
-          : state.deskPinned.filter((id) => id !== action.artifactId),
-      }
-    }
-
-    case "desk-pins-restored": {
-      const same =
-        state.deskPinned.length === action.artifactIds.length &&
-        state.deskPinned.every((id, at) => action.artifactIds[at] === id)
-      if (same) return state
-      return { ...state, deskPinned: [...action.artifactIds] }
-    }
-
     case "close-inspector":
       // The width goes back to the default with it: a pane reopened at
       // yesterday's drag width would be a setting nobody asked to keep. The pin
       // stays *set* — putting the workspace away is a decision about this
-      // conversation, and the next deskView must not undo it. And the desk goes
+      // conversation, and the desk opening again must not undo it. And the desk goes
       // off with it, because the pill and the pane are one state and a switch
       // reading "on" over an ordinary chat layout is a lie.
       return {
@@ -646,7 +376,7 @@ function reduce(state: ShellState, action: Action): ShellState {
       return {
         ...state,
         signalDesk: true,
-        inspector: "deskView",
+        inspector: "desk",
         inspectorPinned: false,
         overlay: null,
         // The desk takes the room from the list, on every viewport rather than
@@ -689,11 +419,7 @@ function reduce(state: ShellState, action: Action): ShellState {
         chatWidth: null,
         inspectorPinned: false,
         sourcesMessageId: null,
-        deskBoards: [],
-        deskPinned: [],
-        deskRecent: [],
-        deskViewArtifactId: null,
-        signalDesk: false,
+                                signalDesk: false,
       }
       if (!action.signalDesk) return cleared
       // Applied through the same transition the switch itself uses, so there is
@@ -707,11 +433,8 @@ function reduce(state: ShellState, action: Action): ShellState {
       return action.opened ? withDesk : { ...withDesk, sidebarOpen: state.sidebarOpen }
     }
 
-    case "select-symbol": {
-      const next: ShellState = { ...state, selected: action.selected }
-      if (!action.open) return next
-      return foldSidebarIfCramped({ ...next, inspector: "symbol", overlay: null })
-    }
+    case "select-symbol":
+      return { ...state, selected: action.selected }
 
     case "context-symbol":
       return { ...state, contextSymbol: action.symbol }
@@ -734,11 +457,6 @@ function reduce(state: ShellState, action: Action): ShellState {
 
     case "draft":
       return { ...state, draft: action.text }
-
-    case "news-article":
-      // An article opening is a change of what the main column reads, so
-      // whatever was floating over it belongs to the screen being left.
-      return { ...state, newsArticle: action.article, overlay: null }
 
     case "pick-attachment":
       // The composer opens the picker; this only says that it was asked for.
@@ -843,13 +561,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault()
         // One shortcut, aimed at whichever list the reader is standing in. With
-        // the workspace open the thing there are twenty of is boards, not
-        // conversations, and making them reach for a second chord to say so
-        // would put the more common search behind the rarer one.
-        dispatch({
-          type: "overlay",
-          overlay: state.inspector === "deskView" ? "boards" : "palette",
-        })
+        dispatch({ type: "overlay", overlay: "palette" })
       }
       // The hint is printed on the menu row (`composer.tsx`), and a printed
       // shortcut that does nothing is the same broken promise this whole
@@ -885,7 +597,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
  * A pane that slides shut over 420ms is drawn for 420ms after the state that
  * opened it has gone: `inspector` is null, `panelWidth` is zero, and every child
  * reading `useShell` would redraw itself for a closed desk while still on
- * screen — the sources tab falling back to the board, the board to its empty
+ * screen — the sources tab falling back to the desk, the desk to its empty
  * line. Handing the subtree the last open value instead keeps the picture still
  * for the length of the slide. `dispatch` stays live; the pane itself turns
  * pointer events off.

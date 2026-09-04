@@ -5,12 +5,9 @@ import {
   Camera,
   ChevronDown,
   ChevronRight,
-  Grid2x2,
-  LayoutList,
   Paperclip,
   Plus,
   Square,
-  Telescope,
   Wallet,
   X,
 } from "lucide-react"
@@ -191,7 +188,7 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
         </div>
       )}
 
-      {/* Above the field, where the analysis-context pill sits, because both
+      {/* Above the field, where the context pill sits, because both
           answer the same question: what is travelling with this question
           besides its words. */}
       {desk.attachments.length > 0 && (
@@ -328,7 +325,7 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
               // Inverted rather than coloured: the design makes this the one
               // solid light shape on the whole surface, which is what picks it
               // out without the accent colour — that is spoken for by the
-              // analysis-context chip a few pixels away, and two oranges in one
+              // context chip a few pixels away, and two oranges in one
               // card compete. `bg-foreground` inverts with the theme, so the
               // button stays the opposite of its ground in light mode too.
               //
@@ -375,19 +372,15 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
  * the consequential mode, and marks nothing at all while the reader is simply
  * chatting.
  *
- * **Three states, and the third is a status light.** While a Study is in flight
- * the segment says so, from the same `building` the pane's skeleton is drawn
- * from — one fact, two places. There is deliberately no fourth: the feature is
- * free for everyone in this release, so there is no locked state, no upgrade
- * path and no popover explaining a limit that does not exist.
+ * **Two states, and no third.** The feature is free for everyone in this
+ * release, so there is no locked state, no upgrade path and no popover
+ * explaining a limit that does not exist.
  *
  * The decision is read from `useDesk` and written back through one function, so
  * an entitlement check later has exactly one edge to attach to.
  */
 function SignalDeskToggle() {
   const desk = useDesk()
-  const running = desk.signalDesk && desk.building !== null
-
   return (
     <div
       role="radiogroup"
@@ -402,9 +395,8 @@ function SignalDeskToggle() {
       <ModeSegment
         selected={desk.signalDesk}
         onSelect={() => desk.setSignalDesk(true)}
-        busy={running}
         accent
-        label={running ? SIGNAL_DESK_COPY.running : SIGNAL_DESK_COPY.toggle}
+        label={SIGNAL_DESK_COPY.toggle}
       />
     </div>
   )
@@ -463,10 +455,9 @@ function ModeSegment({
  * pressed, so the reader watches the progress while they are still writing and
  * the Turn itself carries a short list of ids.
  *
- * The rest still need something the backend does not expose: no portfolio
- * resource, no analysis-template store, no connector registry. Those stay
- * inert and keep the badge — a control that swallowed the press would be worse
- * than one that says it is not ready.
+ * The rest still need something the backend does not expose. They stay inert
+ * and keep the badge — a control that swallowed the press would be worse than
+ * one that says it is not ready.
  */
 export function AttachMenu({
   onPickFile,
@@ -499,37 +490,12 @@ export function AttachMenu({
         {CAPTURE_COPY.row}
       </MenuItem>
       <MenuSeparator />
-      {/* A multi-step mode: several Studies, several rounds, one report. Named
-          apart from the answer-depth control, which changes what one Turn costs
-          and how long it takes. If the two ever read as the same thing, one of
-          the names is wrong — say so rather than blurring both. */}
-      <MenuItem
-        icon={<Telescope className="size-[17px] text-ink-4" strokeWidth={1.6} />}
-        trailing={<ChevronRight className="size-4 shrink-0 text-ink-6" />}
-        disabled
-      >
-        Nghiên cứu sâu
-      </MenuItem>
       <MenuItem
         icon={<Wallet className="size-[17px] text-ink-4" strokeWidth={1.6} />}
         trailing={<ChevronRight className="size-4 shrink-0 text-ink-6" />}
         disabled
       >
         Thêm vào danh mục
-      </MenuItem>
-      <MenuItem
-        icon={<LayoutList className="size-[17px] text-ink-4" strokeWidth={1.6} />}
-        trailing={<ChevronRight className="size-4 shrink-0 text-ink-6" />}
-        disabled
-      >
-        Mẫu phân tích
-      </MenuItem>
-      <MenuItem
-        icon={<Grid2x2 className="size-[17px] text-ink-4" strokeWidth={1.6} />}
-        trailing={<ChevronRight className="size-4 shrink-0 text-ink-6" />}
-        disabled
-      >
-        Nguồn dữ liệu kết nối
       </MenuItem>
       {/* Two rows are deliberately absent from this menu.
           One was a calque of a competitor's feature name for work this product

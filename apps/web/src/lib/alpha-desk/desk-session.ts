@@ -16,8 +16,6 @@
  * and none of that is worth a blank page.
  */
 
-import { guardedStore } from "./guarded-storage"
-
 const KEY = "alpha-desk.session"
 
 export interface DeskSession {
@@ -131,76 +129,6 @@ export function rememberSignalDesk(
   if (!on) return without.length === threads.length ? threads : without
   if (threads[0] === threadId) return threads
   return [threadId, ...without].slice(0, SIGNAL_DESK_MEMORY)
-}
-
-// -- pinned boards ---------------------------------------------------------
-
-/**
- * Which boards a Thread keeps at the top of its list, remembered across
- * sessions.
- *
- * `localStorage` rather than the `sessionStorage` above, and that difference is
- * the whole point: what this *tab* was looking at is a tab's business, but "the
- * two boards I work from in this conversation" is a decision about the
- * conversation, and a reader who made it on Monday should not have to make it
- * again on Tuesday in a new window.
- *
- * Keyed by Thread inside one record rather than one key per Thread, so
- * forgetting the oldest conversations is a slice rather than a scan of the
- * whole origin's storage.
- */
-const PINS_KEY = "alpha-desk.board-pins"
-
-/** How many Threads' worth of pins one browser keeps. */
-const PIN_MEMORY = 24
-
-/** How many pins one Thread's record may hold, so storage stays bounded. */
-const PINS_PER_THREAD = 5
-
-const pins = guardedStore(() => window.localStorage, PINS_KEY)
-
-/** Every Thread's pins, unreadable storage read as "none". */
-function readAllPinnedBoards(): Record<string, string[]> {
-  const raw = pins.read()
-  if (raw === null) return {}
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {}
-    const record: Record<string, string[]> = {}
-    for (const [threadId, value] of Object.entries(parsed as Record<string, unknown>)) {
-      if (!Array.isArray(value)) continue
-      record[threadId] = value.filter((id): id is string => typeof id === "string")
-    }
-    return record
-  } catch {
-    // Written by an older build, or by something else entirely. An unreadable
-    // record is no pins rather than a blank workspace.
-    return {}
-  }
-}
-
-/** The boards pinned in one Thread, in pin order. Empty for an unknown Thread. */
-export function readPinnedBoards(threadId: string | null): string[] {
-  if (threadId === null) return []
-  return readAllPinnedBoards()[threadId] ?? []
-}
-
-/**
- * Write one Thread's pins, dropping the least recently written Thread.
- *
- * The Thread being written goes first, so "least recently written" is simply
- * the tail — a conversation nobody has pinned anything in for twenty-four
- * conversations is the one whose pins are worth least.
- */
-export function writePinnedBoards(threadId: string | null, artifactIds: string[]): void {
-  if (threadId === null) return
-  const all = readAllPinnedBoards()
-  delete all[threadId]
-  const kept = Object.entries(all).slice(0, PIN_MEMORY - 1)
-  const next: Record<string, string[]> = {}
-  if (artifactIds.length > 0) next[threadId] = artifactIds.slice(0, PINS_PER_THREAD)
-  for (const [id, value] of kept) next[id] = value
-  pins.write(JSON.stringify(next))
 }
 
 /**

@@ -33,7 +33,6 @@ import {
   readProgressPart,
   readProgressParts,
   readQuestion,
-  readDeskViews,
   readThoughts,
   readToolCall,
   readToolCalls,
@@ -41,7 +40,6 @@ import {
 import type {
   ProgressPart,
   QuestionPart,
-  SignalDeskAnnouncement,
   SnapshotData,
   Thought,
   ToolCall,
@@ -116,14 +114,6 @@ export interface LiveTurn {
    */
   question: QuestionPart | null
   /**
-   * The desk views this Turn has produced, in the order they were announced.
-   *
-   * Ids and titles, never cells: the numbers are a row the panel fetches. Kept
-   * as a list rather than one value because a Turn may draw more than one
-   * picture, and the newest is the one the panel opens on.
-   */
-  deskViews: SignalDeskAnnouncement[]
-  /**
    * How long the Turn has been running, as the backend last reported it.
    *
    * The backend's number rather than a timer this tab started, so a reader who
@@ -165,7 +155,6 @@ export const IDLE: LiveTurn = {
   thoughts: [],
   progress: [],
   question: null,
-  deskViews: [],
   elapsedMs: 0,
   terminalReason: null,
   messageId: null,
@@ -318,16 +307,6 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
       return question === null ? advanced : { ...advanced, question }
     }
 
-    case "signal_desk.ready": {
-      // Read through the same defensive path a snapshot's list takes, and
-      // upserted by artifact id for the reason a tool call is: one Study run
-      // has one id, so a second announcement of it is a republish rather than
-      // a second picture.
-      const [deskView] = readDeskViews([event.data])
-      if (deskView === undefined) return advanced
-      return { ...advanced, deskViews: upsertDeskView(state.deskViews, deskView) }
-    }
-
     default: {
       const phase = TERMINAL_PHASE[event.type]
       return phase === undefined
@@ -362,20 +341,6 @@ function upsert(calls: ToolCall[], call: ToolCall): ToolCall[] {
   return next
 }
 
-/** The same, by artifact id. */
-function upsertDeskView(
-  deskViews: SignalDeskAnnouncement[],
-  deskView: SignalDeskAnnouncement,
-): SignalDeskAnnouncement[] {
-  const index = deskViews.findIndex(
-    (existing) => existing.artifactId === deskView.artifactId,
-  )
-  if (index === -1) return [...deskViews, deskView]
-  const next = [...deskViews]
-  next[index] = deskView
-  return next
-}
-
 function fromSnapshot(state: LiveTurn, event: TurnEvent): LiveTurn {
   const data = event.data as unknown as SnapshotData
   const terminal = data.status !== "admitted" && data.status !== "running"
@@ -402,10 +367,6 @@ function fromSnapshot(state: LiveTurn, event: TurnEvent): LiveTurn {
     // read out of a draft — and a reader holding a card must not lose it to a
     // reconnect.
     question: readQuestion(data.question, "pending") ?? state.question,
-    // Snapshots use the same wire spelling as canonical messages. Accept the
-    // canvas-era key as well so reconnecting across the rename does not make a
-    // card disappear until the next live announcement.
-    deskViews: readDeskViews(data.signal_desks ?? data.canvases),
     elapsedMs: typeof data.elapsed_ms === "number" ? data.elapsed_ms : state.elapsedMs,
     terminalReason: data.terminal_reason ?? null,
     // A terminal snapshot names the message that replaces this draft, exactly

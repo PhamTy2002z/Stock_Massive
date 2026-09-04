@@ -443,11 +443,6 @@ export function ChatView() {
               )
             }
 
-            // Analysis cards were removed with the analysis lane
-            // (2026-08-25). A transcript entry that would have opened one
-            // renders nothing rather than falling through to the draft
-            // renderer, which has no fields to show for it.
-            if (entry.kind === "analysis") return null
             return (
               <DraftMessage
                 key={entry.key}
@@ -569,11 +564,9 @@ function DockedFooter({
         <Composer />
 
         {/* The desk does not carry the caveat. Under a ~427px column it takes
-            two lines to say what fits on one everywhere else, and the numbers
-            on the desk beside it are not the ones it is warning about: a Study
-            is drawn from the store, frozen at its `as_of`, with its provenance
-            named on the panel itself. The caveat is about the prose answer, so
-            it stays on the surface that shows prose across the full column. */}
+            two lines to say what fits on one everywhere else, and the caveat is
+            about the prose answer — so it stays on the surface that shows prose
+            across the full column. */}
         {/* Collapsed rather than removed: the line's height is the composer's
             resting position, and taking it out in one frame lifts the field by
             a line while the pane beside it is still sliding. A grid row eased

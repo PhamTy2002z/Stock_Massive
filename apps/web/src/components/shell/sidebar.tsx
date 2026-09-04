@@ -136,7 +136,6 @@ function SidebarBody() {
 }
 
 function Nav() {
-  const { dispatch } = useShell()
   const desk = useDesk()
 
   return (
@@ -145,7 +144,6 @@ function Nav() {
         icon={<Plus className="size-[17px] text-ink-4" strokeWidth={1.6} />}
         onClick={() => {
           desk.newThread()
-          dispatch({ type: "view", view: "new" })
         }}
       >
         Trò chuyện mới

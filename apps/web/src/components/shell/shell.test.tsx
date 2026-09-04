@@ -53,7 +53,7 @@ describe("the chat-first workspace", () => {
     act(() => shell.dispatch({ type: "signal-desk", on: true }))
 
     expect(shell.state.signalDesk).toBe(true)
-    expect(shell.state.inspector).toBe("deskView")
+    expect(shell.state.inspector).toBe("desk")
     expect(inspectorWidth(shell.state)).toBeGreaterThan(0)
   })
 

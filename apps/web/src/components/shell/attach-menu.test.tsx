@@ -5,7 +5,7 @@
  * This menu shipped with six rows, all of them inert, and **no test at all** —
  * `AttachMenu|Thêm tệp|attachOpen` matched nothing outside `composer.tsx`. So
  * nothing below is a regression net over old behaviour; all of it is new ground
- * for a menu that now has two rows that do something and four that say plainly
+ * for a menu that now has two rows that do something and one that says plainly
  * that they do not.
  *
  * The one property worth the most here is the count of badges. `MenuItem` draws
@@ -35,10 +35,10 @@ function open(overrides: Partial<Parameters<typeof AttachMenu>[0]> = {}) {
 }
 
 describe("the shape the menu settled on", () => {
-  it("offers exactly six rows", () => {
+  it("offers exactly three rows", () => {
     open()
 
-    expect(screen.getAllByRole("menuitem")).toHaveLength(6)
+    expect(screen.getAllByRole("menuitem")).toHaveLength(3)
   })
 
   it("names them in the agreed order", () => {
@@ -49,10 +49,7 @@ describe("the shape the menu settled on", () => {
     ).toEqual([
       `${ATTACHMENT_COPY.add}${ATTACHMENT_COPY.addHint}`,
       CAPTURE_COPY.row,
-      "Nghiên cứu sâu",
       "Thêm vào danh mục",
-      "Mẫu phân tích",
-      "Nguồn dữ liệu kết nối",
     ])
   })
 
@@ -70,13 +67,13 @@ describe("the shape the menu settled on", () => {
 })
 
 describe("which rows promise and which deliver", () => {
-  it("puts a badge on exactly the four rows that do nothing yet", () => {
+  it("puts a badge on exactly the one row that does nothing yet", () => {
     // Counted, not merely found. The badge is drawn from `disabled`, so one
     // spreading to a working row is a promise nobody made — and a `getByText`
     // would still pass, because it would still find a badge.
     open()
 
-    expect(screen.getAllByText(COMING_SOON)).toHaveLength(4)
+    expect(screen.getAllByText(COMING_SOON)).toHaveLength(1)
   })
 
   it("leaves the two working rows with no badge at all", () => {
@@ -110,7 +107,7 @@ describe("which rows promise and which deliver", () => {
 
     const row = screen.getByRole("menuitem", { name: new RegExp(CAPTURE_COPY.row) })
     expect(row).toBeDisabled()
-    expect(screen.getAllByText(COMING_SOON)).toHaveLength(5)
+    expect(screen.getAllByText(COMING_SOON)).toHaveLength(2)
   })
 })
 
@@ -122,7 +119,7 @@ describe("what a screen reader is told about a row it cannot press", () => {
     open()
 
     const inert = screen.getAllByRole("menuitem").filter((row) => (row as HTMLButtonElement).disabled)
-    expect(inert).toHaveLength(4)
+    expect(inert).toHaveLength(1)
     for (const row of inert) {
       const describedBy = row.getAttribute("aria-describedby")
       expect(describedBy).toBeTruthy()
@@ -153,7 +150,7 @@ describe("what a screen reader is told about a row it cannot press", () => {
       .map((row) => row.getAttribute("aria-describedby"))
       .filter((id): id is string => id !== null)
 
-    expect(ids).toHaveLength(8)
-    expect(new Set(ids).size).toBe(8)
+    expect(ids).toHaveLength(2)
+    expect(new Set(ids).size).toBe(2)
   })
 })

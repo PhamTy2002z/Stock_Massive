@@ -44,7 +44,6 @@ const desk = {
   dismissRefusal: vi.fn(),
   openThread: vi.fn(),
   newThread: vi.fn(),
-  openAnalysis: vi.fn(),
 }
 
 vi.mock("./desk-state", () => ({
@@ -79,7 +78,6 @@ const answer = {
   text: "Phiên 21/08/2026, STB tăng nhẹ 0,27%.",
   toolCalls: [],
   thoughts: [],
-  deskViews: [],
   followUps: [],
   question: null,
   elapsedMs: 0,
@@ -219,7 +217,6 @@ describe("asking a follow-up", () => {
         toolCalls: [],
         thoughts: [],
         question: null,
-        deskViews: [],
         elapsedMs: 0,
         phase: "running",
         terminalReason: null,

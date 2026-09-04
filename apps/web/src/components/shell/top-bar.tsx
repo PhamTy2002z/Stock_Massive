@@ -37,15 +37,11 @@ export function TopBar() {
 
   const current = threads.data?.threads.find((row) => row.id === desk.threadId)
   const fullTitle =
-    state.view === "news"
-      ? "Tin tức thị trường"
-      : state.view === "board"
-        ? "Bảng giá thị trường"
-        : desk.threadId === null
-          ? "Trò chuyện mới"
-          : current
-            ? threadTitle(current.title, current.updated_at)
-            : "Hội thoại"
+    desk.threadId === null
+      ? "Trò chuyện mới"
+      : current
+        ? threadTitle(current.title, current.updated_at)
+        : "Hội thoại"
   const title = shorten(fullTitle)
 
   const menuOpen = state.overlay === "thread"

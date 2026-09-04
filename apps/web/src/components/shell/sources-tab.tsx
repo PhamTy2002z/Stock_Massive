@@ -130,7 +130,7 @@ function CallRow({ call }: { call: ToolCall }) {
         <span className="min-w-0 flex-1 text-meta text-muted-foreground">{call.summary}</span>
         {/* A count only where counting means something. A search has pages and
             the number of them is the reader's first question; a store read has
-            one figure, and a `0` beside a call that succeeded read as "found
+            one local result, and a `0` beside a call that succeeded read as "found
             nothing" — the opposite of what happened. */}
         {!store && (
           <span className="flex-none rounded-lg border border-border px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
@@ -173,7 +173,7 @@ function StoreRunRow({ calls }: { calls: ToolCall[] }) {
         </span>
         <KindIcon store />
         <span className="min-w-0 flex-1 text-meta text-muted-foreground">
-          Đọc {calls.length} chỉ báo từ dữ liệu hệ thống
+          Đã chạy {calls.length} công cụ nội bộ
         </span>
       </button>
 

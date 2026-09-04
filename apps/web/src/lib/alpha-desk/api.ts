@@ -2,17 +2,11 @@
  * The Alpha Desk conversation, over the same-origin proxy.
  *
  * Same-origin against the Next route handler rather than FastAPI directly,
- * because the session lives in httpOnly cookies the browser cannot read. That
- * is also why this does not reuse `fetchApi` from `@/lib/api`: those routes are
- * public market data on the API's own origin, and these carry a user.
- *
- * `fetchApi` stays unchanged, deliberately — retro-fitting auth onto the app's
- * twenty-five existing hooks is its own effort (ADR-0013).
+ * because the session lives in httpOnly cookies the browser cannot read.
  *
  * The request itself is `alphaFetch` from `@/lib/alpha`: the rail and the
- * conversation are the same origin, the same session and the same refusal body,
- * so they read it once. What is here is the conversation's own paths and the
- * shape each one sends.
+ * conversation share one origin, session and refusal body. What is here is the
+ * conversation's own paths and the shape each one sends.
  *
  * **Admission outcomes arrive here, not in the stream.** A `429` or a `503`
  * from the create call is an ordinary HTTP failure carrying its stable reason,
@@ -23,7 +17,6 @@
 import { alphaFetch, alphaSend } from "@/lib/alpha"
 
 import type {
-  ArtifactPayload,
   Attachment,
   Capabilities,
   CreatedTurn,
@@ -93,9 +86,11 @@ export interface CreateTurnInput {
   /**
    * Whether the reader threw the Signal Desk switch for this question.
    *
-   * Read by the surface and not sent — see the note on `createTurn` below. It
-   * stays on the input because the callers already know the answer, and the
-   * line that puts it on the wire should be added where it is translated rather
+   * Read by the surface and not sent: `CreateTurnRequest` forbids fields it does
+   * not declare and it declares no mode, so a body carrying one fails the Turn
+   * with a 422 — every Turn, since the switch is off as explicitly as it is on.
+   * It stays on the input because the callers already know the answer, and the
+   * line that puts it on the wire belongs where it would be translated rather
    * than rediscovered.
    */
   signalDesk?: boolean
@@ -119,13 +114,6 @@ export interface CreateTurnInput {
  * network: the same id with the same payload resolves to the Turn that already
  * exists instead of starting a second one.
  *
- * The desk mode is deliberately **not** on the wire. ``CreateTurnRequest``
- * forbids fields it does not declare and it declares no mode, so sending one
- * fails every Turn with a 422 — whether the desk is on or off, since the field
- * was sent either way. Until the backend has a mode to be told about, the desk
- * is a state of the surface: `signalDesk` on the input below is what the
- * composer and the pane read, and putting it back on the body is one line on
- * the day the request learns to carry it.
  */
 export function createTurn(input: CreateTurnInput): Promise<CreatedTurn> {
   return alphaFetch<CreatedTurn>(`/threads/${encodeURIComponent(input.threadId)}/turns`, {
@@ -167,21 +155,6 @@ export function uploadAttachment(file: File): Promise<Attachment> {
  */
 export function attachmentUrl(attachmentId: string): string {
   return `/api/alpha-desk/attachments/${encodeURIComponent(attachmentId)}`
-}
-
-/**
- * The numbers behind one deskView.
- *
- * A separate request from the transcript, deliberately: a heatmap is thousands
- * of cells and a conversation scrolls, so the text loads at text weight and the
- * picture is fetched by whoever opens the panel.
- *
- * The row is immutable, so the answer may be cached for as long as the tab
- * lives. Re-opening a Thread renders what was frozen; nothing here ever asks
- * the store for a fresher slice.
- */
-export function fetchArtifact(artifactId: string): Promise<ArtifactPayload> {
-  return alphaFetch<ArtifactPayload>(`/artifacts/${encodeURIComponent(artifactId)}`)
 }
 
 /** Idempotent. A second cancel returns the same answer and dispatches nothing. */
