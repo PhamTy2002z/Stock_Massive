@@ -335,6 +335,14 @@ _VISIBLE_DATE_RE = re.compile(
 )
 _URL_DATE_RE = re.compile(r"/(20\d{2})/(0?[1-9]|1[0-2])/(0?[1-9]|[12]\d|3[01])(?:/|$)")
 
+#: The other shape a Vietnamese news URL states its date in: a numeric article
+#: id whose middle is ``yymmdd``. CafeF and its siblings publish
+#: ``...-188260829154209089.chn`` — section, then the date, then a time and a
+#: sequence. Worth reading because a search snippet from these publishers
+#: arrives with no date at all, and an undated snippet is admitted everywhere a
+#: dated one would be refused.
+_URL_STAMP_RE = re.compile(r"-\d{2,3}(2\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{6,}(?:\.|$)")
+
 
 def _stamp(
     raw: Any,
@@ -378,7 +386,24 @@ def extract_publication_stamp(
         found = _stamp(visible.group(1), PublicationMethod.VISIBLE_TEXT, PublicationConfidence.MEDIUM)
         if found:
             return found
-    matched = _URL_DATE_RE.search(urlsplit(url).path if url else "")
+    path = urlsplit(url).path if url else ""
+    matched = _URL_DATE_RE.search(path)
+    stamped = None if matched else _URL_STAMP_RE.search(path)
+    if stamped:
+        try:
+            value = date(
+                2000 + int(stamped.group(1)), int(stamped.group(2)), int(stamped.group(3))
+            )
+        except ValueError:
+            pass
+        else:
+            return PublicationStamp(
+                datetime.combine(value, time.min, tzinfo=ICT),
+                PublicationMethod.URL_PATTERN,
+                PublicationConfidence.LOW,
+                TimePrecision.DATE,
+                stamped.group(0).strip("-."),
+            )
     if matched:
         try:
             value = date(int(matched.group(1)), int(matched.group(2)), int(matched.group(3)))
@@ -417,6 +442,64 @@ def is_temporally_admissible(stamp: PublicationStamp, as_of: datetime) -> bool:
     return stamp.published_at <= as_of
 
 
+#: A date the reader wrote into the question. Day first, because every Vietnamese
+#: form of it is: ``20/8/2026``, ``20-08-2026``, ``ngày 20/8``. A two-digit year
+#: is not accepted — ``20/8/26`` is far more often a typo than a year.
+#:
+#: Without a year, a leading date word is required. ``30/8`` on its own is as
+#: likely to be a ratio as a date, and reading one as a boundary would quietly
+#: starve a Turn of everything published since August.
+_DATE_CUE = r"ngày|phiên|hôm|từ|đến|tới|tính\s+đến|trong|vào|kể\s+từ"
+_ASKED_DATE_RE = re.compile(
+    r"(?:(?<!\d)(\d{1,2})\s*[/-]\s*(\d{1,2})\s*[/-]\s*(\d{4})(?!\d))"
+    rf"|(?:(?:{_DATE_CUE})\s+(?<!\d)(\d{{1,2}})\s*[/-]\s*(\d{{1,2}})(?!\s*[/-]?\d))",
+    re.IGNORECASE,
+)
+
+
+def as_of_from_text(text: str, *, now: datetime) -> datetime | None:
+    """The evidence boundary the question itself states, if it states one.
+
+    A reader who writes "tính đến ngày 20/8/2026" has named what may be known,
+    and §2 forbids answering them with a page published on the 21st. Nothing
+    else carries that boundary: the request is one string, so a boundary that is
+    not read out of it does not exist, and the ledger then stamps its ``asOf``
+    with the wall clock and can never exclude anything.
+
+    Read out of the question rather than accepted as a parameter, deliberately.
+    A typed ``as_of`` on the request would hand the agent a boundary it is
+    supposed to notice, and the corpus would stop measuring whether it notices.
+
+    The **latest** date in the question wins, and a date after ``now`` is
+    ignored: a question naming a range is bounded by its end, and a future date
+    is a forecast horizon rather than a limit on what may be read. The boundary
+    is the end of that local day, because a publisher stamping only a date is
+    compared by date anyway.
+    """
+    if now.utcoffset() is None:
+        raise ValueError("now must include a timezone")
+    local_now = now.astimezone(ICT)
+    found: date | None = None
+    for match in _ASKED_DATE_RE.finditer(text or ""):
+        day = match.group(1) or match.group(4)
+        month = match.group(2) or match.group(5)
+        year = match.group(3)
+        try:
+            value = date(int(year) if year else local_now.year, int(month), int(day))
+        except ValueError:
+            # 32/13, or a ratio like 30/8 that is not a date at all once the
+            # month is out of range. Not a boundary; the next match may be.
+            continue
+        if value > local_now.date():
+            continue
+        if found is None or value > found:
+            found = value
+    if found is None:
+        return None
+    boundary = datetime.combine(found, time.max, tzinfo=ICT)
+    return min(boundary, now)
+
+
 def as_of_bucket(
     *,
     kind: EvidenceCacheKind,
@@ -450,6 +533,7 @@ __all__ = [
     "TimePrecision",
     "TosRisk",
     "as_of_bucket",
+    "as_of_from_text",
     "cache_kind_for",
     "canonical_url",
     "classify_source",

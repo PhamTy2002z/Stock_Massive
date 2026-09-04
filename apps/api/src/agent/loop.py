@@ -137,7 +137,7 @@ from src.core.llm.errors import redact
 from src.core.config import get_settings
 
 from . import registry
-from .budget import TurnBudget, thresholds_for_context, trim_text
+from .budget import Reshaper, TurnBudget, thresholds_for_context, trim_text
 from .definitions import resolve_tool_surface
 from .executor import (
     HALTED_TURN,
@@ -149,6 +149,7 @@ from .executor import (
 from .executor import ToolCall as ExecutorToolCall
 from .executor import ToolResult as ExecutorToolResult
 from .evidence import ClaimLedger, render_claim_ledger, validate_claim_ledger
+from .evidence.source_policy import as_of_from_text
 from .evidence.pipeline import (
     COUNTER_TOOL_ROUND_LIMIT,
     DRAFT_FORMAT,
@@ -942,6 +943,19 @@ def _settled_status(result: ExecutorToolResult) -> ToolCallStatus:
     return ToolCallStatus.ERROR
 
 
+def _reshaper(call: TurnToolCall) -> Reshaper | None:
+    """How this call's tool narrows its own result, when it says.
+
+    Read off the declaration snapshot the call carries rather than the
+    process-wide registry, for the same reason the write check below is: the
+    snapshot is what this Turn resolved, and a legacy call carrying none simply
+    gets the generic cut.
+    """
+    if call.resolved_tool is None:
+        return None
+    return call.resolved_tool.reshape_result
+
+
 def _changes_durable_state(calls: Sequence[TurnToolCall]) -> bool:
     """Whether this batch is about to change something outside the Turn.
 
@@ -1265,7 +1279,14 @@ class AgentLoop:
         cancelled: Cancelled,
         cancel_event: asyncio.Event | None,
     ) -> TurnOutcome:
-        turn_as_of = self._clock()
+        now = self._clock()
+        # The boundary the reader stated, when they stated one. §2 forbids
+        # answering "tính đến ngày 20/8" with a page published on the 21st, and
+        # the request is the only place that boundary is written down: stamped
+        # with the wall clock instead, the ledger's ``asOf`` can never exclude
+        # anything. The clock still wins when the question names no date.
+        stated_as_of = as_of_from_text(request.user_text, now=now)
+        turn_as_of = stated_as_of or now
         state = _TurnState(
             turn_id=str(request.turn_id) if request.turn_id is not None else None,
             thread_id=str(request.thread_id),
@@ -1288,7 +1309,12 @@ class AgentLoop:
                 user_id=request.user_id,
                 thread_id=_as_uuid(request.thread_id),
                 turn_id=_as_uuid(request.turn_id),
-                now=turn_as_of,
+                now=now,
+                # Only a boundary the reader actually stated gates the tools.
+                # ``turn_as_of`` falls back to the clock so the ledger always
+                # has one, and passing *that* here would make every Turn refuse
+                # every source it could not date — which is most of the web.
+                as_of=stated_as_of,
             ),
             guardrails=TurnGuardrails(),
             trace=self._trace_writer(request, turn_budget),
@@ -2756,7 +2782,10 @@ class AgentLoop:
                     # against a longer string than the one being sent would trim
                     # a context that already fitted.
                     turn_budget.add(
-                        finished.id, finished.name, finished.model_text
+                        finished.id,
+                        finished.name,
+                        finished.model_text,
+                        reshape=_reshaper(finished),
                     )
 
         # The results the budget never saw, because they never ran. Added anyway,
@@ -2764,7 +2793,12 @@ class AgentLoop:
         # reads.
         for record in planned:
             if not record.dispatched and record.model_text:
-                turn_budget.add(record.id, record.name, record.model_text)
+                turn_budget.add(
+                    record.id,
+                    record.name,
+                    record.model_text,
+                    reshape=_reshaper(record),
+                )
 
         if timed_out:
             # Settled rather than left running, so a reader who reconnects to the

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -846,3 +847,112 @@ async def test_a_store_that_cannot_answer_leaves_the_page_read_working():
     assert len(seen) == 1
     assert result["from_record"] is False
     assert "The rate was unchanged." in result["content"]
+
+
+def test_reshaping_a_page_result_keeps_the_passages_the_call_asked_for():
+    """A page read shrunk by the budget must not come back as its own menu."""
+    payload = json.dumps(
+        {
+            "url": "https://finance.example.vn/stb.htm",
+            "looking_for": "giá đóng cửa và khối lượng của STB",
+            "content": (
+                "Trang chủ Vĩ mô Dữ liệu Doanh nghiệp Báo cáo Tin tức " * 60
+                + "STB HOSE giá đóng cửa 74,500 khối lượng 9,129,600 "
+                + "Điều khoản Liên hệ Quảng cáo " * 60
+            ),
+        },
+        ensure_ascii=False,
+    )
+
+    narrowed = web.reshape_page_result(payload, 2_000)
+
+    assert narrowed
+    assert len(narrowed) <= 2_000
+    reshaped = json.loads(narrowed)
+    assert "74,500" in reshaped["content"]
+    assert reshaped["excerpted"] is True
+    assert reshaped["url"] == "https://finance.example.vn/stb.htm"
+
+
+def test_a_result_without_a_question_or_content_is_left_to_the_generic_cut():
+    assert web.reshape_page_result("not json at all", 500) == ""
+    assert web.reshape_page_result(json.dumps({"content": "x" * 900}), 500) == ""
+    assert web.reshape_page_result(json.dumps({"looking_for": "giá"}), 500) == ""
+
+
+@pytest.mark.asyncio
+async def test_search_drops_what_was_published_after_the_boundary_and_says_so():
+    """A reader who asked "tính đến 20/8" is not answered with the 21st.
+
+    Dropping the result is the whole point — the graded corpus reads the sources
+    a Turn *carried*, so a page the model saw and declined still counts against
+    it. Saying how many were dropped matters as much: a model handed a silently
+    shorter list re-runs the same query looking for what it half remembers.
+    """
+    raw = [
+        {"title": "Sau", "url": "https://a.example/1", "content": "x", "published_date": "2026-08-21"},
+        {"title": "Trước", "url": "https://b.example/2", "content": "x", "published_date": "2026-08-19"},
+    ]
+    tools = web.WebTools(
+        settings=settings(), lane=DirectLane(), search=lambda _query, _recency: raw
+    )
+    bounded = ToolContext(user_id=11, as_of=datetime(2026, 8, 20, 23, 59, tzinfo=web.ICT))
+
+    result = await tools.web_search(bounded, {"query": "thanh khoản"})
+
+    assert [item["title"] for item in result["results"]] == ["Trước"]
+    assert result["excluded_outside_as_of"] == 1
+
+    # And with no boundary the same search keeps both: this filter exists only
+    # for a question that named a date.
+    unbounded = await tools.web_search(CONTEXT, {"query": "thanh khoản"})
+    assert len(unbounded["results"]) == 2
+    assert unbounded["excluded_outside_as_of"] is None
+
+
+@pytest.mark.asyncio
+async def test_an_undated_result_survives_the_boundary():
+    """Silence about publication time is not evidence of lateness.
+
+    Refusing the undated was tried against the corpus and measured: on the
+    session-memo case it excluded every result of every search and the Turn
+    answered with no evidence at all — a dimension that was failing became one
+    that could not be decided. Whether a snippet the Turn never opened should
+    count as carried evidence is the question underneath, and it is not one a
+    filter here can settle.
+    """
+    raw = [{"title": "Không ngày", "url": "https://c.example/3", "content": "x"}]
+    tools = web.WebTools(
+        settings=settings(), lane=DirectLane(), search=lambda _query, _recency: raw
+    )
+    bounded = ToolContext(user_id=11, as_of=datetime(2026, 8, 20, 23, 59, tzinfo=web.ICT))
+
+    result = await tools.web_search(bounded, {"query": "thanh khoản"})
+
+    assert len(result["results"]) == 1
+    assert result["excluded_outside_as_of"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_page_without_a_title_is_still_named():
+    """§6.6 identity is four facts, and a titleless page would arrive with three.
+
+    A corporate IR index is the ordinary case: it ships an empty ``<title>`` and
+    an ``og:title``. Naming it from the document, or failing that from its own
+    URL, keeps the source traceable without inventing anything about it.
+    """
+    html = (
+        "<html><head><title></title>"
+        "<meta property='og:title' content='Quan hệ cổ đông'>"
+        "</head><body><p>Tài liệu công bố.</p></body></html>"
+    )
+    title, _content, metadata, _json_ld = web.extract_page_details(html, 10_000)
+
+    assert title == ""
+    assert web._named_from(metadata, "https://x.example/quan-he-co-dong.html") == (
+        "Quan hệ cổ đông"
+    )
+    # No metadata either: the URL's own last segment names it.
+    assert web._named_from({}, "https://x.example/quan-he-co-dong.html") == (
+        "quan-he-co-dong.html"
+    )

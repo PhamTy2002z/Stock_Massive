@@ -216,3 +216,30 @@ def test_the_terminal_wait_covers_the_lane_the_question_routes_to():
     # harness must never stop waiting before the Turn's own clock runs out.
     assert deep > DEEP.deadline_seconds
     assert light > LIGHT.deadline_seconds
+
+
+@pytest.mark.asyncio
+async def test_the_projection_keeps_the_question_the_corpus_asked(owner):
+    """The corpus question survives beside the one the assistant asked back.
+
+    Both used to be written under ``question``, and a dict literal keeps the
+    last one: every graded case carried ``None`` where its question belonged.
+    That is not a cosmetic loss. ``grade_budget`` routes a case to its lane by
+    re-reading the question, so an empty one routed every deep Turn to the light
+    lane's ceiling and failed it for reading as widely as its lane allows.
+    """
+    store = AgentPersistence(session_factory=sync_session_factory)
+    thread, request = await one_turn(store, owner, [])
+
+    projected = await read_case(
+        store,
+        case=CASE,
+        user_id=owner,
+        thread_id=thread.id,
+        turn_id=uuid.uuid4(),
+        request_message_id=request.id,
+        wall_ms=1,
+    )
+
+    assert projected["question"] == CASE["question"]
+    assert projected["asked_question"] is None

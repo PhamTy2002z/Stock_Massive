@@ -33,7 +33,7 @@ at any window size.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 #: One token is about four characters of the mixed Vietnamese and English this
@@ -62,6 +62,13 @@ NEWLINE_SLACK_CHARS = 400
 #: shape is worse than no preview: the model cannot plan its next move from it,
 #: and it still costs a round to discover that.
 SPILL_FLOOR_CHARS = 512
+
+
+#: How a tool narrows its own result when a rung asks it to give ground: the
+#: whole result and a character ceiling in, the text to show out. An empty
+#: answer — or one still over the ceiling — means the tool declined, and the
+#: rung falls back to :func:`trim_text`.
+Reshaper = Callable[[str, int], str]
 
 
 def _clamp(value: float, low: int, high: int) -> int:
@@ -212,6 +219,7 @@ class TurnBudget:
         self._registry = dict(registry_limits or {})
         self._originals: list[tuple[str, str, str]] = []
         self._results: dict[str, BudgetedResult] = {}
+        self._reshapers: dict[str, Reshaper] = {}
 
     @property
     def thresholds(self) -> BudgetThresholds:
@@ -232,21 +240,59 @@ class TurnBudget:
         )
 
     def add(
-        self, call_id: str, tool_name: str, text: str, *, pinned: int | None = None
+        self,
+        call_id: str,
+        tool_name: str,
+        text: str,
+        *,
+        pinned: int | None = None,
+        reshape: Reshaper | None = None,
     ) -> BudgetedResult:
-        """Apply rung two to one result and remember it for rung three."""
+        """Apply rung two to one result and remember it for rung three.
+
+        ``reshape`` is how the tool that produced the result narrows it, and it
+        is remembered with the result: rung three shrinks the same string later,
+        and a rung that reached for the generic cut there would undo the tool's
+        own selection.
+        """
         original = text if isinstance(text, str) else str(text)
         self._originals.append((call_id, tool_name, original))
-        trimmed, cursor = trim_text(original, self.limit_for(tool_name, pinned=pinned))
-        result = BudgetedResult(
+        if reshape is not None:
+            self._reshapers[call_id] = reshape
+        result = self._fit(
+            call_id, tool_name, original, self.limit_for(tool_name, pinned=pinned)
+        )
+        self._results[call_id] = result
+        return result
+
+    def _fit(
+        self, call_id: str, tool_name: str, original: str, limit: int
+    ) -> BudgetedResult:
+        """One result at one ceiling: the tool's own narrowing, or the cut.
+
+        A reshaped result carries no cursor. The cursor says where a preview
+        stopped and what follows it, which is true of a head cut and false of a
+        selection drawn from several places in the same document; a tool that
+        reshapes marks the gaps in the text it returns.
+        """
+        reshape = self._reshapers.get(call_id)
+        if reshape is not None and len(original) > limit:
+            reshaped = reshape(original, limit)
+            if reshaped and len(reshaped) <= limit:
+                return BudgetedResult(
+                    call_id=call_id,
+                    tool_name=tool_name,
+                    text=reshaped,
+                    original_chars=len(original),
+                )
+        trimmed, cursor = trim_text(original, limit)
+        return BudgetedResult(
             call_id=call_id,
             tool_name=tool_name,
             text=trimmed,
             original_chars=len(original),
             cursor=cursor,
         )
-        self._results[call_id] = result
-        return result
 
     def results(self) -> tuple[BudgetedResult, ...]:
         """Every result in the order it arrived, rung two applied."""
@@ -273,13 +319,8 @@ class TurnBudget:
                 break
             call_id, tool_name, original = candidate
             limits[call_id] = max(SPILL_FLOOR_CHARS, len(self._results[call_id].text) // 2)
-            trimmed, cursor = trim_text(original, limits[call_id])
-            self._results[call_id] = BudgetedResult(
-                call_id=call_id,
-                tool_name=tool_name,
-                text=trimmed,
-                original_chars=len(original),
-                cursor=cursor,
+            self._results[call_id] = self._fit(
+                call_id, tool_name, original, limits[call_id]
             )
         return self.results()
 
@@ -308,6 +349,7 @@ __all__ = [
     "PER_TURN_MAX_CHARS",
     "PER_TURN_MIN_CHARS",
     "SPILL_FLOOR_CHARS",
+    "Reshaper",
     "BudgetThresholds",
     "BudgetedResult",
     "ResultCursor",
