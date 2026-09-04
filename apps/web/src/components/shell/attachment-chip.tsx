@@ -57,7 +57,8 @@ export function AttachmentChip({
     <span
       className={cn(
         "inline-flex max-w-[220px] items-center gap-2 rounded-lg border py-1 pl-1 pr-1",
-        // Neutral beside the composer; only failures add an accent.
+        // Neutral, like the analysis-context pill beside it. The accent on this
+        // card belongs to the mode control, and two oranges in one card compete.
         failed ? "border-destructive/40 bg-destructive/5" : "border-border bg-surface-bubble",
       )}
     >

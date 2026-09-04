@@ -21,12 +21,14 @@
  * only that they *are* strings.
  */
 
+import { SIGNAL_DESK_COPY } from "./copy"
 import type {
   ProgressKind,
   ProgressPart,
   QuestionOption,
   QuestionPart,
   QuestionState,
+  SignalDeskAnnouncement,
   Thought,
   ToolCall,
   ToolResult,
@@ -148,6 +150,50 @@ export function readResults(value: unknown): ToolResult[] {
   return results
 }
 
+/**
+ * Every desk view announced, malformed ones dropped.
+ *
+ * Read through the same defensive path whether it arrived on the stream or out
+ * of a stored message, for the reason the tool calls are: two readers for one
+ * shape drift, and the drift shows up only on a reconnect.
+ *
+ * An announcement with no id is dropped rather than rendered. The id is the
+ * whole of what the row is fetched by, so a card without one is a button that
+ * opens nothing — which reads to a reader as a picture they are not allowed to
+ * see.
+ */
+export function readDeskViews(value: unknown): SignalDeskAnnouncement[] {
+  if (!Array.isArray(value)) return []
+  const deskViews: SignalDeskAnnouncement[] = []
+  for (const item of value) {
+    const record = asRecord(item)
+    if (record === null) continue
+    const artifactId = asString(record.artifactId)
+    if (artifactId === "") continue
+    const title = asString(record.title)
+    const studyName = asString(record.studyName)
+    const studyDisplayName = asString(record.studyDisplayName)
+    deskViews.push({
+      artifactId,
+      studyName,
+      // The Vietnamese name, and never the slug as a stand-in for it: a board
+      // announced by a build that predates the display name has no readable
+      // recipe name, and the surfaces fall back to the title rather than
+      // printing `intraday_liquidity` at somebody.
+      studyDisplayName,
+      // A desk view with no title still gets a name a person can read: the panel
+      // and the card in the transcript are both labelled by it.
+      title: title === "" ? SIGNAL_DESK_COPY.name : title,
+      // Zero is honest when nothing said otherwise — the skeleton is then one
+      // block tall and grows when the fetch lands, rather than guessing high.
+      blockCount: asNumber(record.blockCount, 0),
+      round: asNumber(record.round, 0),
+      symbol: asString(record.symbol).toUpperCase(),
+      asOf: asString(record.asOf),
+    })
+  }
+  return deskViews
+}
 
 /**
  * One loop event, or nothing.
@@ -247,6 +293,7 @@ function readQuestionOptions(value: unknown): QuestionOption[] {
   return options
 }
 
+/** The narration of a Turn, by round, empty entries dropped. */
 export function readThoughts(value: unknown): Thought[] {
   if (!Array.isArray(value)) return []
   const thoughts: Thought[] = []

@@ -16,10 +16,13 @@ import {
   deepLinkedThread,
   openingState,
   readDeskSession,
+  readPinnedBoards,
   writeDeskSession,
+  writePinnedBoards,
 } from "./desk-session"
 
 const KEY = "alpha-desk.session"
+const PINS_KEY = "alpha-desk.board-pins"
 
 beforeEach(() => {
   window.sessionStorage.clear()
@@ -34,6 +37,7 @@ describe("what the tab remembers", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       activeSymbol: null,
+      signalDeskThreads: [],
       pendingAttachments: [],
     })
   })
@@ -43,6 +47,7 @@ describe("what the tab remembers", () => {
       threadId: null,
       turnId: null,
       activeSymbol: null,
+      signalDeskThreads: [],
       pendingAttachments: [],
     })
   })
@@ -55,6 +60,7 @@ describe("what the tab remembers", () => {
       threadId: "thread-1",
       turnId: null,
       activeSymbol: null,
+      signalDeskThreads: [],
       pendingAttachments: [],
     })
   })
@@ -78,6 +84,7 @@ describe("what the tab remembers", () => {
       threadId: null,
       turnId: null,
       activeSymbol: null,
+      signalDeskThreads: [],
       pendingAttachments: [],
     })
     expect(window.sessionStorage.getItem(KEY)).toBeNull()
@@ -106,7 +113,7 @@ describe("what the surface opens onto", () => {
   })
 
   it("carries the deep-linked symbol as the lens and nothing more", () => {
-    // Not into another product surface. Arriving with context is a question, not a
+    // Not onto the Watchlist. Arriving from Stock 360 is a question, not a
     // decision about what gets analysed every night.
     expect(openingState("HPG", { threadId: null, turnId: null, activeSymbol: null }).activeSymbol).toBe("HPG")
   })
@@ -178,6 +185,7 @@ describe("a value this build cannot read", () => {
       threadId: null,
       turnId: null,
       activeSymbol: null,
+      signalDeskThreads: [],
       pendingAttachments: [],
     })
   })
@@ -186,5 +194,74 @@ describe("a value this build cannot read", () => {
     window.sessionStorage.setItem(KEY, JSON.stringify({ threadId: 7, turnId: null }))
 
     expect(readDeskSession().threadId).toBeNull()
+  })
+})
+
+describe("the boards a conversation keeps on its strip", () => {
+  it("hands back what was pinned in that conversation and nothing else", () => {
+    writePinnedBoards("thread-1", ["a1", "a2"])
+    writePinnedBoards("thread-2", ["b1"])
+
+    expect(readPinnedBoards("thread-1")).toEqual(["a1", "a2"])
+    expect(readPinnedBoards("thread-2")).toEqual(["b1"])
+  })
+
+  it("has no answer for a conversation nothing was pinned in", () => {
+    expect(readPinnedBoards("thread-9")).toEqual([])
+    expect(readPinnedBoards(null)).toEqual([])
+  })
+
+  it("outlives the tab, unlike the Turn above", () => {
+    // `localStorage` on purpose: which two boards a reader works from is a
+    // decision about the conversation, not about the window it was made in.
+    writePinnedBoards("thread-1", ["a1"])
+
+    expect(window.sessionStorage.getItem(PINS_KEY)).toBeNull()
+    expect(window.localStorage.getItem(PINS_KEY)).not.toBeNull()
+  })
+
+  it("records an unpin rather than leaving the old answer standing", () => {
+    writePinnedBoards("thread-1", ["a1", "a2"])
+
+    writePinnedBoards("thread-1", ["a2"])
+
+    expect(readPinnedBoards("thread-1")).toEqual(["a2"])
+  })
+
+  it("keeps no more than the strip has slots for", () => {
+    writePinnedBoards("thread-1", ["a1", "a2", "a3", "a4", "a5", "a6", "a7"])
+
+    expect(readPinnedBoards("thread-1")).toHaveLength(5)
+  })
+
+  it("forgets the conversations it has gone longest without", () => {
+    for (let index = 0; index < 30; index += 1) {
+      writePinnedBoards(`thread-${index}`, [`a${index}`])
+    }
+
+    expect(readPinnedBoards("thread-29")).toEqual(["a29"])
+    expect(readPinnedBoards("thread-0")).toEqual([])
+  })
+
+  it("reads a record it cannot parse as no pins rather than throwing", () => {
+    window.localStorage.setItem(PINS_KEY, "not json at all")
+
+    expect(readPinnedBoards("thread-1")).toEqual([])
+  })
+
+  it("ignores entries of the wrong shape", () => {
+    window.localStorage.setItem(
+      PINS_KEY,
+      JSON.stringify({ "thread-1": "a1", "thread-2": ["b1", 7] }),
+    )
+
+    expect(readPinnedBoards("thread-1")).toEqual([])
+    expect(readPinnedBoards("thread-2")).toEqual(["b1"])
+  })
+
+  it("writes nothing for a conversation that does not exist yet", () => {
+    writePinnedBoards(null, ["a1"])
+
+    expect(window.localStorage.getItem(PINS_KEY)).toBeNull()
   })
 })

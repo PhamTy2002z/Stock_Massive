@@ -44,6 +44,7 @@ const EVENT_TYPES: TurnEventType[] = [
   "tool.call",
   "part.progress",
   "part.question",
+  "signal_desk.ready",
   "turn.completed",
   "turn.incomplete",
   "turn.failed",
@@ -59,6 +60,8 @@ const ERROR_PROBE_MS = 4000
 export interface TurnInput {
   text: string
   symbols?: string[]
+  /** The Signal Desk switch as it stood when the question was sent. */
+  signalDesk?: boolean
   /**
    * The attachments this question carries, by id.
    *
@@ -188,6 +191,7 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
           text: input.text,
           attachments: input.attachments ?? [],
           symbols: input.symbols,
+          signalDesk: input.signalDesk,
           retryOfTurnId,
         })
       } catch (error) {

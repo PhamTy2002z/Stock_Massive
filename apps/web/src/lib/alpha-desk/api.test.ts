@@ -80,12 +80,28 @@ describe("the Turn id", () => {
     expect(keys).toEqual([turnId, turnId])
   })
 
-  it("sends no retired mode field", async () => {
+  it("carries the mode the reader switched to, so the desk is asked for", async () => {
+    fetchMock.mockResolvedValue(json({ id: "t-1", created: true }))
+
+    await createTurn({
+      threadId: "thread-1",
+      turnId: newTurnId(),
+      text: "VCB thế nào?",
+      signalDesk: true,
+    })
+
+    expect(sentBody().mode).toBe("signal_desk")
+  })
+
+  it("says chat rather than saying nothing, because the mode is part of the key", async () => {
+    // Omitted, the server would default it — and two Turns asked in two
+    // different modes under one id would resolve to each other. The value is
+    // stated so the idempotency payload can tell them apart.
     fetchMock.mockResolvedValue(json({ id: "t-1", created: true }))
 
     await createTurn({ threadId: "thread-1", turnId: newTurnId(), text: "VCB?" })
 
-    expect(sentBody()).not.toHaveProperty("mode")
+    expect(sentBody().mode).toBe("chat")
   })
 
   it("sends no analysis lens, because nothing behind the request reads one", async () => {

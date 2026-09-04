@@ -6,11 +6,13 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 
+import { buildingLabel } from "@/components/signal-desk/signal-desk-building"
 import { useAnswerReveal } from "@/hooks/use-answer-reveal"
 import { useLiveTurn } from "@/hooks/use-live-turn"
 import {
@@ -25,12 +27,19 @@ import {
   deepLinkedThread,
   openingState,
   readDeskSession,
+  readPinnedBoards,
+  rememberSignalDesk,
+  signalDeskOn,
   writeDeskSession,
+  writePinnedBoards,
 } from "@/lib/alpha-desk/desk-session"
+import { readPreferences } from "@/lib/alpha-desk/preferences"
 import { isActive, isSettled, resendPlan } from "@/lib/alpha-desk/live-turn"
 import {
   buildTranscript,
   questionBefore,
+  storedDeskViews,
+  type OpenedAnalysis,
   type TranscriptEntry,
 } from "@/lib/alpha-desk/transcript"
 import { uploadAttachment } from "@/lib/alpha-desk/api"
@@ -38,10 +47,10 @@ import { attachmentRefusal } from "@/lib/alpha-desk/copy"
 import { canCapture, captureScreen } from "@/lib/alpha-desk/screen-capture"
 import { AlphaRefusalError } from "@/lib/alpha"
 import { useCapabilities } from "@/hooks/use-capabilities"
-import type { Attachment, FlagReason } from "@/lib/alpha-desk/types"
+import type { Attachment, FlagReason, SignalDeskAnnouncement } from "@/lib/alpha-desk/types"
 import { describeFailure, type Failure } from "@/lib/failure"
 
-import { useShell } from "./shell-state"
+import { useShell, type SignalDeskBoard } from "./shell-state"
 
 /**
  * The conversation itself: the Thread, the Turn in flight, and sending.
@@ -106,6 +115,32 @@ interface DeskApi {
    * takes its recovery from the second.
    */
   refusalFailure: Failure | null
+  /**
+   * Whether the Signal Desk is on for the conversation on screen.
+   *
+   * Read from the shell, which owns the layout the switch changes, and exposed
+   * here because the composer's pill is the one control that sets it. One edge
+   * in and one edge out: an entitlement check, when there is one, goes on
+   * `setSignalDesk` and nowhere else.
+   */
+  signalDesk: boolean
+  /**
+   * Turn the desk on or off for this conversation.
+   *
+   * The single function the flag passes through, and the only place an
+   * entitlement check would go. It changes the layout and it changes what the
+   * next request asks for: `submit` reads this same value as the Turn's mode, so
+   * the switch and the payload cannot come to disagree.
+   */
+  setSignalDesk: (on: boolean) => void
+  /**
+   * What a Study in flight should be called, or null when none is.
+   *
+   * One derivation, two readers: the pill in the composer is this state's
+   * status light and the pane's skeleton is its shape. Computing it twice is
+   * how the two end up disagreeing about whether anything is happening.
+   */
+  building: string | null
   flagFailedFor: number | null
   submit: (text: string) => void
   /** What this unsent question carries, in the order it was added. */
@@ -162,6 +197,7 @@ interface DeskApi {
   dismissRefusal: () => void
   openThread: (id: string) => void
   newThread: () => void
+  openAnalysis: (symbol: string, tradingDay: string) => void
 }
 
 const DeskContext = createContext<DeskApi | null>(null)
@@ -217,6 +253,15 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   // A Thread that could not be opened. Kept separately from the Turn's own
   // refusal because it is a different failure: nothing was admitted.
   const [threadError, setThreadError] = useState<Error | null>(null)
+  // The Analyses opened into the conversation on screen. Client state rather
+  // than a persisted resource: an artifact is a thing the reader put in front
+  // of themselves, not a message anybody sent.
+  const [openedAnalyses, setOpenedAnalyses] = useState<OpenedAnalysis[]>([])
+  // Which conversations this tab has the desk switched on for. Held here rather
+  // than in the shell because it outlives the conversation on screen: the shell
+  // knows whether *this* desk is open, and this knows which Thread to restore
+  // that answer for.
+  const [signalDeskThreads, setSignalDeskThreads] = useState<string[]>([])
 
   const thread = useThread(threadId)
   const turn = useLiveTurn(threadId)
@@ -240,11 +285,19 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     const session = readDeskSession()
     const opening = openingState(deepLinked, session, deepLinkedThreadId)
     setThreadId(opening.threadId)
+    setSignalDeskThreads(session.signalDeskThreads ?? [])
     // The desk the arriving Thread was left with — or, where there is no
     // Thread to arrive at, what this browser says a new conversation opens
     // with. A deep link lands in the second case: it opens a conversation that
     // has no answer yet, and so has no mode of its own to restore.
-    shellDispatch({ type: "thread", opened: false })
+    shellDispatch({
+      type: "thread",
+      signalDesk:
+        opening.threadId === null
+          ? readPreferences().signalDeskByDefault
+          : signalDeskOn(session, opening.threadId),
+      opened: false,
+    })
     if (opening.activeSymbol !== null) {
       shellDispatch({ type: "context-symbol", symbol: opening.activeSymbol })
     }
@@ -265,6 +318,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       threadId,
       turnId: turnSettled ? null : liveTurnId,
       activeSymbol,
+      signalDeskThreads,
       // Written because the rows already exist server-side. A reload that
       // forgot them would leave files in the database that nothing on screen
       // refers to, filling the reader's own quota with invisible uploads until
@@ -277,8 +331,19 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     liveTurnId,
     turnSettled,
     activeSymbol,
+    signalDeskThreads,
     readyIds,
   ])
+
+  // The switch, recorded against the Thread it was thrown for. Watched rather
+  // than written in the handler because the desk can be switched on before
+  // there is a Thread to attach it to: the first question opens one, and this
+  // is what files the answer under it when it arrives.
+  const signalDesk = shell.signalDesk
+  useEffect(() => {
+    if (!restored || threadId === null) return
+    setSignalDeskThreads((threads) => rememberSignalDesk(threads, threadId, signalDesk))
+  }, [restored, threadId, signalDesk])
 
   // -- attaching ----------------------------------------------------------
 
@@ -436,7 +501,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
         // silence, which reads from here as a lens that travels when it does
         // not. It changes this composer and stops there until something behind
         // the request is designed to receive it.
-        void send({ text, attachments })
+        void send({ text, signalDesk, attachments })
         return
       }
       setQueuedQuestion(text)
@@ -459,7 +524,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
         },
       })
     },
-    [threadId, send, createThread],
+    [threadId, signalDesk, send, createThread],
   )
 
   /** What the composer calls: this question, carrying what is pending. */
@@ -480,8 +545,8 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     setQueuedQuestion(null)
     const attachments = queuedAttachments
     setQueuedAttachments([])
-    void send({ text, attachments })
-  }, [threadId, queuedQuestion, queuedAttachments, send])
+    void send({ text, signalDesk, attachments })
+  }, [threadId, queuedQuestion, queuedAttachments, signalDesk, send])
 
   // The create commits the user message before it returns, so the copy on
   // screen stops being a local one as soon as the Thread comes back.
@@ -493,6 +558,82 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       setUnconfirmedQuestion(null)
     }
   }, [messages, unconfirmedQuestion])
+
+  // The pictures this conversation already made, put back on the record.
+  //
+  // Runs off the stored messages rather than off the live Turn: the Turn that
+  // drew them ended in another session, possibly on another day. Without this
+  // the header's list stayed empty until a *new* Study ran, so an old Thread's
+  // desk views existed, were fetchable, and were reachable only by scrolling
+  // the transcript back to the card that opened them.
+  const storedTabs = useMemo(
+    () => storedDeskViews(messages).map(asBoard),
+    [messages],
+  )
+  useEffect(() => {
+    if (storedTabs.length === 0) return
+    shellDispatch({ type: "desk-views-restored", tabs: storedTabs })
+  }, [storedTabs, shellDispatch])
+
+  // The boards this browser pinned in *this* conversation, put back.
+  //
+  // Read on the Thread rather than once at mount: a pin is a statement about
+  // one conversation, so opening another has to answer the question again. The
+  // shell has already cleared the previous Thread's pins by this point, and an
+  // empty answer is the correct restore for a Thread nothing was pinned in.
+  // What was read back, and for which conversation. Held because the write
+  // below has to tell two indistinguishable-looking states apart: "the reader
+  // unpinned everything" and "the Thread just changed, so the shell has been
+  // cleared and the restore has not landed yet".
+  const restoredPins = useRef<{ threadId: string | null; artifactIds: string[] }>({
+    threadId: null,
+    artifactIds: [],
+  })
+  const pinsSynced = useRef<string | null>(null)
+  useEffect(() => {
+    if (!restored) return
+    const artifactIds = readPinnedBoards(threadId)
+    restoredPins.current = { threadId, artifactIds }
+    pinsSynced.current = null
+    shellDispatch({ type: "desk-pins-restored", artifactIds })
+  }, [restored, threadId, shellDispatch])
+
+  const deskPinned = shell.deskPinned
+  useEffect(() => {
+    if (!restored || threadId === null) return
+    const landed = restoredPins.current
+    if (landed.threadId !== threadId) return
+    if (pinsSynced.current !== threadId) {
+      // Nothing is written until the shell is holding what was read back. Until
+      // then this conversation's pins are still the previous one's, cleared.
+      if (!sameIds(landed.artifactIds, deskPinned)) return
+      pinsSynced.current = threadId
+      return
+    }
+    writePinnedBoards(threadId, deskPinned)
+  }, [restored, threadId, deskPinned])
+
+  // A desk view the Turn produced opens the panel on it — once, and only while the
+  // reader has not pinned another tab themselves. Keyed on the newest
+  // announcement rather than the list, so re-renders of an unchanged Turn do
+  // not keep re-opening a panel the reader has closed.
+  const newestDeskView = turn.state.deskViews[turn.state.deskViews.length - 1]
+  const newestDeskViewId = newestDeskView?.artifactId ?? null
+  // Read through a ref so the announcement's own fields do not re-run the
+  // effect: the id is what decides whether this is a new picture, and the rest
+  // of the announcement is what that picture is filed under.
+  const newestRef = useRef(newestDeskView)
+  newestRef.current = newestDeskView
+  useEffect(() => {
+    if (newestDeskViewId === null) return
+    const announcement = newestRef.current
+    shellDispatch({
+      type: "signal-desk-ready",
+      ...(announcement === undefined
+        ? { artifactId: newestDeskViewId }
+        : asBoard(announcement)),
+    })
+  }, [newestDeskViewId, shellDispatch])
 
   // -- what is on screen --------------------------------------------------
 
@@ -510,6 +651,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
         live: turn.state,
         pendingUserText: unconfirmedQuestion,
         pendingAttachments: pendingAttachmentViews,
+        openedAnalyses,
         reveal,
       }),
     [
@@ -518,9 +660,28 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       turn.state,
       unconfirmedQuestion,
       pendingAttachmentViews,
+      openedAnalyses,
       reveal,
     ],
   )
+
+  // Read through a ref so opening an Analysis does not re-create the callback
+  // on every message that lands.
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
+
+  const openAnalysis = useCallback((symbol: string, tradingDay: string) => {
+    setOpenedAnalyses((opened) => {
+      if (opened.some((one) => one.symbol === symbol && one.tradingDay === tradingDay)) {
+        return opened
+      }
+      const afterSeq = messagesRef.current.reduce(
+        (highest, message) => Math.max(highest, message.seq),
+        0,
+      )
+      return [...opened, { symbol, tradingDay, afterSeq }]
+    })
+  }, [])
 
   // The last question asked, with what it carried. From `questionBefore` rather
   // than derived here, because the transcript's own module is where that
@@ -535,9 +696,10 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     setUnconfirmedQuestion(null)
     void retryTurn({
       text: lastQuestion.text,
+      signalDesk,
       attachments: lastQuestion.attachments,
     })
-  }, [lastQuestion, retryTurn])
+  }, [lastQuestion, signalDesk, retryTurn])
 
   /**
    * Ask a question from the transcript again, from the message that carries it.
@@ -597,12 +759,26 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     [skip],
   )
 
+  // Both of these leave the conversation the artifacts were opened into, so
+  // they leave with it.
+  // Read through a ref so the two below do not re-create themselves every time
+  // a desk is switched somewhere.
+  const deskThreadsRef = useRef(signalDeskThreads)
+  deskThreadsRef.current = signalDeskThreads
+
   const openThread = useCallback(
     (id: string) => {
       setThreadId(id)
       setUnconfirmedQuestion(null)
       setThreadError(null)
-      shellDispatch({ type: "thread", opened: true })
+      setOpenedAnalyses([])
+      // Re-read rather than carry forward: the desk belongs to the conversation
+      // being opened, and the one being left keeps its own answer.
+      shellDispatch({
+        type: "thread",
+        signalDesk: deskThreadsRef.current.includes(id),
+        opened: true,
+      })
     },
     [shellDispatch],
   )
@@ -612,9 +788,22 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     setThreadId(null)
     setUnconfirmedQuestion(null)
     setThreadError(null)
-    shellDispatch({ type: "thread", opened: true })
+    setOpenedAnalyses([])
+    // A new conversation starts where this browser says new conversations
+    // start, whatever the last one did. The preference answers only this
+    // question: a Thread with history restores its own mode instead.
+    shellDispatch({
+      type: "thread",
+      signalDesk: readPreferences().signalDeskByDefault,
+      opened: true,
+    })
     reset()
   }, [reset, shellDispatch])
+
+  const setSignalDesk = useCallback(
+    (on: boolean) => shellDispatch({ type: "signal-desk", on }),
+    [shellDispatch],
+  )
 
   const dismissRefusal = useCallback(() => {
     setThreadError(null)
@@ -634,6 +823,9 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       isSubmitting: createThread.isPending || queuedQuestion !== null,
       refusal: refusalError?.message ?? null,
       refusalFailure: refusalError === null ? null : describeFailure(refusalError),
+      signalDesk,
+      setSignalDesk,
+      building: buildingLabel(turn.state),
       attachments: pending,
       attach: attachFiles,
       detach,
@@ -656,6 +848,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       dismissRefusal,
       openThread,
       newThread,
+      openAnalysis,
     }),
     [
       threadId,
@@ -666,6 +859,8 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       createThread.isPending,
       queuedQuestion,
       flagging.failedMessageId,
+      signalDesk,
+      setSignalDesk,
       pending,
       attachFiles,
       detach,
@@ -685,10 +880,37 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       dismissRefusal,
       openThread,
       newThread,
+      openAnalysis,
     ],
   )
 
   return <DeskContext.Provider value={value}>{children}</DeskContext.Provider>
+}
+
+/**
+ * One announcement as the shell files a board.
+ *
+ * A projection rather than the announcement itself: the shell keeps what a
+ * reader needs to *find* the board again — its name, its ticker, the analysis
+ * that drew it and the round it belongs to. `blockCount` is the panel's
+ * business, and the frozen instant is the artifact's.
+ */
+function asBoard(announcement: SignalDeskAnnouncement): SignalDeskBoard {
+  return {
+    artifactId: announcement.artifactId,
+    title: announcement.title,
+    // Empty strings would be drawn as a stray separator in the switcher's
+    // second line, so absence stays absence.
+    symbol: announcement.symbol || undefined,
+    studyName: announcement.studyName || undefined,
+    studyDisplayName: announcement.studyDisplayName || undefined,
+    round: announcement.round,
+  }
+}
+
+/** Whether two id lists say the same thing, in the same order. */
+function sameIds(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((id, at) => right[at] === id)
 }
 
 export function useDesk(): DeskApi {

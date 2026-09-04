@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react"
 import { Building2, Check, Lock, MessageSquare, Search, X } from "lucide-react"
 
-import { CAPTURE_COPY } from "@/lib/alpha-desk/copy"
+import { BoardSwitcher } from "@/components/signal-desk/board-switcher"
+import { BOARD_SWITCHER_COPY, CAPTURE_COPY } from "@/lib/alpha-desk/copy"
 import { useThreads } from "@/hooks/use-threads"
 import { FailureState } from "@/components/ui/failure-state"
 import { describeFailure } from "@/lib/failure"
@@ -28,6 +29,7 @@ export function Overlays() {
   const { state } = useShell()
 
   if (state.overlay === "palette") return <CommandPalette />
+  if (state.overlay === "boards") return <BoardPicker />
   if (state.overlay === "share") return <ShareDialog />
   if (state.overlay === "capture") {
     return (
@@ -209,6 +211,33 @@ function CommandPalette() {
             ))}
         </div>
       </div>
+    </Scrim>
+  )
+}
+
+/**
+ * The board switcher, wired to the shell that owns the boards.
+ *
+ * A thin adapter on purpose: the list itself knows nothing about the reducer, so
+ * it can be rendered and tested with an array of boards rather than a whole
+ * shell — and the rules about what a press *does* to the layout stay in the one
+ * place that owns them.
+ */
+function BoardPicker() {
+  const { state, dispatch } = useShell()
+
+  return (
+    <Scrim align="top" label={BOARD_SWITCHER_COPY.title}>
+      <BoardSwitcher
+        boards={state.deskBoards}
+        pinned={state.deskPinned}
+        activeBoardId={state.deskViewArtifactId}
+        onOpenBoard={(artifactId) => dispatch({ type: "open-desk-view", artifactId })}
+        onTogglePin={(artifactId, pinned) =>
+          dispatch({ type: "pin-desk-view", artifactId, pinned })
+        }
+        onClose={() => dispatch({ type: "overlay", overlay: null })}
+      />
     </Scrim>
   )
 }

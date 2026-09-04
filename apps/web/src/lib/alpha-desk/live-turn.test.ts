@@ -109,7 +109,7 @@ describe("content deltas", () => {
 })
 
 describe("tool calls", () => {
-  it("updates a call in place when it settles", () => {
+  it("updates a call in place when its outcome arrives", () => {
     const state = apply(
       started(),
       event("tool.call", 1, { id: "a", name: "web_search", status: "running", summary: "Đang tìm" }),
@@ -273,6 +273,82 @@ describe("tool calls", () => {
       }),
     )
     expect(state.toolCalls[0].results.map((result) => result.title)).toEqual(["kept"])
+  })
+})
+
+describe("a desk view", () => {
+  const SIGNAL_DESK = {
+    artifactId: "artifact-1",
+    studyName: "intraday_liquidity_profile",
+    studyDisplayName: "Thanh khoản trong phiên",
+    title: "Thanh khoản trong phiên — STB",
+    blockCount: 4,
+    round: 0,
+    symbol: "STB",
+    asOf: "2026-08-28T09:00:00+07:00",
+  }
+
+  it("is remembered by the id the panel will fetch it with", () => {
+    const state = apply(started(), event("signal_desk.ready", 1, SIGNAL_DESK))
+
+    expect(state.deskViews).toEqual([SIGNAL_DESK])
+    expect(state.seq).toBe(1)
+  })
+
+  it("is replaced rather than duplicated when it is announced twice", () => {
+    // One Study run has one id, so a second announcement is a republish. The
+    // sequence still advances: both events happened.
+    const state = apply(
+      started(),
+      event("signal_desk.ready", 1, SIGNAL_DESK),
+      event("signal_desk.ready", 2, { ...SIGNAL_DESK, title: "Đã đổi tên" }),
+    )
+
+    expect(state.deskViews).toHaveLength(1)
+    expect(state.deskViews[0].title).toBe("Đã đổi tên")
+    expect(state.seq).toBe(2)
+  })
+
+  it("is dropped when it names no artifact, because a card with no id opens nothing", () => {
+    const state = apply(started(), event("signal_desk.ready", 1, { title: "Không có id" }))
+
+    expect(state.deskViews).toEqual([])
+    expect(state.seq).toBe(1)
+  })
+
+  it("survives a reconnect, because a snapshot restates it", () => {
+    const state = apply(
+      started(),
+      event("signal_desk.ready", 1, SIGNAL_DESK),
+      event("turn.snapshot", 0, {
+        through_seq: 5,
+        status: "running",
+        terminal_reason: null,
+        text: "Thanh khoản STB",
+        tool_calls: [],
+        signal_desks: [SIGNAL_DESK],
+        message_id: null,
+      }),
+    )
+
+    expect(state.deskViews).toEqual([SIGNAL_DESK])
+  })
+
+  it("is gone from a snapshot that names none, because a snapshot replaces", () => {
+    const state = apply(
+      started(),
+      event("signal_desk.ready", 1, SIGNAL_DESK),
+      event("turn.snapshot", 0, {
+        through_seq: 5,
+        status: "running",
+        terminal_reason: null,
+        text: "",
+        tool_calls: [],
+        message_id: null,
+      }),
+    )
+
+    expect(state.deskViews).toEqual([])
   })
 })
 
