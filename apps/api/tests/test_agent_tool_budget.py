@@ -134,3 +134,46 @@ def test_a_result_that_fits_is_left_alone_by_both_rungs():
 
     assert rebalanced[0].text == text
     assert rebalanced[0].truncated is False
+
+
+def test_a_tool_that_reshapes_keeps_its_own_selection_when_a_rung_shrinks_it():
+    """Rung three asks the largest result to give ground, not to lose its point.
+
+    The generic cut keeps the head, which for a page read is its navigation
+    menu. A tool that declares how to narrow its result is asked instead, at
+    both rungs, so the part the call went looking for survives the shrinking.
+    """
+    head = "menu " * 400
+    body = f"{head}CLOSING PRICE 74,500 {'tail ' * 400}"
+
+    def reshape(text: str, limit: int) -> str:
+        assert text == body
+        return "CLOSING PRICE 74,500"[:limit]
+
+    turn = budget.TurnBudget(
+        budget.BudgetThresholds(per_result_chars=1_500, per_turn_chars=1_000)
+    )
+    turn.add("page", "fetch_url", body, reshape=reshape)
+
+    rebalanced = turn.rebalance()
+
+    assert "74,500" in rebalanced[0].text
+    assert rebalanced[0].original_chars == len(body)
+    # A selection drawn from several places is not a preview that stopped
+    # somewhere, so it carries no cursor.
+    assert rebalanced[0].cursor is None
+
+
+def test_a_reshaper_that_overruns_or_declines_falls_back_to_the_cut():
+    text = _lines(60)
+    turn = budget.TurnBudget(
+        budget.BudgetThresholds(per_result_chars=1_000, per_turn_chars=100_000)
+    )
+
+    turn.add("declined", "fetch_url", text, reshape=lambda _text, _limit: "")
+    turn.add("overran", "fetch_url", text, reshape=lambda text, _limit: text)
+
+    by_id = {result.call_id: result for result in turn.results()}
+    assert by_id["declined"].truncated is True
+    assert by_id["overran"].truncated is True
+    assert all(result.chars <= 1_000 for result in by_id.values())

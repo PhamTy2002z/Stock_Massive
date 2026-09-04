@@ -190,6 +190,10 @@ class ToolContext:
     symbol: str | None = None
     #: Reserved trusted temporal scope; current tools do not use it.
     trading_day: date | None = None
+    #: The evidence boundary this Turn was given: nothing published after it may
+    #: be read. Set from the date the reader named in the question, and ``None``
+    #: when they named none, which is every Turn asking about the present.
+    as_of: datetime | None = None
     #: The caller's clock. Injected so a handler that stamps a row and a test
     #: that asserts the stamp read the same instant.
     now: datetime | None = None
@@ -254,6 +258,16 @@ class ToolEntry:
     #: loop rather than letting them stall every other call in the round.
     is_async: bool = True
     max_result_size_chars: int | None = None
+    #: How this tool narrows its own result when the output budget asks it to
+    #: give ground, taking the whole result and a character ceiling.
+    #:
+    #: Cutting the head off a result is the generic answer and a bad one for a
+    #: tool whose payload is structured or whose first characters are boilerplate
+    #: — a page read comes back as its navigation menu. A tool that knows its own
+    #: shape declares this instead; ``None`` keeps the generic cut. An empty
+    #: answer, or one still over the ceiling, means the tool declined and the
+    #: generic cut applies.
+    reshape_result: Callable[[str, int], str] | None = None
     effect: ToolEffect = ToolEffect.UNKNOWN
     idempotency: ToolIdempotency = ToolIdempotency.NON_IDEMPOTENT
     access: ToolAccess = ToolAccess.NETWORK
@@ -410,6 +424,7 @@ class ResolvedTool:
     contract_version: str
     is_async: bool
     max_result_size_chars: int | None
+    reshape_result: Callable[[str, int], str] | None = None
 
     @property
     def reads_external(self) -> bool:
@@ -468,6 +483,7 @@ class ResolvedTool:
             contract_version=entry.contract_version,
             is_async=entry.is_async,
             max_result_size_chars=entry.max_result_size_chars,
+            reshape_result=entry.reshape_result,
         )
 
 

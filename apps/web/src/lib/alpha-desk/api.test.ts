@@ -80,10 +80,19 @@ describe("the Turn id", () => {
     expect(keys).toEqual([turnId, turnId])
   })
 
-  it("sends no retired mode field", async () => {
+  it("sends no mode, because the schema forbids a field it does not declare", async () => {
+    // `CreateTurnRequest` is `extra="forbid"` and declares no mode, so a body
+    // carrying one fails the whole Turn with a 422 — and because the mode was
+    // sent whether the desk was on or off, that was every Turn. The desk is a
+    // state of the surface until the request learns to carry it.
     fetchMock.mockResolvedValue(json({ id: "t-1", created: true }))
 
-    await createTurn({ threadId: "thread-1", turnId: newTurnId(), text: "VCB?" })
+    await createTurn({
+      threadId: "thread-1",
+      turnId: newTurnId(),
+      text: "VCB thế nào?",
+      signalDesk: true,
+    })
 
     expect(sentBody()).not.toHaveProperty("mode")
   })

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -18,6 +18,8 @@ from src.agent.evidence.source_policy import (
     canonical_url,
     classify_source,
     extract_publication_stamp,
+    ICT,
+    as_of_from_text,
     is_temporally_admissible,
 )
 
@@ -134,3 +136,56 @@ def test_retention_and_bucket_values_are_locked_by_policy():
     assert as_of_bucket(kind=EvidenceCacheKind.AGGREGATOR_PAGE, as_of=as_of) == (
         "2026-08-21T12:00:00+07:00"
     )
+
+
+def test_the_boundary_is_read_out_of_the_question_and_only_when_it_is_a_date():
+    """A stated date bounds the Turn; a ratio that looks like one does not.
+
+    "tính đến ngày 20/8/2026" is a boundary the reader wrote down, and §2 says
+    a page published on the 21st cannot answer it. "P/E 30/8" is not a date at
+    all, and reading it as one would bound the Turn to August and quietly starve
+    it of everything since — which is why a year-less pair needs a date word in
+    front of it.
+    """
+    now = datetime(2026, 9, 4, 23, 0, tzinfo=ICT)
+
+    bounded = as_of_from_text("Tính đến ngày 20/8/2026, thanh khoản HOSE ra sao?", now=now)
+    assert bounded is not None and bounded.astimezone(ICT).date() == date(2026, 8, 20)
+
+    # The end of a range, not its start.
+    ranged = as_of_from_text("Từ 01/08/2026 đến 20/08/2026 thị trường thế nào?", now=now)
+    assert ranged is not None and ranged.astimezone(ICT).date() == date(2026, 8, 20)
+
+    assert as_of_from_text("phiên 12/8 vừa rồi thế nào?", now=now) is not None
+    assert as_of_from_text("P/E 30/8 của VCB là bao nhiêu?", now=now) is None
+    assert as_of_from_text("Vốn điều lệ hiện tại của VCB?", now=now) is None
+    # A forecast horizon is not a limit on what may be read.
+    assert as_of_from_text("Dự báo tới 31/12/2027 ra sao?", now=now) is None
+
+
+def test_a_compact_news_id_dates_the_page_a_snippet_left_undated():
+    """CafeF and Tuổi Trẻ write the date into the article id, not the path.
+
+    A search snippet from either arrives with no publication field at all, and
+    an undated source is admitted everywhere a dated one is refused — so a page
+    published after the reader's stated boundary walks in on the strength of its
+    publisher's URL scheme. Read the id and it does not.
+    """
+    cafef = extract_publication_stamp(
+        url="https://cafef.vn/sau-dip-le-quoc-khanh-188260829154209089.chn"
+    )
+    assert cafef.published_at is not None
+    assert cafef.published_at.astimezone(ICT).date() == date(2026, 8, 29)
+    assert cafef.method is PublicationMethod.URL_PATTERN
+
+    tuoitre = extract_publication_stamp(
+        url="https://tuoitre.vn/chung-khoan-14-8-100260814074820245.htm"
+    )
+    assert tuoitre.published_at is not None
+    assert tuoitre.published_at.astimezone(ICT).date() == date(2026, 8, 14)
+
+    # An id with no date in it stays unknown rather than inventing one.
+    plain = extract_publication_stamp(
+        url="https://vnexpress.net/chung-khoan-giam-them-37-diem-5109204.html"
+    )
+    assert plain.published_at is None

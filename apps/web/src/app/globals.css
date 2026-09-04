@@ -279,9 +279,37 @@
     50% { opacity: 0.35; }
   }
 
+  @keyframes vg-draw-line {
+    from { stroke-dashoffset: 640; }
+    to { stroke-dashoffset: 0; }
+  }
+
   @keyframes vg-bar-grow {
     from { transform: scaleX(0); }
     to { transform: scaleX(1); }
+  }
+
+  /* The Signal Desk pane enters and leaves along the same curve and clock the
+     chat column's padding moves on (`duration-panel` / `ease-panel`), so the
+     pane's left edge and the conversation's right edge travel as one seam
+     instead of the pane popping in over text that then squeezes out from under
+     it. Both are transforms: the pane is `position: fixed`, so sliding it costs
+     no layout on the column beside it. */
+  @keyframes vg-panel-in {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+
+  @keyframes vg-panel-out {
+    from { transform: translateX(0); }
+    to { transform: translateX(100%); }
+  }
+
+  .animate-vg-panel-in {
+    animation: vg-panel-in 420ms cubic-bezier(0.22, 1, 0.28, 1) both;
+  }
+  .animate-vg-panel-out {
+    animation: vg-panel-out 420ms cubic-bezier(0.22, 1, 0.28, 1) both;
   }
 
   .animate-vg-fade-in { animation: vg-fade-in 0.3s ease both; }
@@ -293,6 +321,13 @@
 
   .animate-vg-dot-pulse { animation: vg-dot-pulse 1.2s ease-in-out infinite; }
   .animate-vg-live-pulse { animation: vg-live-pulse 1.8s ease-in-out infinite; }
+
+  /* Draws the price line left to right, so a chart reads as time passing
+     rather than as a shape that was always there. */
+  .animate-vg-draw-line {
+    stroke-dasharray: 640;
+    animation: vg-draw-line 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+  }
 
   .animate-vg-bar-grow {
     transform-origin: left;
@@ -502,5 +537,100 @@
 
   .fetching-opacity[data-fetching="true"] {
     opacity: 0.7;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   The Alpha Desk Widget registry palette (ADR-0012).
+
+   Still declared separately from the chart layer above, and for the same
+   reason: a Widget must never paint a series in the brand amber or in a market
+   green, because a neutral figure drawn in the up colour reads as a rising
+   number and a bar drawn in the brand colour reads as a control.
+
+   Colour never carries meaning alone here. These tokens are the visual half;
+   every Widget also states the same thing in its textual summary and in its
+   data table, so a reader who cannot separate the hues loses nothing. ------- */
+@layer base {
+  :root {
+    --widget-surface: var(--surface-raised);
+    --widget-ink: 220 6% 90%;
+    --widget-ink-muted: 214 5% 71%;
+    /* The default series colour: a blue that is neither the amber nor the
+       market pair. What a Widget paints when the numbers claim nothing. */
+    --widget-series: 213 84% 72%;
+    /* The same blue stepped back, for a companion series. Re-cut from 26%/40%,
+       which read at 2.71:1 here and 1.70:1 in light — below the 3:1 a chart
+       stroke needs, so it was a token nothing could safely have used. */
+    --widget-series-muted: 213 40% 56%;
+    --widget-up: 140 50% 50%;
+    --widget-down: 3 72% 60%;
+    --widget-neutral: 214 4% 65%;
+    --widget-track: 220 5% 20%;
+    --widget-grid: 220 5% 18%;
+    --widget-axis: 214 5% 71%;
+    /* The row or point the answer is actually about. */
+    --widget-focus: 30 91% 58%;
+    /* What something is being compared *against*: an index, a sector median.
+       Deliberately the quietest mark on a chart — a reference that competed
+       with the line referencing it would be a chart with two subjects. Slate
+       at 5.13:1 against --widget-surface, past the 3:1 a chart stroke needs
+       and well clear of the six category hues. */
+    --widget-benchmark: 220 12% 55%;
+    /* A cell a reader should not read past without the caveat beside it. Amber
+       rather than the fall red: the number is not bad, it is unsafe to read
+       alone. Stepped away from --widget-focus (30 91% 58%) by hue so the two
+       are not mistaken for each other on one picture. 8.44:1. */
+    --widget-warning: 45 88% 60%;
+
+    /* Six interchangeable group hues, for a picture whose parts are categories
+       rather than directions.
+
+       The hues are what is left once the meanings above are spoken for: amber
+       ~30° is the brand and the focus mark, violet ~262° reads as *trần* to a
+       Vietnamese reader, ~3° is a fall and ~140° is a rise. Each of these sits
+       at least ~22° clear of all four, and at least 25° from its neighbours
+       here, so the six are told apart by hue rather than by a legend.
+
+       Measured against --widget-surface (220 5% 12%): 8.82, 5.68, 6.86, 5.90,
+       9.20 and 8.59 to one — every one past the 3:1 a chart mark needs.
+
+       Nothing is a category and a direction at once, so a Widget drawing these
+       beside the up/down pair is drawing two claims on one picture. That is a
+       Study's mistake to avoid, not something a colour can fix. */
+    --widget-cat-1: 190 70% 62%;
+    --widget-cat-2: 240 72% 74%;
+    --widget-cat-3: 300 55% 70%;
+    --widget-cat-4: 335 70% 68%;
+    --widget-cat-5: 75 52% 58%;
+    --widget-cat-6: 165 62% 52%;
+  }
+
+  .light {
+    --widget-surface: 0 0% 100%;
+    --widget-ink: 220 10% 10%;
+    --widget-ink-muted: 216 6% 40%;
+    --widget-series: 217 72% 40%;
+    --widget-series-muted: 217 40% 58%;
+    --widget-up: 140 60% 26%;
+    --widget-down: 3 72% 42%;
+    --widget-neutral: 216 5% 44%;
+    --widget-track: 220 8% 90%;
+    --widget-grid: 220 8% 88%;
+    --widget-axis: 216 6% 40%;
+    --widget-focus: 30 76% 36%;
+    /* The same two, darkened for white paper: 4.61:1 and 4.53:1 against
+       --widget-surface (0 0% 100%). */
+    --widget-benchmark: 220 12% 42%;
+    --widget-warning: 38 92% 32%;
+
+    /* The same six hues, darkened for white paper. Against --widget-surface
+       (0 0% 100%): 5.88, 9.45, 6.29, 6.25, 5.42 and 5.73 to one. */
+    --widget-cat-1: 190 90% 27%;
+    --widget-cat-2: 240 62% 46%;
+    --widget-cat-3: 300 55% 40%;
+    --widget-cat-4: 335 70% 42%;
+    --widget-cat-5: 75 80% 25%;
+    --widget-cat-6: 165 90% 24%;
   }
 }

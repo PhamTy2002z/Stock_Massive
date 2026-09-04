@@ -29,6 +29,17 @@
 - New typed parts (progress, question, claim/citation) are added only by the
   phase that owns them (Phase 3/6/7), through the part lifecycle — never as
   ad-hoc payloads.
+- The **Signal Desk is a mode on the composer and a right-hand pane, and
+  nothing else**: a `Chat | Signal Desk` pill (`components/shell/composer.tsx`),
+  the pane and its geometry (`components/shell/inspector.tsx`,
+  `shell-state.tsx`), and one empty state
+  (`components/signal-desk/signal-desk-empty.tsx`). It is client state — no
+  request carries a mode, nothing produces a board, and the pane's only body is
+  its empty one. A new implementation attaches at `Body` in `inspector.tsx`.
+- `CreateTurnRequest` is `extra="forbid"` (`apps/api/src/agent/schemas.py`).
+  A field the browser adds to a Turn body that the schema does not declare
+  fails **every** Turn with a 422, on and off alike. Change the schema in the
+  same commit as the client, or do not send the field.
 - Register tools through `apps/api/src/agent/registry.py` and
   `apps/api/src/agent/tools/`; no second dispatch path; do not expose every
   registered tool by default.
@@ -39,10 +50,18 @@
 
 ## Retired Paths
 
-- Do not restore Signal Desk, analysis boards, Study/Board DSL, widget
-  catalogs, local indicator/calculation tools, stock-store reads, their
-  schedulers, or any global watchlist surface. "Evidence Desk" is a different
-  product; the name "Signal Desk" stays retired.
+- The **analysis board stays retired**: the board renderer and its blocks,
+  Study/Board DSL, the widget catalog and every widget, chart runtimes,
+  artifact rows and `GET /artifacts/{id}`, board announcements
+  (`signal_desk.ready`), board tabs, pinning and export, local
+  indicator/calculation tools, stock-store reads, their schedulers, and any
+  global watchlist surface. Do not restore any of it.
+- The **name** "Signal Desk" is no longer retired. The mode and the pane were
+  restored on 2026-09-04 at the product owner's direction, as the surface a new
+  backend will fill. `docs/roadmap.md` still records the whole desk as torn
+  down (Phase 0, §"Đã xóa") and **has not been amended yet** — where the two
+  disagree, this file is current on the desk surface and the roadmap remains
+  the authority on everything else. Raise the amendment before building on it.
 - Do not import runtime code from deleted `src/stocks/` or `src/studies/`
   modules; historical plans and migrations naming them are not current
   architecture authority.
@@ -115,5 +134,7 @@ make golden-release CEILING_USD=1 RELEASE_ARGS="--grade-only golden/artifacts/<f
 the host environment differs from the container's.
 
 Before reporting completion, run `git diff --check` and verify that production
-code has no retired Signal Desk/Study/local-analysis references outside
-explicit statements that those capabilities do not exist.
+code has no Study, widget, artifact or local-analysis references outside
+explicit statements that those capabilities do not exist. Signal Desk names
+are expected in the composer, the inspector and `components/signal-desk/`;
+anywhere else they are a board coming back.

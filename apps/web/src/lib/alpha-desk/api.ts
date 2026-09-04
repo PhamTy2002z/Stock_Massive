@@ -84,6 +84,17 @@ export interface CreateTurnInput {
   text: string
   symbols?: string[]
   /**
+   * Whether the reader threw the Signal Desk switch for this question.
+   *
+   * Read by the surface and not sent: `CreateTurnRequest` forbids fields it does
+   * not declare and it declares no mode, so a body carrying one fails the Turn
+   * with a 422 — every Turn, since the switch is off as explicitly as it is on.
+   * It stays on the input because the callers already know the answer, and the
+   * line that puts it on the wire belongs where it would be translated rather
+   * than rediscovered.
+   */
+  signalDesk?: boolean
+  /**
    * The attachments this question carries, by id, in the order they were added.
    *
    * Ids and not files: the bytes went up before the reader finished typing, so

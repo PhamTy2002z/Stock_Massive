@@ -19,7 +19,7 @@ def prose(key: str) -> str:
 
 
 def test_prompt_version_and_section_order_are_explicit():
-    assert PROMPT_VERSION == "4.1.0"
+    assert PROMPT_VERSION == "4.2.0"
     assert tuple(item.key for item in SECTIONS) == (
         "mission",
         "invariants",

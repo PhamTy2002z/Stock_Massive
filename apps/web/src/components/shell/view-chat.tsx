@@ -6,8 +6,10 @@ import { AlertCircle, Check, Copy, Pencil, RotateCcw, X } from "lucide-react"
 import { AssistantMessage } from "@/components/alpha/message/assistant-message"
 import { AttachmentChip } from "@/components/shell/attachment-chip"
 import { DraftMessage } from "@/components/alpha/message/draft-message"
+import { FollowUps } from "@/components/alpha/message/follow-ups"
 import { VisgniteMark } from "@/components/shared/visgnite-logo"
 import { useAuth } from "@/hooks/use-auth"
+import { SIGNAL_DESK_COPY, SIGNAL_DESK_STARTERS } from "@/lib/alpha-desk/copy"
 import { attachmentUrl } from "@/lib/alpha-desk/api"
 import { pinStep } from "@/lib/alpha-desk/pin-question"
 import { questionBefore } from "@/lib/alpha-desk/transcript"
@@ -109,12 +111,51 @@ function Greeting() {
   )
 }
 
+/**
+ * What the narrow column says before the desk has been asked anything.
+ *
+ * The product naming itself, where an ordinary opening greets the reader. A
+ * reader who has switched the desk on has already said what they came for, and
+ * the greeting's warmth belongs to the screen where that is still an open
+ * question — here it would be a second hello over a workspace waiting to be
+ * used.
+ *
+ * Held at the column's centre with the composer under it rather than sharing a
+ * centred stack with it: the composer is where it will be for the rest of the
+ * conversation, so nothing jumps when the first question lands.
+ *
+ * **Display size, not heading size.** It was set a third smaller than the
+ * design on the theory that a ~427px column could not carry the full measure.
+ * It can: the line is four short words and it is the only thing in the region.
+ * Undersized, it read as a section label over an empty pane rather than as the
+ * product naming itself, which is the whole job of this line. The mark grows
+ * with it — the two are one lockup, and a mark that stayed put would sit as a
+ * bullet beside the type instead of as its counterweight.
+ */
+function DeskHeadline() {
+  return (
+    <div className="flex animate-vg-fade-in items-center justify-center gap-[0.8rem]">
+      <VisgniteMark className="h-[26px] w-[17px]" />
+      <h2 className="min-w-0 font-serif text-[2.2rem] font-light leading-[1.15] tracking-[-0.01em] text-ink-display [text-wrap:pretty]">
+        {SIGNAL_DESK_COPY.deskEmptyHeadline}
+      </h2>
+    </div>
+  )
+}
+
 export function ChatView() {
   const desk = useDesk()
   const { dispatch } = useShell()
   const container = useRef<HTMLDivElement>(null)
   const following = useRef(true)
+  // The newest question, while it is held at the top of the viewport. Cleared by
+  // any scroll the reader performs themselves, and by the spacer running out.
   const pinned = useRef(false)
+  // A pin asked for and not yet applied. The scroll cannot happen in the same
+  // commit as the question: the room it needs is a spacer that does not exist
+  // until React has laid one out, and scrolling before then is clamped to the
+  // transcript's old height — which is a question that stops halfway up the
+  // screen with the previous answer still under it.
   const landing = useRef(false)
   const anchor = useRef<HTMLDivElement | null>(null)
   const [tail, setTail] = useState(0)
@@ -292,6 +333,30 @@ export function ChatView() {
   // still run — they all early-return on a null container ref — so React's
   // hook order stays stable across this branch.
   if (desk.threadId === null && desk.entries.length === 0) {
+    // The desk's opening is the column the rest of the conversation happens in,
+    // already at its width, with the composer already docked where it will
+    // stay. The ordinary opening centres a greeting and a field together
+    // because there is no second region to be beside.
+    //
+    // The two openings are different trees, and throwing the desk switch swaps
+    // one for the other in a single frame: a greeting and a centred field one
+    // moment, a headline over a docked field the next. Each side fades in as it
+    // arrives, so the swap reads as a scene change rather than a glitch; the
+    // `key` is what restarts the fade on the way back.
+    if (desk.signalDesk) {
+      return (
+        <div
+          key="desk-opening"
+          className="flex min-h-0 flex-1 flex-col motion-safe:animate-vg-fade-in"
+        >
+          <div className="flex min-h-0 flex-1 items-center justify-center px-5 pb-6 pt-2">
+            <DeskHeadline />
+          </div>
+          <DockedFooter starters anchored={false} />
+        </div>
+      )
+    }
+
     return (
       <div
         key="chat-opening"
@@ -425,9 +490,15 @@ export function ChatView() {
  * layout above it can know, and reserving a guess for it puts the headline off
  * centre by however much the guess was wrong.
  */
-function DockedFooter({ anchored = true }: { anchored?: boolean }) {
+function DockedFooter({
+  starters = false,
+  anchored = true,
+}: {
+  starters?: boolean
+  anchored?: boolean
+}) {
   const desk = useDesk()
-  const { state, panelWidth } = useShell()
+  const { state, dispatch, panelWidth } = useShell()
 
   return (
     <div
@@ -478,9 +549,37 @@ function DockedFooter({ anchored = true }: { anchored?: boolean }) {
           </div>
         )}
 
+        {/* Pills rather than cards: the desk's opening column is the narrow one,
+            and three bordered rows in it read as a list to complete rather than
+            as three ways to start. */}
+        {starters && (
+          <FollowUps
+            items={[...SIGNAL_DESK_STARTERS]}
+            onPick={(text) => dispatch({ type: "ask", text })}
+            pill
+            className="pb-3"
+          />
+        )}
+
         <Composer />
 
-        <div>
+        {/* The desk does not carry the caveat. Under a ~427px column it takes
+            two lines to say what fits on one everywhere else, and the caveat is
+            about the prose answer — so it stays on the surface that shows prose
+            across the full column. */}
+        {/* Collapsed rather than removed: the line's height is the composer's
+            resting position, and taking it out in one frame lifts the field by
+            a line while the pane beside it is still sliding. A grid row eased
+            between 0fr and 1fr lets the height leave on the same clock. */}
+        <div
+          aria-hidden={desk.signalDesk || undefined}
+          className={cn(
+            "grid transition-[grid-template-rows,opacity] duration-panel ease-panel motion-reduce:transition-none",
+            desk.signalDesk
+              ? "[grid-template-rows:0fr] opacity-0"
+              : "[grid-template-rows:1fr] opacity-100",
+          )}
+        >
           <p className="min-h-0 overflow-hidden pt-2.5 text-center text-micro text-ink-6">
             VisgniteAI có thể sai sót. Hãy đối chiếu nguồn dữ liệu trước khi ra quyết định đầu tư.
           </p>

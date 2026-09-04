@@ -24,6 +24,19 @@ const store = guardedStore(() => window.localStorage, "alpha-desk.preferences")
 
 export interface Preferences {
   /**
+   * Whether a *new* conversation starts with the Signal Desk switched on.
+   *
+   * The default for a Thread that has no history, not an override for one that
+   * does: the mode belongs to a conversation, and `desk-session` restores what
+   * each one was actually doing. This only answers the question that arises
+   * when there is nothing to restore.
+   *
+   * It expresses a wish, never an entitlement. The composer's toggle is still
+   * the one edge an entitlement check attaches to, so a reader whose plan does
+   * not carry the desk gets the same refusal here as there.
+   */
+  signalDeskByDefault: boolean
+  /**
    * Whether the sidebar was left collapsed, or null for "never said".
    *
    * Null rather than a boolean default so the shell can distinguish a reader
@@ -36,6 +49,7 @@ export interface Preferences {
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
+  signalDeskByDefault: false,
   sidebarOpen: null,
   chatWidth: null,
 }
@@ -55,6 +69,7 @@ export function readPreferences(): Preferences {
 
   const record = parsed as Record<string, unknown>
   return {
+    signalDeskByDefault: flag(record.signalDeskByDefault) ?? false,
     sidebarOpen: flag(record.sidebarOpen),
     chatWidth: width(record.chatWidth),
   }

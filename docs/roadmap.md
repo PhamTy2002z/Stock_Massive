@@ -694,6 +694,39 @@ citation mở đúng trang; material-claim accuracy có baseline nhiều trial;
 điểm rubric judge ≥ ngưỡng đã khóa từ baseline Phase 1; 0 import local
 signal engine.
 
+**Trạng thái (2026-09-04).** Code đã merge vào `develop` (`12dd0f6`, `c2af520`):
+pipeline 3-pass, claim ledger, source policy, evidence store, extractor
+`published_at`. Gate kỹ thuật xanh — API **1473 passed**, alembic round trip
+sạch, web lint/type-check/test/build xanh.
+
+Lượt đo đầu tiên sau khi merge phát hiện năm khiếm khuyết, sửa trong `5d9e564`:
+
+- Runner ghi câu hỏi elicitation đè lên câu hỏi của corpus (cùng key trong một
+  dict literal) — mọi case được chấm với câu hỏi rỗng, nên `grade_budget` định
+  lane bằng cách đọc lại câu hỏi đã hạ mọi deep Turn xuống trần của lane light.
+- `as_of` chưa bao giờ tới runtime: ledger stamp mốc bằng đồng hồ chạy, tức
+  không loại được gì. Mốc nay đọc từ chính câu hỏi (`as_of_from_text`); chỉ mốc
+  người dùng nêu mới chặn tool. Loại luôn nguồn *không* xác định được ngày đã
+  thử và đo: nó vét sạch bằng chứng của một Turn có mốc, nên chỉ nguồn **có
+  ngày** sau mốc bị loại — nguồn không ngày là khoảng hở đã đo, không phải sót.
+- URL báo VN ghi ngày trong id bài (`188260829…`) mà pattern đường dẫn không
+  thấy; trang không có `<title>` mất một trong bốn mặt định danh §6.6.
+- Light lane hỏi lại người đọc trước khi tra trang nào: scout-then-ask trước
+  đây chỉ viết cho pipeline deep, nay nằm trong prompt light lane đọc (4.2.0).
+
+**Đo trên 10 case chạm mọi hard dimension** (probe 2026-09-04): `settlement`
+10/10, `citation_url` 10/10, `evidence_identity` 10/10, `budget` 10/10,
+`temporal_validity` **3/3**, `refusal_policy` **2/2**, `material_claim`
+**2/2** — hai dimension cuối là hai dòng **BLIND** của baseline Phase 4, lần
+đầu tiên corpus hỏi được và pass.
+
+**Phase vẫn giữ nhãn Target** cho tới khi một lượt `make golden-release` toàn
+corpus 40 case cho verdict trong *một* artifact; hiện các dimension mới xanh
+trên hai artifact rời. Ngưỡng mềm `judge_axes` vẫn chưa khoá vì cần nhiều
+trial. Plan và bằng chứng:
+[`plans/260902-0026-phase-06-evidence-engine/plan.md`](../plans/260902-0026-phase-06-evidence-engine/plan.md),
+[`plans/reports/fullstack-260902-1418-phase-06-evidence-engine.md`](../plans/reports/fullstack-260902-1418-phase-06-evidence-engine.md).
+
 ### Phase 7 — Evidence Desk UX — **Target**
 
 **Outcome.** Client render đầy đủ hình dạng sản phẩm §1 từ typed contract —

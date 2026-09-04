@@ -34,6 +34,7 @@ describe("what the tab remembers", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       activeSymbol: null,
+      signalDeskThreads: [],
       pendingAttachments: [],
     })
   })
@@ -43,6 +44,7 @@ describe("what the tab remembers", () => {
       threadId: null,
       turnId: null,
       activeSymbol: null,
+      signalDeskThreads: [],
       pendingAttachments: [],
     })
   })
@@ -55,6 +57,7 @@ describe("what the tab remembers", () => {
       threadId: "thread-1",
       turnId: null,
       activeSymbol: null,
+      signalDeskThreads: [],
       pendingAttachments: [],
     })
   })
@@ -78,6 +81,7 @@ describe("what the tab remembers", () => {
       threadId: null,
       turnId: null,
       activeSymbol: null,
+      signalDeskThreads: [],
       pendingAttachments: [],
     })
     expect(window.sessionStorage.getItem(KEY)).toBeNull()
@@ -106,7 +110,7 @@ describe("what the surface opens onto", () => {
   })
 
   it("carries the deep-linked symbol as the lens and nothing more", () => {
-    // Not into another product surface. Arriving with context is a question, not a
+    // Not onto the Watchlist. Arriving from Stock 360 is a question, not a
     // decision about what gets analysed every night.
     expect(openingState("HPG", { threadId: null, turnId: null, activeSymbol: null }).activeSymbol).toBe("HPG")
   })
@@ -178,6 +182,7 @@ describe("a value this build cannot read", () => {
       threadId: null,
       turnId: null,
       activeSymbol: null,
+      signalDeskThreads: [],
       pendingAttachments: [],
     })
   })

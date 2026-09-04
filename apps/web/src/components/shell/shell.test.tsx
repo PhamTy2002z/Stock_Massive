@@ -37,13 +37,24 @@ function mount() {
 }
 
 describe("the chat-first workspace", () => {
-  it("has no analysis mode or board state", () => {
+  it("opens on the conversation with the desk off", () => {
     mount()
 
+    // The desk is a mode the reader turns on from the composer, so a shell that
+    // opened with it already on would be answering a question nobody asked.
     expect(shell.state.view).toBe("chat")
     expect(shell.state.inspector).toBeNull()
-    expect(shell.state).not.toHaveProperty("signalDesk")
-    expect(shell.state).not.toHaveProperty("deskBoards")
+    expect(shell.state.signalDesk).toBe(false)
+  })
+
+  it("turning the desk on opens the pane beside the conversation", () => {
+    mount()
+
+    act(() => shell.dispatch({ type: "signal-desk", on: true }))
+
+    expect(shell.state.signalDesk).toBe(true)
+    expect(shell.state.inspector).toBe("desk")
+    expect(inspectorWidth(shell.state)).toBeGreaterThan(0)
   })
 
   it("opens sources for the message that requested them", () => {

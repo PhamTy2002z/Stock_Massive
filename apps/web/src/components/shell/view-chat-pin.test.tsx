@@ -44,7 +44,6 @@ const desk = {
   dismissRefusal: vi.fn(),
   openThread: vi.fn(),
   newThread: vi.fn(),
-  openAnalysis: vi.fn(),
 }
 
 vi.mock("./desk-state", () => ({

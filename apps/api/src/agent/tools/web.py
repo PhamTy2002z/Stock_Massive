@@ -62,6 +62,7 @@ from src.core.config import Settings, get_settings
 from src.core.web_lane import URL_FRESH_SECONDS, WebLane, WebUnavailable
 
 from ..evidence.source_policy import (
+    ICT,
     PublicationStamp,
     SourcePolicy,
     SourceTier,
@@ -69,6 +70,7 @@ from ..evidence.source_policy import (
     classify_source,
     extract_publication_stamp,
 )
+from ..budget import SPILL_FLOOR_CHARS
 from ..security import refuse_secret_egress
 from ..registry import (
     ContentTrust,
@@ -237,6 +239,17 @@ def extract_page_details(
     return title, body, metadata, tuple(parser.json_ld_values[:16])
 
 
+def _named_from(metadata: Mapping[str, tuple[str, ...]], url: str) -> str:
+    """A title for a page that gave none: its own ``og:title``, else its URL."""
+    for key in ("og:title", "twitter:title", "application-name"):
+        values = metadata.get(key) or ()
+        if values and str(values[0]).strip():
+            return str(values[0]).strip()[:240]
+    split = urlsplit(url)
+    tail = (split.path or "").rstrip("/").rsplit("/", 1)[-1]
+    return (tail or split.hostname or url)[:240]
+
+
 def _source_metadata(
     *,
     url: str,
@@ -265,6 +278,35 @@ def _source_metadata(
         "evidence_tier": SourceTier.SNIPPET.value if snippet_only else source_policy.tier.value,
         "publication": stamp.to_payload(),
     }
+
+
+def _outside_as_of(payload: Mapping[str, Any], as_of: datetime | None) -> bool:
+    """Whether this result may not be read by a Turn the reader bounded.
+
+    Only a *dated* result is refused, and the alternative was tried and measured.
+    Refusing what cannot be dated sounds stricter and is worse: on ``rl-em-003``
+    it excluded all five results of all seven searches and the Turn answered a
+    question about a trading session with no evidence at all. That does not make
+    the boundary hold — it converts a dimension that was failing into one that
+    cannot be decided, which is the more expensive of the two outcomes.
+
+    An undated source that slips past is therefore a known, measured gap rather
+    than an oversight, and it belongs to whoever decides whether a snippet the
+    Turn never opened counts as evidence the answer carried.
+    """
+    if as_of is None:
+        return False
+    publication = (payload.get("publication") or {}) if isinstance(payload, Mapping) else {}
+    published = publication.get("publishedAt")
+    if not published:
+        return False
+    try:
+        stamped = datetime.fromisoformat(str(published))
+    except ValueError:
+        return False
+    if stamped.tzinfo is None:
+        stamped = stamped.replace(tzinfo=ICT)
+    return stamped.astimezone(ICT).date() > as_of.astimezone(ICT).date()
 
 
 def _terms(looking_for: str) -> tuple[str, ...]:
@@ -354,6 +396,55 @@ def select_passages(body: str, looking_for: str, limit: int) -> tuple[str, ...]:
         else:
             merged.append([start, end])
     return tuple(text[start:end] for start, end in merged)
+
+
+def reshape_page_result(text: str, limit: int) -> str:
+    """Narrow one ``fetch_url`` result by re-selecting passages, not by cutting.
+
+    Rung three of the output budget can ask a result gathered three rounds ago
+    to give ground, and it does that by keeping the head of the string. For a
+    page read that is the worst part to keep: a Vietnamese finance page opens
+    with a navigation menu and a ticker strip, so the model is handed the menu
+    and told the page said nothing. This re-runs :func:`select_passages` with
+    the question the call already carried, which is the same selection the
+    original read made, only against a smaller budget.
+
+    Answers ``""`` when the result is not a page payload this can narrow, or
+    when JSON escaping keeps the shrunk payload over ``limit`` — both mean the
+    caller should fall back to the generic cut.
+    """
+
+    try:
+        payload = json.loads(text)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return ""
+    if not isinstance(payload, Mapping):
+        return ""
+    content = payload.get("content")
+    looking_for = payload.get("looking_for")
+    if not isinstance(content, str) or not content:
+        return ""
+    if not isinstance(looking_for, str) or not looking_for:
+        # Nothing to select *for*. The head of the page is as good an answer as
+        # this function can give, and the generic cut already gives it.
+        return ""
+    # What the metadata around the content costs, so the passages are measured
+    # against the room actually left for them.
+    budget = max(SPILL_FLOOR_CHARS, limit - (len(text) - len(content)))
+    for _ in range(4):
+        narrowed = dict(payload)
+        narrowed["content"] = PASSAGE_GAP.join(
+            select_passages(content, looking_for, budget)
+        )
+        narrowed["excerpted"] = True
+        candidate = json.dumps(narrowed, ensure_ascii=False)
+        if len(candidate) <= limit:
+            return candidate
+        # Escaping a quote or a newline costs characters the plain-text budget
+        # never saw, so give ground and measure again rather than guessing at a
+        # multiplier that holds for every page.
+        budget = int(budget * 0.8)
+    return ""
 
 
 def _resolved_addresses(
@@ -658,6 +749,9 @@ class WebTools:
                 concurrency=ToolConcurrency.PARALLEL_SAFE,
                 permission=ToolPermission.ALLOW,
                 resource_arg="url",
+                # Page reads are the results the Turn budget shrinks first, and
+                # a page's first characters are its chrome.
+                reshape_result=reshape_page_result,
                 # The widest of the shipped bounds because this call is the one
                 # that can legitimately be several requests: ``MAX_REDIRECTS``
                 # hops, each with its own ``FETCH_TIMEOUT_SECONDS``. Cutting at
@@ -671,11 +765,13 @@ class WebTools:
         )
 
     async def web_search(
-        self, _context: ToolContext, arguments: Mapping[str, Any]
+        self, context: ToolContext, arguments: Mapping[str, Any]
     ) -> Mapping[str, Any]:
-        return await asyncio.to_thread(self._web_search, dict(arguments))
+        return await asyncio.to_thread(self._web_search, dict(arguments), context.as_of)
 
-    def _web_search(self, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    def _web_search(
+        self, arguments: Mapping[str, Any], as_of: datetime | None = None
+    ) -> Mapping[str, Any]:
         query = str(arguments.get("query") or "").strip()
         if not query:
             raise ValueError("query must not be blank")
@@ -693,18 +789,25 @@ class WebTools:
         except WebUnavailable as exc:
             return {"query": query, "results": [], "reason": "web_unavailable", "detail": str(exc)}
         payload = read.payload if isinstance(read.payload, Sequence) else ()
-        results = [
+        found = [
             self._search_item(raw, rank)
             for rank, raw in enumerate(
                 (item for item in payload if isinstance(item, Mapping)), start=1
             )
-        ][:MAX_RESULTS]
+        ]
+        knowable = [item for item in found if not _outside_as_of(item, as_of)]
+        excluded = len(found) - len(knowable)
+        results = knowable[:MAX_RESULTS]
         return {
             "query": query,
             "results": results,
             "stale": read.stale,
             "age_seconds": round(read.age_seconds, 1),
-            "reason": None if results else "no_web_results",
+            # Said out loud rather than left as a shorter list: a model that
+            # cannot see the boundary bit will re-run the same query.
+            "excluded_outside_as_of": excluded or None,
+            "as_of": as_of.isoformat() if as_of else None,
+            "reason": None if results else ("all_results_outside_as_of" if excluded else "no_web_results"),
         }
 
     async def fetch_url(
@@ -716,7 +819,18 @@ class WebTools:
         refuse_secret_egress(url, label="URL")
         looking_for = str(arguments.get("looking_for") or "").strip()
         recorded = await self._recorded_page(context.thread_id, url)
-        return await asyncio.to_thread(self._fetch_url, url, looking_for, recorded)
+        page = await asyncio.to_thread(self._fetch_url, url, looking_for, recorded)
+        if _outside_as_of(page, context.as_of):
+            # One call, one result, on this path too: the model is told the page
+            # exists and why it may not read it, so it looks for an earlier
+            # source instead of asking for the same URL again.
+            return {
+                "url": url,
+                "refused": "outside_as_of",
+                "as_of": context.as_of.isoformat() if context.as_of else None,
+                "published_at": (page.get("publication") or {}).get("publishedAt"),
+            }
+        return page
 
     async def _recorded_page(
         self, thread_id: uuid.UUID | None, url: str
@@ -970,7 +1084,12 @@ class WebTools:
             )
             return {
                 "url": current,
-                "title": title,
+                # §6.6 identity is four facts travelling together, and a page
+                # with an empty ``<title>`` — a corporate IR index, typically —
+                # would drop one of them at the far end. Falling back names the
+                # page from what the document or its URL already says; it never
+                # invents one.
+                "title": title or _named_from(metadata, current),
                 "content": content,
                 "source": urlsplit(current).hostname or current,
                 "retrieved_at": self._now().astimezone(timezone.utc).isoformat(),

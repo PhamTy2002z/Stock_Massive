@@ -15,9 +15,9 @@ import { ChatView } from "./view-chat"
 /**
  * VisgniteAI, whole.
  *
- * Three regions on one viewport: sidebar, chat column, inspector. The board,
- * news and new-conversation views were removed with the market surfaces
- * (2026-08-25). The main column now only ever renders the chat.
+ * Three regions on one viewport: sidebar, chat column, inspector. The market
+ * surfaces were removed on 2026-08-25 and the analysis board with them, so
+ * the main column now only ever renders the chat.
  *
  * The page itself never scrolls. Each region owns its own overflow.
  */
@@ -44,6 +44,9 @@ function Frame() {
   // scrim however high its own z-index goes, and every press on it lands on the
   // scrim instead. Measured: `elementsFromPoint` over a menu row returned the
   // scrim first, and raising the composer to `z-40` changed nothing.
+  //
+  // The answer is applied where the scrim is decided: for the composer's menu
+  // there is no scrim at all, so there is nothing to be under.
   //
   // A press on the trigger is left alone — it is `aria-expanded` while the menu
   // is open, and closing here would let its own click reopen what it meant to

@@ -96,7 +96,15 @@ export function TopBar() {
     <header className="flex flex-none items-center gap-2 px-5 py-3">
       {!state.sidebarOpen && <OpenSidebarButton onClick={() => dispatch({ type: "toggle-sidebar" })} />}
 
-      {renaming && current !== undefined ? (
+      {/* The desk does not repeat the conversation's name.
+          On the desk this bar sits above a ~427px column, and the name is the
+          one thing on it that is neither a control nor part of what the reader
+          came to look at — the list already says which conversation is open,
+          one corner away. The chevron goes with it rather than being left
+          naming nothing: switching the desk off brings the title and the menu
+          back together. */}
+      {!state.signalDesk &&
+        (renaming && current !== undefined ? (
           // The name, as a text field, in the place the name was. A dialog to
           // change one word would take the reader off the conversation they are
           // reading; the field commits and abandons by the same three keys the
@@ -186,7 +194,7 @@ export function TopBar() {
               </Menu>
             )}
           </div>
-        )}
+        ))}
 
       {/* Sharing a conversation is a property of the conversation, so the
           control belongs to the bar above it — not to a panel that may not be

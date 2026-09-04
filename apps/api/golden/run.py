@@ -590,7 +590,7 @@ async def read_case(
     payloads: tuple[Mapping[str, Any], ...] = ()
     turn_status = "unknown"
     answer_message_id: int | None = None
-    question: Mapping[str, Any] | None = None
+    asked_question: Mapping[str, Any] | None = None
     for message in reversed(view.messages if view else ()):
         if message.role != "assistant":
             continue
@@ -602,7 +602,7 @@ async def read_case(
         turn_status = str(content.get("status") or "unknown")
         answer_message_id = int(message.id)
         raw_question = content.get("question")
-        question = dict(raw_question) if isinstance(raw_question, Mapping) else None
+        asked_question = dict(raw_question) if isinstance(raw_question, Mapping) else None
         break
 
     # The checked ledger, read from where the runtime wrote it rather than
@@ -716,7 +716,7 @@ async def read_case(
         # Present only on a Turn that produced one, so an artifact from a light
         # lane stays byte-identical to what it was before the deep lane existed.
         "claim_ledger": ledger,
-        "question": question,
+        "asked_question": asked_question,
         "external_evidence_text": "\n".join(external_chunks),
         "store_evidence_text": "\n".join(store_chunks),
         "cost": spend_for(request_message_id),

@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -25,8 +26,11 @@ import {
   deepLinkedThread,
   openingState,
   readDeskSession,
+  rememberSignalDesk,
+  signalDeskOn,
   writeDeskSession,
 } from "@/lib/alpha-desk/desk-session"
+import { readPreferences } from "@/lib/alpha-desk/preferences"
 import { isActive, isSettled, resendPlan } from "@/lib/alpha-desk/live-turn"
 import {
   buildTranscript,
@@ -56,7 +60,7 @@ import { useShell } from "./shell-state"
  *
  * - **the Thread**, created lazily. A visit that asks nothing leaves no empty
  *   Thread behind, so the first question is what opens one;
- * - **the analysis context**, which is a workspace setting rather than a
+ * - **the symbol in context**, which is a workspace setting rather than a
  *   persistence key. It lives in the shell's state (one symbol selection, not
  *   two), and this reads it — switching it starts no Thread and ends none;
  * - **reattaching**, from what this tab remembered. A reload, a view change and
@@ -106,6 +110,23 @@ interface DeskApi {
    * takes its recovery from the second.
    */
   refusalFailure: Failure | null
+  /**
+   * Whether the Signal Desk is on for the conversation on screen.
+   *
+   * Read from the shell, which owns the layout the switch changes, and exposed
+   * here because the composer's pill is the one control that sets it. One edge
+   * in and one edge out: an entitlement check, when there is one, goes on
+   * `setSignalDesk` and nowhere else.
+   */
+  signalDesk: boolean
+  /**
+   * Turn the desk on or off for this conversation.
+   *
+   * The single function the flag passes through, and the only place an
+   * entitlement check would go. It changes the layout, and it is what a Turn's
+   * mode would be read from on the day the request carries one.
+   */
+  setSignalDesk: (on: boolean) => void
   flagFailedFor: number | null
   submit: (text: string) => void
   /** What this unsent question carries, in the order it was added. */
@@ -217,6 +238,11 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   // A Thread that could not be opened. Kept separately from the Turn's own
   // refusal because it is a different failure: nothing was admitted.
   const [threadError, setThreadError] = useState<Error | null>(null)
+  // Which conversations this tab has the desk switched on for. Held here rather
+  // than in the shell because it outlives the conversation on screen: the shell
+  // knows whether *this* desk is open, and this knows which Thread to restore
+  // that answer for.
+  const [signalDeskThreads, setSignalDeskThreads] = useState<string[]>([])
 
   const thread = useThread(threadId)
   const turn = useLiveTurn(threadId)
@@ -240,16 +266,24 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     const session = readDeskSession()
     const opening = openingState(deepLinked, session, deepLinkedThreadId)
     setThreadId(opening.threadId)
+    setSignalDeskThreads(session.signalDeskThreads ?? [])
     // The desk the arriving Thread was left with — or, where there is no
     // Thread to arrive at, what this browser says a new conversation opens
     // with. A deep link lands in the second case: it opens a conversation that
     // has no answer yet, and so has no mode of its own to restore.
-    shellDispatch({ type: "thread", opened: false })
+    shellDispatch({
+      type: "thread",
+      signalDesk:
+        opening.threadId === null
+          ? readPreferences().signalDeskByDefault
+          : signalDeskOn(session, opening.threadId),
+      opened: false,
+    })
     if (opening.activeSymbol !== null) {
       shellDispatch({ type: "context-symbol", symbol: opening.activeSymbol })
     }
     // Only for the deep link. A remembered Thread must not drag a reader who
-    // left the tab on the board back into the conversation.
+    // left the tab elsewhere back into the conversation.
     if (deepLinkedThreadId !== null) shellDispatch({ type: "view", view: "chat" })
     if (opening.turnId && opening.threadId) attach(opening.turnId, opening.threadId)
   }, [restored, deepLinked, deepLinkedThreadId, attach, shellDispatch])
@@ -265,6 +299,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       threadId,
       turnId: turnSettled ? null : liveTurnId,
       activeSymbol,
+      signalDeskThreads,
       // Written because the rows already exist server-side. A reload that
       // forgot them would leave files in the database that nothing on screen
       // refers to, filling the reader's own quota with invisible uploads until
@@ -277,8 +312,19 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     liveTurnId,
     turnSettled,
     activeSymbol,
+    signalDeskThreads,
     readyIds,
   ])
+
+  // The switch, recorded against the Thread it was thrown for. Watched rather
+  // than written in the handler because the desk can be switched on before
+  // there is a Thread to attach it to: the first question opens one, and this
+  // is what files the answer under it when it arrives.
+  const signalDesk = shell.signalDesk
+  useEffect(() => {
+    if (!restored || threadId === null) return
+    setSignalDeskThreads((threads) => rememberSignalDesk(threads, threadId, signalDesk))
+  }, [restored, threadId, signalDesk])
 
   // -- attaching ----------------------------------------------------------
 
@@ -431,12 +477,12 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       if (threadId) {
         // `symbols` stays empty: guessing which symbols a sentence is *about*
         // would put a parser in the browser and a wrong answer in the
-        // idempotency payload. The analysis lens is not sent either — it has no
+        // idempotency payload. The symbol in context is not sent either — it has no
         // reader on the other side, and a field nothing declares is dropped in
         // silence, which reads from here as a lens that travels when it does
         // not. It changes this composer and stops there until something behind
         // the request is designed to receive it.
-        void send({ text, attachments })
+        void send({ text, signalDesk, attachments })
         return
       }
       setQueuedQuestion(text)
@@ -459,7 +505,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
         },
       })
     },
-    [threadId, send, createThread],
+    [threadId, signalDesk, send, createThread],
   )
 
   /** What the composer calls: this question, carrying what is pending. */
@@ -480,8 +526,8 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     setQueuedQuestion(null)
     const attachments = queuedAttachments
     setQueuedAttachments([])
-    void send({ text, attachments })
-  }, [threadId, queuedQuestion, queuedAttachments, send])
+    void send({ text, signalDesk, attachments })
+  }, [threadId, queuedQuestion, queuedAttachments, signalDesk, send])
 
   // The create commits the user message before it returns, so the copy on
   // screen stops being a local one as soon as the Thread comes back.
@@ -522,6 +568,11 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     ],
   )
 
+  // Read through a ref so the callbacks below do not re-create themselves on
+  // every message that lands.
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
+
   // The last question asked, with what it carried. From `questionBefore` rather
   // than derived here, because the transcript's own module is where that
   // decision lives and the resend control in `view-chat` asks it the same way.
@@ -535,9 +586,10 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     setUnconfirmedQuestion(null)
     void retryTurn({
       text: lastQuestion.text,
+      signalDesk,
       attachments: lastQuestion.attachments,
     })
-  }, [lastQuestion, retryTurn])
+  }, [lastQuestion, signalDesk, retryTurn])
 
   /**
    * Ask a question from the transcript again, from the message that carries it.
@@ -597,12 +649,23 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     [skip],
   )
 
+  // Read through a ref so the two below do not re-create themselves every time
+  // a desk is switched somewhere.
+  const deskThreadsRef = useRef(signalDeskThreads)
+  deskThreadsRef.current = signalDeskThreads
+
   const openThread = useCallback(
     (id: string) => {
       setThreadId(id)
       setUnconfirmedQuestion(null)
       setThreadError(null)
-      shellDispatch({ type: "thread", opened: true })
+      // Re-read rather than carry forward: the desk belongs to the conversation
+      // being opened, and the one being left keeps its own answer.
+      shellDispatch({
+        type: "thread",
+        signalDesk: deskThreadsRef.current.includes(id),
+        opened: true,
+      })
     },
     [shellDispatch],
   )
@@ -612,9 +675,21 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     setThreadId(null)
     setUnconfirmedQuestion(null)
     setThreadError(null)
-    shellDispatch({ type: "thread", opened: true })
+    // A new conversation starts where this browser says new conversations
+    // start, whatever the last one did. The preference answers only this
+    // question: a Thread with history restores its own mode instead.
+    shellDispatch({
+      type: "thread",
+      signalDesk: readPreferences().signalDeskByDefault,
+      opened: true,
+    })
     reset()
   }, [reset, shellDispatch])
+
+  const setSignalDesk = useCallback(
+    (on: boolean) => shellDispatch({ type: "signal-desk", on }),
+    [shellDispatch],
+  )
 
   const dismissRefusal = useCallback(() => {
     setThreadError(null)
@@ -634,6 +709,8 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       isSubmitting: createThread.isPending || queuedQuestion !== null,
       refusal: refusalError?.message ?? null,
       refusalFailure: refusalError === null ? null : describeFailure(refusalError),
+      signalDesk,
+      setSignalDesk,
       attachments: pending,
       attach: attachFiles,
       detach,
@@ -666,6 +743,8 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       createThread.isPending,
       queuedQuestion,
       flagging.failedMessageId,
+      signalDesk,
+      setSignalDesk,
       pending,
       attachFiles,
       detach,
@@ -690,6 +769,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
 
   return <DeskContext.Provider value={value}>{children}</DeskContext.Provider>
 }
+
 
 export function useDesk(): DeskApi {
   const value = useContext(DeskContext)
