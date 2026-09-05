@@ -23,6 +23,14 @@ python-multipart>=0.0.6
 pypdf>=6.0.0,<7.0.0
 openpyxl>=3.1.0,<4.0.0
 
+# Market data. Pinned exactly rather than bounded by a range: the provider's
+# own version history records repeated changes to pagination and to column
+# names, so an upgrade is a canary run rather than a resolver decision. The
+# package is a *research connector* under a personal, non-commercial licence,
+# which is why `get_market_data` is unavailable outside the internal profile no
+# matter what is installed.
+vnstock==4.0.5
+
 # Cache & Rate Limiting. Rate limiting is served by the plain Redis client in
 # src/core/ratelimit.py, so no separate limiter package belongs here.
 redis>=5.0.0,<9.0.0

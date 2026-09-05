@@ -334,13 +334,80 @@ def _datetime(value: Any) -> datetime | None:
     return parsed if parsed.utcoffset() is not None else None
 
 
+def _market_evidence(result_text: str | None) -> Any | None:
+    """One market read as one evidence row, or nothing if it cannot be trusted.
+
+    ``source_class`` is ``STORE`` and stays there. The figures came from a
+    securities company's feed rather than from HOSE or HNX, and ``STORE`` is
+    deliberately outside ``ledger._PRIMARY_CLASSES`` — so a material claim
+    resting only on this settles at ``SINGLE_SOURCE``. That is the correct
+    label for the path the data actually took, and widening the primary set to
+    make the label nicer would be widening it for every store row ever added.
+
+    ``published_at`` is the last bar's close, which is the moment the whole
+    series became knowable. Without it ``ledger._temporal_valid`` refuses the
+    row for any material claim, so a payload that cannot supply one is dropped
+    here rather than becoming evidence that quietly fails later.
+    """
+    try:
+        payload = _object_text(result_text)
+        excerpt = str(payload.get("excerpt") or "").strip()
+        symbol = str(payload.get("symbol") or "").strip()
+        interval = str(payload.get("interval") or "").strip()
+        actual = payload.get("actual")
+        actual = actual if isinstance(actual, Mapping) else {}
+        closed_at = _datetime(actual.get("end"))
+        observed_at = _datetime(payload.get("retrieved_at"))
+        content_sha256 = str(payload.get("content_sha256") or "")
+        if not excerpt or not symbol or closed_at is None or not content_sha256:
+            return None
+        return build_evidence_ref(
+            kind=EvidenceKind.STORE_FIGURE,
+            source_class=SourceClass.STORE,
+            title=f"{symbol} {interval} {actual.get('start')} → {actual.get('end')}",
+            # No URL: there is no page. The locator is the request that produced
+            # the rows, which is what a reader would have to repeat to see them.
+            source=f"{payload.get('provider')}:{payload.get('source')}/{symbol}/{interval}",
+            publisher=str(payload.get("publisher") or payload.get("source") or "market"),
+            excerpt=excerpt,
+            content_sha256=content_sha256,
+            observed_at=observed_at,
+            published_at=closed_at,
+            # The provider stated the bar boundary; nothing was inferred from
+            # prose, and the boundary is a minute rather than a day.
+            publication_method=PublicationMethod.PROVIDER,
+            publication_confidence=PublicationConfidence.HIGH,
+            publication_precision=TimePrecision.INSTANT,
+            tos_risk=TosRisk.MEDIUM,
+        )
+    except (TypeError, ValueError):
+        return None
+
+
 def evidence_from_calls(calls: Sequence[TurnToolCall]) -> tuple[Any, ...]:
-    """Build immutable evidence only from successful fetched-page payloads."""
+    """Build immutable evidence from the calls that returned citable content.
+
+    Two shapes, because two tools return something a claim can be checked
+    against and they carry their provenance differently. A fetched page brings
+    its publisher, its URL and whatever publication stamp could be recovered
+    from the page itself. A market read brings none of those — there is no page
+    — so it names the securities company whose feed answered, the bar close it
+    is evidence of, and the rendered rows that hold the figures in the unit a
+    claim would state them in.
+    """
 
     found = []
     seen: set[str] = set()
     for call in calls:
-        if call.name != "fetch_url" or call.status is not ToolCallStatus.OK:
+        if call.status is not ToolCallStatus.OK:
+            continue
+        if call.name == "get_market_data":
+            item = _market_evidence(call.result_text)
+            if item is not None and item.evidence_id not in seen:
+                seen.add(item.evidence_id)
+                found.append(item)
+            continue
+        if call.name != "fetch_url":
             continue
         try:
             payload = _object_text(call.result_text)

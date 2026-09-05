@@ -20,7 +20,21 @@ EXPECTED_CATALOG = {
     "session_search": ("memory", registry.ToolEffect.READ, registry.ToolIdempotency.IDEMPOTENT, registry.ToolAccess.STORE, registry.ContentTrust.TRUSTED_STRUCTURED, registry.ToolConcurrency.PARALLEL_SAFE, registry.ToolPermission.ALLOW, 10.0),
     "remember_fact": ("memory", registry.ToolEffect.WRITE, registry.ToolIdempotency.UNKNOWN, registry.ToolAccess.STORE, registry.ContentTrust.TRUSTED_STRUCTURED, registry.ToolConcurrency.SERIALIZED, registry.ToolPermission.ALLOW, 10.0),
     "recall_facts": ("memory", registry.ToolEffect.READ, registry.ToolIdempotency.IDEMPOTENT, registry.ToolAccess.STORE, registry.ContentTrust.TRUSTED_STRUCTURED, registry.ToolConcurrency.PARALLEL_SAFE, registry.ToolPermission.ALLOW, 10.0),
+    "get_market_data": ("market_data", registry.ToolEffect.READ, registry.ToolIdempotency.IDEMPOTENT, registry.ToolAccess.NETWORK, registry.ContentTrust.UNTRUSTED, registry.ToolConcurrency.PARALLEL_SAFE, registry.ToolPermission.ALLOW, 20.0),
 }
+
+#: What a *conversation* is offered, which is no longer everything registered.
+#: The two are separate tuples deliberately: the day they were one, adding a
+#: capability for another lane would have widened chat's surface by doing
+#: nothing, and ``test_chat_selection_is_web_and_memory_only`` is the test that
+#: would have gone on passing.
+CHAT_CATALOG = (
+    "web_search",
+    "fetch_url",
+    "session_search",
+    "remember_fact",
+    "recall_facts",
+)
 
 
 def test_all_shipped_tools_declare_a_complete_behavior_contract():
@@ -44,6 +58,9 @@ def test_shipped_schema_order_and_display_contract_are_locked():
         "session_search": ("Tìm trong hội thoại trước", True, None, "query", False),
         "remember_fact": ("Ghi nhớ", True, None, "title", False),
         "recall_facts": ("Đọc lại ghi chú", True, None, "query", False),
+        # Blocking, because the provider client is synchronous, and it composes
+        # its own rail row because no single argument says what was read.
+        "get_market_data": ("Đọc dữ liệu giá", False, 24_000, None, True),
     }
     with isolated_registry():
         tools.register_all()
@@ -69,7 +86,8 @@ def test_chat_selection_is_web_and_memory_only():
     assert toolsets.CORE_TOOLSETS == ("web", "memory")
     assert active_pack().toolsets == ()
     assert toolsets.CHAT_TOOLSETS == toolsets.CORE_TOOLSETS
-    assert toolsets.resolve_toolset(toolsets.CHAT_TOOLSETS) == tuple(EXPECTED_CATALOG)
+    assert toolsets.resolve_toolset(toolsets.CHAT_TOOLSETS) == CHAT_CATALOG
+    assert "get_market_data" not in CHAT_CATALOG
 
 
 @pytest.mark.asyncio

@@ -135,7 +135,7 @@ retired Study/Board/widget stack.
 |---|---|---|---:|---|
 | 1 | [Roadmap deviation](./phase-01-roadmap-deviation.md) | Done | 1h | — |
 | 2 | [Flint contract spike](./phase-02-flint-contract-spike.md) | Done | 2h | 1 |
-| 3 | [Vnstock market-data capability](./phase-03-vnstock-market-data-capability.md) | Todo | 8h | 1 |
+| 3 | [Vnstock market-data capability](./phase-03-vnstock-market-data-capability.md) | Done | 8h | 1 |
 | 4 | [Signal Desk mode + market evidence](./phase-04-evidence-readiness-agent-loop.md) | Todo | 6h | 3 |
 | 5 | [Flint visual-artifact core](./phase-05-flint-visual-artifact-core.md) | Todo | 10h | 2, 4 |
 | 6 | [Signal Desk right panel](./phase-06-signal-desk-right-panel.md) | Todo | 10h | 5 |

@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Vnstock Market Data Capability"
-status: todo
+status: done
 priority: P1
 effort: "8h"
 dependencies: [1]
@@ -189,14 +189,19 @@ report và phải refuse khi profile không phải `personal_internal`.
 
 ## Success Criteria
 
-- [ ] `ohlcv` pass contract test deterministic + bounded live canary.
-- [ ] Một market call = một provider operation admitted; không fan-out ẩn.
-- [ ] Mỗi số accepted có unit, time, source, một raw hash.
-- [ ] Market evidence đi qua `validate_claim_ledger` ra `SINGLE_SOURCE`, chứng
-      minh bằng test — không phải `UNSUPPORTED` vì thiếu `published_at` hay số
-      không có trong excerpt.
-- [ ] Web/memory tool và tool surface của chat không đổi.
-- [ ] Production không thể expose tool bằng nhầm lẫn config.
+- [x] `ohlcv` pass contract test deterministic + bounded live canary.
+      26 test trong `tests/test_agent_market_data.py`; canary FPT + TNG.
+- [x] Một market call = một provider operation admitted; không fan-out ẩn.
+      `_history` gọi đúng `Quote.history` một lần, không pagination, không fallback.
+- [x] Mỗi số accepted có unit, time, source, một raw hash.
+- [x] Market evidence đi qua `validate_claim_ledger` ra `SINGLE_SOURCE`.
+- [x] Web/memory tool và tool surface của chat không đổi.
+      `CHAT_CATALOG` vẫn đúng năm tool, có test riêng.
+- [x] Production không thể expose tool bằng nhầm lẫn config.
+      `deployment_profile != personal_internal` → `available()` False, đo trực tiếp.
+
+Report: `plans/reports/cook-260905-1500-phase-03-vnstock-market-data.md` —
+gồm ba finding buộc Phase 4 phải đưa vào planning note.
 
 ## Risks And Rollback
 

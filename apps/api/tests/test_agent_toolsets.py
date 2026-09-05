@@ -26,6 +26,28 @@ def test_the_shipped_toolsets_hold_the_five_tools_and_nothing_else():
     )
 
 
+def test_a_conversation_never_inherits_the_market_bundle():
+    """The market read exists, and no chat Turn can reach it.
+
+    Registered in ``TOOLSETS`` and named by neither ``CORE_TOOLSETS`` nor the
+    active pack, which is the only arrangement that holds: the import-time check
+    keeps ``CHAT_TOOLSETS`` equal to core plus the pack, so a bundle added to
+    the pack to "make it available" would hand it to every conversation.
+    """
+    assert "market_data" in toolsets.TOOLSETS
+    assert "market_data" not in toolsets.CHAT_TOOLSETS
+    assert "get_market_data" not in toolsets.resolve_toolset(toolsets.CHAT_TOOLSETS)
+
+
+def test_the_signal_desk_selection_is_the_chat_one_plus_the_market_read():
+    resolved = toolsets.resolve_toolset(toolsets.SIGNAL_DESK_TOOLSETS)
+
+    assert resolved == (
+        *toolsets.resolve_toolset(toolsets.CHAT_TOOLSETS),
+        "get_market_data",
+    )
+
+
 def test_one_name_may_be_passed_without_a_sequence():
     assert toolsets.resolve_toolset("web") == (
         "web_search",

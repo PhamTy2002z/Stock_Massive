@@ -54,7 +54,23 @@ TOOLSETS: dict[str, Toolset] = {
         ),
         "tools": ("session_search", "remember_fact", "recall_facts"),
     },
+    # Registered, and deliberately in neither :data:`CORE_TOOLSETS` nor the
+    # active pack. ``_check_the_selection_matches_the_pack`` holds
+    # ``CHAT_TOOLSETS`` equal to the core bundles plus the pack's, so a bundle
+    # added to the pack would reach every conversation — which is the opposite
+    # of what this one is for. The Signal Desk lane names it directly.
+    "market_data": {
+        "description": (
+            "Read one listed symbol's price and volume history for a date range."
+        ),
+        "tools": ("get_market_data",),
+    },
 }
+
+#: What a Signal Desk Turn may reach for: everything a conversation has, plus
+#: the market read. Written here rather than assembled at the call site so the
+#: two selections this deployment makes are visible in the same file.
+SIGNAL_DESK_TOOLSETS: tuple[str, ...] = (*CORE_TOOLSETS, "market_data")
 
 
 #: What a conversation may reach for, and the only selection the chat lane makes.
@@ -275,6 +291,7 @@ _check_the_selection_matches_the_pack()
 
 __all__ = [
     "CHAT_TOOLSETS",
+    "SIGNAL_DESK_TOOLSETS",
     "CORE_TOOLS",
     "CORE_TOOLSETS",
     "ChatSelectionDisagreesWithPackError",

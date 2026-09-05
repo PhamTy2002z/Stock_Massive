@@ -129,6 +129,19 @@ class Settings(BaseSettings):
     web_fleet_requests_per_minute: int = 30
     web_domain_requests_per_minute: int = 30
 
+    # Which deployment this process is. It gates one capability and nothing
+    # else, and it is a *string with one meaningful value* rather than a
+    # boolean because the meaningful value has to be said out loud: a host
+    # only reads market data when it has declared itself the internal,
+    # non-commercial one. Anything else — the default included — is a
+    # deployment the provider's community licence does not cover, so it is
+    # refused without asking whether a credential happens to be present.
+    deployment_profile: str = "production"
+    # The deployment's own decision on top of the profile. Both are required,
+    # for the same reason the web tools need a flag *and* a key: the profile
+    # says the capability is permitted here and the flag says it is wanted.
+    market_data_enabled: bool = False
+
     # Khối giá mà Budget Validation đọc lúc khởi động. Đơn vị USD trên một
     # triệu token, khai riêng cho từng workload: batch và interactive là hai
     # model khác nhau với giá khác nhau, một khối dùng chung sẽ định sai giá
