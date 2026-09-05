@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Roadmap Deviation"
-status: todo
+status: done
 priority: P1
 effort: "1h"
 dependencies: []
@@ -65,9 +65,12 @@ chạm production code.
 
 ## Success Criteria
 
-- [ ] Owner acceptance nằm trong deviation report.
-- [ ] Hai authority file khớp nhau (lệnh `rg` ở trên chứng minh).
-- [ ] Không production code, dependency, schema hay API contract nào đổi.
+- [x] Owner acceptance nằm trong deviation report.
+      `plans/reports/deviation-260905-signal-desk-flint-vnstock.md`, accepted 2026-09-05.
+- [x] Hai authority file khớp nhau (lệnh `rg` ở trên chứng minh).
+      `CLAUDE.md` §Current Boundary/§Retired Paths ↔ `docs/roadmap.md`
+      §"Amendment 2026-09-05" + tool tree + §Đã xóa + §Không xây.
+- [x] Không production code, dependency, schema hay API contract nào đổi.
 
 ## Risks And Rollback
 

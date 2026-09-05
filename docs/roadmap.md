@@ -171,10 +171,17 @@ catalog, frame buffer, compute sandbox cũ, artifact render; tool đọc/tính
 indicator/series/statement/local store; prompt ép board; scheduler/backfill
 của đường đã bỏ.
 
+**Amendment 2026-09-05** (§"Amendment 2026-09-05" bên dưới): *cái tên* Signal
+Desk không còn retired. Mode trên composer, pane phải và một visual part đã
+được mở lại. Mọi thứ còn lại trong đoạn trên vẫn retired và không được restore.
+
 ### Không xây trong roadmap lõi
 
 - Chart/board/Study engine mới dưới tên khác; catalog chỉ báo built-in; local
-  market store cho agent; watchlist surface toàn cục.
+  market store cho agent; watchlist surface toàn cục. (Amendment 2026-09-05
+  mở **một** visual part render bằng compiler của `flint-chart` ở pane phải —
+  không phải một engine, không có DSL, không có widget catalog, và không có
+  store: mỗi visual đến từ một market call trong chính Turn đó.)
 - Shell trên host, file-write ngoài sandbox, LSP, browser-computer-use,
   plugin npm.
 - Generic MCP marketplace, `trust: full` mặc định, provider matrix rộng.
@@ -207,6 +214,7 @@ Agent Loop + provider recovery + bounded budgets     ← Hermes discipline
     ├── Tool Executor
     │     ├── web_search · fetch_url
     │     ├── session_search · remember_fact · recall_facts
+    │     ├── get_market_data (ohlcv, read-only)     ← signal_desk + internal
     │     └── execute_code (sandbox)                 ← Conditional, Phase 11
     ├── Deep-lane pipeline: research → counterevidence → verification
     │     (verifier = hidden specialist, context sạch)
@@ -328,7 +336,9 @@ cap/provider error; repetition `allow → warn → block → halt`; cancel
 idempotent, exit qua terminal owner tập trung; SSE snapshot/replay; SSRF/
 rebinding/redirect protections; untrusted result bị cap + quét injection.
 Tool catalog đúng năm capability web + memory/session. Attachment là input
-của Turn, không phải tool.
+của Turn, không phải tool. (Amendment 2026-09-05 thêm capability thứ sáu
+`get_market_data`, chỉ đến được từ mode `signal_desk` và chỉ khả dụng ở profile
+`personal_internal`; `chat` vẫn đúng năm.)
 
 **Đã verify trực tiếp trong code (2026-09-01):** năm tool khai báo tại
 `toolsets.py`; `MAX_TOOL_ROUNDS = 4` và turn deadline trong `loop.py` (trở
@@ -393,6 +403,36 @@ cách được **amend tường minh**, không phải bằng cách bất biến 
 - **Một chiều** (dừng và chờ người quyết, bất kể phase): public HTTP/SSE
   contract, drop/migrate dữ liệu, ranh giới pháp lý research/advice, default
   permission, thêm capability ngoài catalog, thay đổi hợp đồng sự thật §2.
+
+### Amendment 2026-09-05 — Signal Desk visual mode, Vnstock read, Flint
+
+Ba cửa một chiều đã mở, đúng phạm vi này và không hơn. Nguồn:
+`plans/reports/deviation-260905-signal-desk-flint-vnstock.md` (accepted
+2026-09-05), thực thi bởi `plans/260905-0001-signal-desk-visual-harness/`.
+
+| Capability | Phạm vi đã mở | Vẫn đóng |
+|---|---|---|
+| Signal Desk visual | **Một** optional versioned visual part trên assistant message, render **chỉ** ở pane phải khi Turn chạy mode `signal_desk`. | Board renderer, Study/Board DSL, widget catalog, chart runtime tự viết, artifact row + `GET /artifacts/{id}`, `signal_desk.ready`, board tab/pin/export. `mode=chat` không bao giờ sinh visual part. |
+| Market data | **Một** tool read-only `get_market_data`, dataset **chỉ `ohlcv`**, một symbol mỗi call, bounded rows, backed by Vnstock Community pinned. Khả dụng chỉ khi profile `personal_internal` + flag + import check; production/staging fail-closed dù có credential. | `quote`, `trades`, order book, flow, indicator, screener; local market store; scheduler/backfill; watchlist; broker/order. Production cho tới khi có software license và quyền upstream bằng văn bản. |
+| Chart core | Package chính thức `flint-chart` pin exact version, import trực tiếp vào web app. Host chuẩn bị `ChartAssemblyInput`; compiler của package sinh ECharts option. | Fork/patch/copy template Flint, hậu xử lý output, persist ECharts option, model sinh React/HTML/DSL. Generic MCP gateway vẫn chờ Phase 12. |
+
+**Truth contract §2 không đổi.** Market evidence dùng `EvidenceKind.STORE_FIGURE`
++ `SourceClass.STORE`, cả hai đã có sẵn trong enum. `SourceClass.STORE` **không**
+được thêm vào `_PRIMARY_CLASSES`: số đến từ feed công ty chứng khoán (KBS,
+Vietcap), không phải HOSE/HNX, nên material claim chỉ dựa vào nó ra
+`SINGLE_SOURCE` — và đó là nhãn đúng. Đường lên `VERIFIED` là cross-check hai
+publisher độc lập, `_accepted_verdict` đã hỗ trợ sẵn.
+
+**Không có loop, gate hay state machine thứ hai.** Readiness vẫn là
+`validate_claim_ledger`; state machine vẫn là `PipelineStage`; evidence need vẫn
+là `ResearchDraft.gaps`; bound vẫn là `lanes.DEEP` + `TurnGuardrails`.
+
+**Paid quality gate còn lại của Phase 6** chạy một lần trong corpus kết hợp
+text/evidence/visual của plan này, không phải hai corpus cạnh tranh.
+
+**Rollback:** revert amendment này, gỡ bundle `market_data` và dependency, gỡ
+visual part. Signal Desk trở lại pane rỗng; đường text và web-evidence không bị
+chạm ở bất kỳ bước nào.
 
 ## 10. Lộ trình theo phase — triển khai tuần tự
 

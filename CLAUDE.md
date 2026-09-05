@@ -24,18 +24,22 @@
   SSE replay, cancellation, attachments, model gateway, budget ledger, context
   handling, guardrails, web evidence and memory.
 - The runtime tool catalog is exactly `web_search`, `fetch_url`,
-  `session_search`, `remember_fact` and `recall_facts` until a roadmap phase
-  gate opens more. `execute_code` exists only behind the Phase 11 gate.
+  `session_search`, `remember_fact` and `recall_facts` for `mode=chat`, plus
+  `get_market_data` reachable **only** from `mode=signal_desk` and available
+  only on the `personal_internal` profile (roadmap §"Amendment 2026-09-05").
+  Nothing else opens until a roadmap phase gate opens it. `execute_code` exists
+  only behind the Phase 11 gate.
 - New typed parts (progress, question, claim/citation) are added only by the
   phase that owns them (Phase 3/6/7), through the part lifecycle — never as
   ad-hoc payloads.
-- The **Signal Desk is a mode on the composer and a right-hand pane, and
-  nothing else**: a `Chat | Signal Desk` pill (`components/shell/composer.tsx`),
-  the pane and its geometry (`components/shell/inspector.tsx`,
-  `shell-state.tsx`), and one empty state
-  (`components/signal-desk/signal-desk-empty.tsx`). It is client state — no
-  request carries a mode, nothing produces a board, and the pane's only body is
-  its empty one. A new implementation attaches at `Body` in `inspector.tsx`.
+- The **Signal Desk is a mode on the composer, a right-hand pane, and one
+  visual part — nothing else**: a `Chat | Signal Desk` pill
+  (`components/shell/composer.tsx`), the pane and its geometry
+  (`components/shell/inspector.tsx`, `shell-state.tsx`), the empty state
+  (`components/signal-desk/signal-desk-empty.tsx`), and the visual body that
+  attaches at `Body` in `inspector.tsx`. The mode travels on the Turn body as
+  `mode: chat | signal_desk`; `chat` is the default and never produces a visual
+  part. Still no board, no DSL, no widget catalog, no artifact row.
 - `CreateTurnRequest` is `extra="forbid"` (`apps/api/src/agent/schemas.py`).
   A field the browser adds to a Turn body that the schema does not declare
   fails **every** Turn with a 422, on and off alike. Change the schema in the
@@ -57,18 +61,24 @@
   indicator/calculation tools, stock-store reads, their schedulers, and any
   global watchlist surface. Do not restore any of it.
 - The **name** "Signal Desk" is no longer retired. The mode and the pane were
-  restored on 2026-09-04 at the product owner's direction, as the surface a new
-  backend will fill. `docs/roadmap.md` still records the whole desk as torn
-  down (Phase 0, §"Đã xóa") and **has not been amended yet** — where the two
-  disagree, this file is current on the desk surface and the roadmap remains
-  the authority on everything else. Raise the amendment before building on it.
+  restored on 2026-09-04 at the product owner's direction, and the roadmap was
+  amended on 2026-09-05 (§"Amendment 2026-09-05", sourced from
+  `plans/reports/deviation-260905-signal-desk-flint-vnstock.md`). The two files
+  now agree; the roadmap is the authority.
 - Do not import runtime code from deleted `src/stocks/` or `src/studies/`
   modules; historical plans and migrations naming them are not current
   architecture authority.
 - Do not drop historical database data during ordinary code cleanup.
   Retention, backup and rollback are a dedicated migration decision.
 - Do not add multi-agent, MCP, side-effect tools, host shell or file-write
-  tools before the Phase 11/12 gates are explicitly opened.
+  tools before the Phase 11/12 gates are explicitly opened. The 2026-09-05
+  amendment did **not** open MCP: `flint-chart` is imported directly as an npm
+  dependency, never through a gateway.
+- The **chart core is the official `flint-chart` package, pinned exact**. Do not
+  fork it, patch it, copy its templates, post-process its ECharts output or
+  persist a generated ECharts option. The host prepares a `ChartAssemblyInput`
+  from accepted market evidence and styles the panel frame; the package does the
+  rest. The model sends no numbers.
 
 ## Decision and Deviation Rules
 

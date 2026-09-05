@@ -133,7 +133,7 @@ retired Study/Board/widget stack.
 
 | # | Phase | Status | Effort | Dependency |
 |---|---|---|---:|---|
-| 1 | [Roadmap deviation](./phase-01-roadmap-deviation.md) | Todo | 1h | — |
+| 1 | [Roadmap deviation](./phase-01-roadmap-deviation.md) | Done | 1h | — |
 | 2 | [Flint contract spike](./phase-02-flint-contract-spike.md) | Todo | 2h | 1 |
 | 3 | [Vnstock market-data capability](./phase-03-vnstock-market-data-capability.md) | Todo | 8h | 1 |
 | 4 | [Signal Desk mode + market evidence](./phase-04-evidence-readiness-agent-loop.md) | Todo | 6h | 3 |
