@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Flint Contract Spike"
-status: todo
+status: done
 priority: P1
 effort: "2h"
 dependencies: [1]
@@ -89,4 +89,97 @@ production không bị chạm.
 
 ## Findings
 
-_Điền khi phase chạy xong._
+### Version và license
+
+`flint-chart@0.5.1` pinned trong `apps/web/package.json`. License **MIT**,
+author Microsoft Corporation. `echarts` là **optional peer dependency** — Phase 2
+không cài nó vì compile không cần; Phase 6 sẽ cần khi render.
+
+### Import và type Phase 5 phải dùng
+
+```ts
+import { assembleECharts, ecAllTemplateDefs } from "flint-chart/echarts"
+```
+
+`assembleECharts(input: ChartAssemblyInput): any`. Trả về ECharts option kèm các
+key nội bộ `_width`, `_height`, `_dataLength`, `_transform`, và `_warnings` chỉ
+khi có warning.
+
+`ChartAssemblyInput` (từ `core/types`, `chart_spec` là object literal ẩn danh,
+không có interface tên `ChartSpec`):
+
+| Field | Bắt buộc | Ghi chú |
+|---|---|---|
+| `data` | ✅ | `{ values: any[] }` hoặc `{ url: string }` |
+| `chart_spec.chartType` | ✅ | tên template, đúng chuỗi trong `ecAllTemplateDefs` |
+| `chart_spec.encodings` | ✅ | `Record<string, string \| ChartEncoding \| ...>`; string = tên cột |
+| `chart_spec.baseSize` / `canvasSize` | — | `{width,height}`, mặc định 400×320 |
+| `chart_spec.title` / `subtitle` | — | |
+| `semantic_types` | — | `Record<string, string \| SemanticAnnotation>` |
+| `theme_spec`, `options`, `field_display_names` | — | `field_display_names` đổi tên trục và series |
+
+### Candlestick **không có channel volume**
+
+```
+Candlestick Chart → channels: x, open, high, low, close, column, row
+```
+
+Giả định của plan ("candlestick + volume là 2 series 2 axis") **sai**. Giá và
+khối lượng là **hai `ChartAssemblyInput` và hai option**, không phải một chart
+hai trục. Gộp lại sau khi compile = sửa output của Flint, điều plan cấm. Phase 5
+assemble hai input; Phase 6 xếp chồng hai container.
+
+Test khoá lại điều này: nếu bản sau thêm channel `volume`, test đỏ và quyết định
+hai-chart được xem lại có chủ đích.
+
+### Shape lỗi — **Flint không validate**
+
+Đây là finding quan trọng nhất và nó đổi thiết kế Phase 5.
+
+| Input | Hành vi thật |
+|---|---|
+| `chartType` không tồn tại | **Throw** `Error: Unknown ECharts chart type: X. Use ecAllTemplateDefs to see available types.` |
+| Thiếu `chart_spec` | Throw `TypeError` — message là lỗi truy cập thuộc tính, không phải lỗi contract |
+| **Thiếu channel bắt buộc** (không có `close`) | **Không throw.** Trả option có `series === undefined` |
+| **Encoding trỏ vào cột không row nào có** | **Không throw, không warning.** Trả series `candlestick` bình thường — nhìn như đã chạy đúng |
+| `values: []` | Không throw; `_dataLength === 0` |
+
+Hệ quả: **gate `invalid_visual` là của host, không phải của Flint.** Phase 5 phải
+validate trước khi gọi `assembleECharts`:
+
+1. mọi channel bắt buộc của chartType đó đều được encode (Flint không khai
+   channel nào bắt buộc — host tự khai, cho đúng hai chart type ta dùng);
+2. mọi field được encode đều có mặt và hữu hạn trên **mọi** row.
+
+Quy tắc này đã viết và chứng minh trong test (`gives the host a checkable rule
+for all three`) nên Phase 5 chép được nguyên vẹn thay vì suy lại.
+
+Điều này ăn khớp với ràng buộc evidence: một field không có trong data thì không
+thể có evidence ID, nên gate visual và gate provenance là **một** kiểm tra.
+
+### Verdict thị giác (render thật, headless Chrome, khổ pane phải)
+
+Scratch page ngoài repo: `/tmp/flint-scratch/pane.html`, ảnh
+`/tmp/flint-scratch/pane.png` (volume 120px) và `pane2.png` (volume 200px).
+
+**Đạt, có ba điều kiện cho Phase 6:**
+
+1. **Candlestick 388×240 đọc tốt.** Nến, râu, gridline, tick giá và tick ngày
+   thưa hợp lý; không chồng chữ. Màu mặc định xanh tăng / đỏ giảm, khớp quy ước
+   Việt Nam.
+2. **Volume 120px là hỏng, ≥200px thì đạt.** Ở 120px nhãn trục y chồng thành
+   vệt không đọc được và nhãn x xoay 90° ăn hết chiều cao, cột bị bẹp. Ở 200px
+   cả hai trục sạch. Phase 6 cấp tối thiểu 200px cho volume.
+3. **`baseSize` không phải là ràng buộc cứng.** Hỏi 388×240 thì `_width/_height`
+   trả 409×301; thêm `canvasSize` cũng vậy. Đây là *gợi ý* — kích thước thật do
+   container DOM quyết định. Phase 6 set kích thước bằng CSS container và coi
+   `_width/_height` là gợi ý, không phải hợp đồng.
+
+Hai điểm copy cho Phase 6 (không chặn phase này):
+
+- Nhãn trục y của candlestick là `Price` — chuỗi tiếng Anh Flint tự sinh cho
+  nhóm OHLC, `field_display_names` cho `open/high/low/close` **không** ghi đè
+  được. `field_display_names.time` thì có tác dụng (trục x hiện `Phiên`).
+- Nhãn x của volume là `2026-08-10` xoay dọc. Rút ngắn giá trị cột `time` **ở
+  data trước khi assemble** (host chuẩn bị input — hợp lệ), không phải sửa option
+  sau khi compile.
