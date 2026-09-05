@@ -1,7 +1,7 @@
 ---
 title: "Signal Desk Visual Research Harness"
 description: "Build a quality-first agent loop that gathers web and Vnstock evidence, reaches a bounded readiness decision, and renders an original Flint visualization in the right-hand Signal Desk."
-status: pending
+status: in_progress
 priority: P1
 effort: "49h"
 issue: null
@@ -136,7 +136,7 @@ retired Study/Board/widget stack.
 | 1 | [Roadmap deviation](./phase-01-roadmap-deviation.md) | Done | 1h | — |
 | 2 | [Flint contract spike](./phase-02-flint-contract-spike.md) | Done | 2h | 1 |
 | 3 | [Vnstock market-data capability](./phase-03-vnstock-market-data-capability.md) | Done | 8h | 1 |
-| 4 | [Signal Desk mode + market evidence](./phase-04-evidence-readiness-agent-loop.md) | Todo | 6h | 3 |
+| 4 | [Signal Desk mode + market evidence](./phase-04-evidence-readiness-agent-loop.md) | Done | 6h | 3 |
 | 5 | [Flint visual-artifact core](./phase-05-flint-visual-artifact-core.md) | Todo | 10h | 2, 4 |
 | 6 | [Signal Desk right panel](./phase-06-signal-desk-right-panel.md) | Todo | 10h | 5 |
 | 7 | [End-to-end quality gate](./phase-07-end-to-end-quality-gate.md) | Todo | 12h | 6 |

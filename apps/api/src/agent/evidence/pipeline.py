@@ -117,6 +117,65 @@ candidate_evidence_ids may be empty because the harness assigns immutable IDs
 after page reads. question is null unless a preliminary web scout proved one
 non-discoverable choice would change the research branch."""
 
+#: The name of the market read, as the notes below have to spell it. Written
+#: once rather than in four prompt strings: a note naming a tool the surface
+#: does not offer buys a round the model spends discovering that.
+MARKET_TOOL = "get_market_data"
+
+MARKET_PLANNER_NOTE = """DEEP RESEARCH — PLANNING PASS (SIGNAL DESK).
+Call web_search exactly three times in one parallel batch, in this order: (1) the
+event or catalyst, (2) company/industry fundamentals, (3) a counter-thesis or
+disconfirming view. In the same batch call get_market_data once for the price and
+volume series the question is about, with an explicit start and end date.
+Search snippets never satisfy a price or volume figure: a snippet has no unit, no
+timezone and no session boundary, and a number taken from one cannot be checked.
+Every price or volume you state must come from get_market_data. Do not answer yet."""
+
+MARKET_RESEARCH_NOTE = """DEEP RESEARCH — RESEARCH PASS (SIGNAL DESK).
+Fetch the strongest relevant pages for the narrative, prioritising
+regulator/exchange/VSDC/issuer disclosures over media and aggregators. Compare
+independent publishers. Call get_market_data again only if the first call missed
+a series or a range you need.
+
+Three rules about how a claim is written, and each one decides whether it can be
+checked at all:
+
+1. Prices are in whole dong, as get_market_data returns them. Never restate a
+   figure in the provider's thousands.
+2. Do not write a calendar date inside the sentence of a material claim. The
+   numeric check reads 24/08/2026 as the numbers 24, 8 and 2026 and refuses the
+   claim because no source prints a currency beside a day number. Put the period
+   in the surrounding prose instead: "phiên gần nhất", "trong tuần khảo sát".
+3. A material claim supported only by get_market_data is single_source, never
+   verified. The figures come from a securities company's feed rather than from
+   the exchange, and labelling one verified invalidates the whole ledger.
+
+When the research pass is complete, make no more tool calls and return only one
+JSON object with keys: claims, gaps, assumptions, invalidations, question. Each
+claim has claim_id, text, kind (fact|inference|scenario), material,
+candidate_evidence_ids, unit, currency. candidate_evidence_ids may be empty
+because the harness assigns immutable IDs after the reads. question is null
+unless a preliminary scout proved one non-discoverable choice would change the
+research branch."""
+
+
+def planner_note(*, market: bool) -> str:
+    """The planning pass's note, for a surface that has the market read or not.
+
+    Keyed on what the Turn was actually offered rather than on the mode it was
+    asked in. The two agree whenever the capability is enabled, and where they
+    do not — a Signal Desk Turn on a host where the provider is switched off —
+    the surface is right and the mode is not: a note telling the model to call a
+    tool it does not have costs a round and teaches it nothing.
+    """
+    return MARKET_PLANNER_NOTE if market else PLANNER_NOTE
+
+
+def research_note(*, market: bool) -> str:
+    """The research pass's note, chosen the same way."""
+    return MARKET_RESEARCH_NOTE if market else RESEARCH_NOTE
+
+
 COUNTER_NOTE_TEMPLATE = """DEEP RESEARCH — COUNTEREVIDENCE PASS.
 Attack the draft below. Search or fetch deliberately disconfirming primary or
 independent evidence, check publication timing and corporate-action/unit traps,
@@ -711,7 +770,12 @@ __all__ = [
     "ELICITATION_MALFORMED",
     "ELICITATION_NOT_PROPOSED",
     "ELICITATION_NO_SCOUT",
+    "MARKET_PLANNER_NOTE",
+    "MARKET_RESEARCH_NOTE",
+    "MARKET_TOOL",
     "PLANNER_NOTE",
+    "planner_note",
+    "research_note",
     "PipelineStage",
     "QuestionCandidate",
     "RESEARCH_NOTE",

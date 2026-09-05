@@ -558,6 +558,10 @@ async def create_turn(
             user_text=payload.text,
             runtime=_runtime(current_user),
             symbols=payload.symbols,
+            # Read off the body, never inferred from the words. Which desk the
+            # reader is at is a thing they chose with a switch, and a heuristic
+            # over their sentence would take that choice back off them.
+            mode=payload.mode,
             history=history,
             summary=None if summary is None else summary.text,
             summarised_turns=0 if summary is None else summary.summarised_turns,

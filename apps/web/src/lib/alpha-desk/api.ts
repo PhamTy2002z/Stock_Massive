@@ -86,12 +86,14 @@ export interface CreateTurnInput {
   /**
    * Whether the reader threw the Signal Desk switch for this question.
    *
-   * Read by the surface and not sent: `CreateTurnRequest` forbids fields it does
-   * not declare and it declares no mode, so a body carrying one fails the Turn
-   * with a 422 — every Turn, since the switch is off as explicitly as it is on.
-   * It stays on the input because the callers already know the answer, and the
-   * line that puts it on the wire belongs where it would be translated rather
-   * than rediscovered.
+   * Sent as `mode`, and the translation is the point: the switch is a boolean
+   * on this side because that is what a two-position control is, and it is a
+   * named mode on the wire because the server has to be able to add a third
+   * desk without every old client meaning something new by `false`.
+   *
+   * Absent is `chat`, which is what makes the field safe to have added:
+   * `CreateTurnRequest` forbids fields it does not declare, so this line and
+   * the schema that declares `mode` ship together or every Turn 422s.
    */
   signalDesk?: boolean
   /**
@@ -122,6 +124,7 @@ export function createTurn(input: CreateTurnInput): Promise<CreatedTurn> {
       turn_id: input.turnId,
       text: input.text,
       symbols: input.symbols ?? [],
+      mode: input.signalDesk ? "signal_desk" : "chat",
       attachments: input.attachments ?? [],
       retry_of_turn_id: input.retryOfTurnId ?? null,
     }),

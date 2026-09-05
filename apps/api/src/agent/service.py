@@ -118,7 +118,7 @@ def build_alpha_desk(
     # sides (``core/llm/admission.py``); ``None`` is unlimited in both.
     slots = SessionSlots(limit=resolved.ceilings.active_turns_system)
 
-    def loop_factory(*, checkpoint, publisher, lane) -> AgentLoop:
+    def loop_factory(*, checkpoint, publisher, lane, toolsets) -> AgentLoop:
         return AgentLoop(
             client=client,
             config=resolved,
@@ -126,6 +126,11 @@ def build_alpha_desk(
             # What the Turn was routed to. The service builds one loop per Turn,
             # so the ceilings can be the Turn's own rather than the build's.
             lane=lane,
+            # And which surface it was asked from. Passed in for the same reason
+            # the lane is: the desk a Turn belongs to is decided once, when it is
+            # created, and a surface re-derived per round could change under a
+            # Turn halfway through its own research.
+            toolsets=toolsets,
             checkpoint=checkpoint,
             publisher=publisher,
             # Wired the same way the checkpoint is: one short transaction per

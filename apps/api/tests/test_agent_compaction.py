@@ -488,7 +488,7 @@ def db_store() -> AgentPersistence:
 
 
 def turn_service(client: Any, **overrides: Any) -> TurnService:
-    def loop_factory(*, checkpoint, publisher, lane):
+    def loop_factory(*, checkpoint, publisher, lane, toolsets):
         return AgentLoop(
             client=client,
             config=config(),

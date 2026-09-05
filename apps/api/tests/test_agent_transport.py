@@ -204,7 +204,7 @@ class Desk:
 
         # ``lane`` is accepted and dropped: a scripted loop runs no rounds, so it
         # has no ceilings to take from the Turn's lane.
-        def loop_factory(*, checkpoint, publisher, lane):
+        def loop_factory(*, checkpoint, publisher, lane, toolsets):
             return ScriptedLoop(self.control, checkpoint=checkpoint, publisher=publisher)
 
         self.service = AlphaDeskService(
@@ -545,6 +545,30 @@ class TestIdempotency:
         assert again.status_code == 200
         assert again.json()["created"] is False
         desk.control.finish()
+
+    async def test_the_same_words_in_two_modes_are_two_questions(
+        self, client, auth, desk
+    ):
+        """The mode is part of the idempotency payload, and it has to be.
+
+        A key that ignored it would answer a Signal Desk question with the chat
+        Turn that already ran under the same id — same words, different desk,
+        wrong answer.
+        """
+        thread_id = await open_thread(client, auth)
+        turn_id = str(uuid.uuid4())
+
+        first = await start_turn(client, auth, thread_id, turn_id=turn_id)
+        assert first.status_code == 201, first.text
+        await asyncio.wait_for(desk.control.started.wait(), 2)
+        desk.control.finish()
+
+        clash = await start_turn(
+            client, auth, thread_id, turn_id=turn_id, mode="signal_desk"
+        )
+
+        assert clash.status_code == 409
+        assert clash.json()["detail"]["reason"] == "turn_id_reused"
 
     async def test_a_mode_nobody_declared_is_refused_before_a_row_exists(
         self, client, auth, desk

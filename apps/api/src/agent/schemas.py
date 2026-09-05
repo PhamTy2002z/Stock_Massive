@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -204,6 +204,17 @@ class CreateTurnRequest(BaseModel):
     # Part of the idempotency payload: the same id with a different set is a
     # different question.
     symbols: list[str] = Field(default_factory=list, max_length=10)
+    # Which desk the reader asked from. Part of the idempotency payload, because
+    # the same words asked in the two modes are two different questions: one may
+    # read the market and draw, the other may not.
+    #
+    # A default rather than a required field, and the default is the old
+    # behaviour: a client that predates this line sends a body byte-identical to
+    # the one it always sent and gets the Turn it always got. ``Literal`` rather
+    # than a free string because ``extra="forbid"`` refuses unknown *fields* and
+    # would happily accept an unknown *value* — a misspelt mode would then run
+    # as a Turn nobody configured.
+    mode: Literal["chat", "signal_desk"] = "chat"
     # Retry creates a *new* Turn that points at the old one; the previous Turn,
     # its spend, its message and its traces stay immutable.
     retry_of_turn_id: uuid.UUID | None = None

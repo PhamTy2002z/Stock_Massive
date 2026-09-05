@@ -153,14 +153,15 @@ from .evidence.source_policy import as_of_from_text
 from .evidence.pipeline import (
     COUNTER_TOOL_ROUND_LIMIT,
     DRAFT_FORMAT,
-    PLANNER_NOTE,
-    RESEARCH_NOTE,
+    MARKET_TOOL,
     RESEARCH_TOOL_ROUND_LIMIT,
     VERIFIER_FORMAT,
     PipelineStage,
     ResearchDraft,
     candidate_ledger,
     counter_note,
+    planner_note,
+    research_note,
     draft_recovery_messages,
     elicitation_part,
     evidence_from_calls,
@@ -412,8 +413,13 @@ EXTERNAL_TOOL_EXHAUSTED_MESSAGE = (
     "already been gathered, and say what you could not look up."
 )
 
-# The only remaining conversation surface is chat.
+# The two desks a Turn can be asked from, and the only difference between them
+# that reaches this module: which lane and which tool surface the Turn is built
+# with. Everything after that — the loop, the ceilings, the guardrails, the
+# terminal reasons — is one code path for both, which is why there is no third
+# name here for "the Signal Desk pipeline".
 CHAT_MODE = "chat"
+SIGNAL_DESK_MODE = "signal_desk"
 
 def domain_body_note() -> str:
     """The active pack's own half of the prompt, for a Turn that reached for it.
@@ -1368,9 +1374,13 @@ class AgentLoop:
             reason=request.lane_reason,
         )
         deep_pipeline = self._lane.name == DEEP.name
+        # Which pipeline notes this Turn gets, decided from the surface it was
+        # actually resolved rather than from the mode it was asked in. A note
+        # naming a tool a deployment has switched off would spend a round.
+        market = MARKET_TOOL in surface.by_name
         if deep_pipeline:
             state.pipeline_stage = PipelineStage.PLANNING
-            state.note = PLANNER_NOTE
+            state.note = planner_note(market=market)
 
         # Deep reserves the lane's eleventh model-call slot for its clean
         # verifier. Light keeps the exact five-call shape it had before.
@@ -1638,7 +1648,7 @@ class AgentLoop:
                     },
                 )
                 state.pipeline_stage = PipelineStage.RESEARCH
-                state.note = RESEARCH_NOTE
+                state.note = research_note(market=market)
 
             # The round is behind us either way: a stop that arrived during it
             # has already settled its own calls — reads given up on, a write in
@@ -3203,6 +3213,7 @@ __all__ = [
     "CANCELLED_BY_USER",
     "CHARS_PER_TOKEN",
     "CHAT_MODE",
+    "SIGNAL_DESK_MODE",
     "CONTENT_POLICY_BLOCKED",
     "CONTEXT_COMPRESSION_FACTOR",
     "CONTEXT_OVERFLOW",

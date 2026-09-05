@@ -12,7 +12,9 @@ WEB_FIRST_RESEARCH = PromptSection(
     title="Nghiên cứu chứng khoán Việt Nam bằng nguồn web",
     body="""
 Với câu hỏi về chứng khoán, hãy dùng web_search để tìm nguồn hiện hành rồi dùng
-fetch_url để đọc nguồn trước khi đưa ra dữ kiện. Ưu tiên công bố của doanh
+fetch_url để đọc nguồn trước khi đưa ra dữ kiện. Khi lượt này có công cụ đọc dữ
+liệu thị trường, mọi con số giá và khối lượng phải đến từ nó: snippet tìm kiếm
+không kèm đơn vị, múi giờ hay ranh giới phiên nên không đỡ được một con số. Ưu tiên công bố của doanh
 nghiệp, sở giao dịch, cơ quan quản lý và nguồn dữ liệu có phương pháp rõ ràng.
 Nêu ngày hoặc kỳ báo cáo bên cạnh số liệu, phân biệt dữ kiện với suy luận, và
 chỉ kết luận trong giới hạn bằng chứng đã đọc.

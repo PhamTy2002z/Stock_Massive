@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Signal Desk Mode And Market Evidence In The Deep Pipeline"
-status: todo
+status: done
 priority: P1
 effort: "6h"
 dependencies: [3]
@@ -126,14 +126,19 @@ git diff --check
 
 ## Success Criteria
 
-- [ ] Request cũ (không `mode`) chạy y như trước, chứng minh bằng transcript
-      baseline.
-- [ ] `signal_desk` là đường duy nhất tới toolset market; chat không chạm được.
-- [ ] Mọi Turn test terminate với reason ổn định; không path nào lên round thứ
-      11 hay external call thứ 21.
-- [ ] Không file `readiness.py`, không digest, không state machine thứ hai
+- [x] Request cũ (không `mode`) chạy y như trước.
+      `test_a_client_that_names_no_mode_sends_what_it_always_sent` đã có sẵn và xanh.
+- [x] `signal_desk` là đường duy nhất tới toolset market; chat không chạm được.
+      `test_a_chat_turn_cannot_reach_the_market_read` +
+      `test_a_conversation_never_inherits_the_market_bundle`.
+- [x] Mọi Turn test terminate với reason ổn định; không path nào lên round thứ
+      11 hay external call thứ 21. Bound nằm trên lane, lane chọn theo mode;
+      `test_the_market_surface_buys_no_extra_capacity` khoá 10/20/1.800.
+- [x] Không file `readiness.py`, không digest, không state machine thứ hai
       trong diff.
-- [ ] Suite evidence/untrusted/cancellation của Phase 6 xanh.
+- [x] Suite evidence/untrusted/cancellation xanh — toàn bộ 1508 test API xanh.
+
+Report: `plans/reports/cook-260905-1535-phase-04-signal-desk-mode.md`.
 
 ## Risks And Rollback
 

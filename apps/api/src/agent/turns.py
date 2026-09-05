@@ -62,8 +62,10 @@ from .events import (
 )
 from src.core.llm.protocol import Usage
 
-from .lanes import LIGHT, DEFAULT_REASON, LaneProfile, route_reason
+from .lanes import DEEP, LIGHT, DEFAULT_REASON, LaneProfile, route_reason
 from .loop import (
+    CHAT_MODE,
+    SIGNAL_DESK_MODE,
     TurnAttachment,
     TurnDraft,
     TurnOutcome,
@@ -77,6 +79,7 @@ from .messages import CALL_INTERRUPTED, settle_orphan_calls
 from .parts import QUESTION_PENDING, QuestionPart
 from .persistence import TURN_COMPLETE, TURN_INCOMPLETE, AgentPersistence, TurnRecord
 from .prompt import RuntimeContext
+from .toolsets import CHAT_TOOLSETS, SIGNAL_DESK_TOOLSETS
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +171,9 @@ class RunningTurn:
     # Turn was allowed ten rounds of evidence.
     lane: LaneProfile = LIGHT
     lane_reason: str = DEFAULT_REASON
+    # Which desk asked, decided once with the lane and carried for the same
+    # reason: the tool surface a Turn runs with may not change under it.
+    mode: str = CHAT_MODE
     # The last draft the loop checkpointed. It is what a Turn killed by the
     # deadline or by shutdown leaves behind, and the only place the prose it
     # managed to produce still exists in this process.
@@ -438,6 +444,7 @@ class TurnService:
         summary: str | None = None,
         summarised_turns: int = 0,
         retry_of_turn_id: uuid.UUID | str | None = None,
+        mode: str = CHAT_MODE,
         attachments: Sequence[TurnAttachment] = (),
     ) -> TurnHandle:
         """Commit the Turn, then start it. Never the other way round.
@@ -460,6 +467,7 @@ class TurnService:
             user_text=user_text,
             symbols=symbols,
             retry_of_turn_id=retry_of_turn_id,
+            mode=mode,
             # Metadata only, and derived in one place: the committed request
             # records what was attached, and the payload goes to the run.
             attachments=[entry.as_metadata() for entry in attached],
@@ -480,7 +488,15 @@ class TurnService:
         # decided before its first call and stay the same for its whole life. A
         # lane re-derived per round could change under a Turn mid-flight, which
         # would make "how many rounds did it have" a question with no answer.
-        lane, lane_reason = route_reason(user_text)
+        # Signal Desk is not a guess about the question, so it does not go
+        # through the router: a reader who threw the switch has asked for the
+        # deep lane and for the market surface, and a keyword heuristic that
+        # disagreed would quietly give them the light one. Chat keeps the
+        # router it has always had.
+        if mode == SIGNAL_DESK_MODE:
+            lane, lane_reason = DEEP, f"mode:{SIGNAL_DESK_MODE}"
+        else:
+            lane, lane_reason = route_reason(user_text)
         logger.info(
             "Turn %s runs on the %s lane (%s)", record.id, lane.name, lane_reason
         )
@@ -489,6 +505,7 @@ class TurnService:
             publisher=publisher,
             lane=lane,
             lane_reason=lane_reason,
+            mode=mode,
         )
         self._running[record.id] = running
         request = TurnRequest(
@@ -524,7 +541,14 @@ class TurnService:
 
         checkpointer = Checkpointer(self._store, turn_id, publisher, payload=remember)
         agent = self._loop_factory(
-            checkpoint=checkpointer, publisher=publisher, lane=running.lane
+            checkpoint=checkpointer,
+            publisher=publisher,
+            lane=running.lane,
+            toolsets=(
+                SIGNAL_DESK_TOOLSETS
+                if running.mode == SIGNAL_DESK_MODE
+                else CHAT_TOOLSETS
+            ),
         )
         # The loop's own between-round check fires at this same number and fires
         # first, which is what leaves a partial answer attached; this one is the

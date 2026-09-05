@@ -12,7 +12,7 @@ from sqlalchemy import delete, select
 from src.agent import registry, toolsets
 from src.agent.events import EventType, TurnPublisher, snapshot_from_draft
 from src.agent.lanes import DEEP, DEFAULT_REASON, LIGHT, LaneProfile
-from src.agent.loop import AgentLoop, ContextBudget, TurnDraft
+from src.agent.loop import SIGNAL_DESK_MODE, AgentLoop, ContextBudget, TurnDraft
 from src.agent.persistence import (
     TURN_COMPLETE,
     TURN_INCOMPLETE,
@@ -122,19 +122,25 @@ def wants(name: str) -> Completion:
     )
 
 
-def service(client, *, loop=None, **overrides) -> TurnService:
+def service(client, *, loop=None, built=None, **overrides) -> TurnService:
     loop_kwargs = loop or {}
+    built = [] if built is None else built
 
-    def loop_factory(*, checkpoint, publisher, lane):
-        return AgentLoop(
+    def loop_factory(*, checkpoint, publisher, lane, toolsets):
+        loop = AgentLoop(
             client=client,
             config=config(),
             budget=ContextBudget(max_tokens=30_000),
             lane=lane,
             checkpoint=checkpoint,
             publisher=publisher,
+            # Passed through rather than defaulted, so a test asserting on the
+            # surface is asserting on the wiring and not on this double.
+            toolsets=toolsets,
             **loop_kwargs,
         )
+        built.append(loop)
+        return loop
 
     return TurnService(
         store=store(),
@@ -204,7 +210,7 @@ async def test_the_question_picks_the_lane_once_and_the_loop_is_built_from_it(ow
     thread_id = await thread_for(owner)
     built: list[LaneProfile] = []
 
-    def loop_factory(*, checkpoint, publisher, lane):
+    def loop_factory(*, checkpoint, publisher, lane, toolsets):
         built.append(lane)
         return AgentLoop(
             client=FakeClient([answer("Xong.")]),
@@ -233,6 +239,85 @@ async def test_the_question_picks_the_lane_once_and_the_loop_is_built_from_it(ow
     assert built == [DEEP]
     assert running.lane is DEEP
     assert running.lane_reason == "keyword:memo"
+
+
+@pytest.mark.asyncio
+async def test_the_signal_desk_mode_skips_the_router_and_widens_the_surface(owner):
+    """The mode decides both ceilings and surface, and it does not ask the words.
+
+    A reader who threw the switch has asked for the deep lane. Leaving that to
+    the keyword router would give a short Signal Desk question the light lane —
+    four rounds and no market read — which is the opposite of what the switch
+    means.
+    """
+    thread_id = await thread_for(owner)
+    routed: list[tuple[LaneProfile, tuple[str, ...]]] = []
+
+    def loop_factory(*, checkpoint, publisher, lane, toolsets):
+        routed.append((lane, tuple(toolsets)))
+        return AgentLoop(
+            client=FakeClient([answer("Xong.")]),
+            config=config(),
+            lane=lane,
+            checkpoint=checkpoint,
+            publisher=publisher,
+            toolsets=toolsets,
+        )
+
+    turns = TurnService(store=store(), loop_factory=loop_factory, config=config())
+    turn_id = uuid.uuid4()
+
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        # Short and keyword-free: the router would send this to the light lane.
+        user_text="FPT?",
+        runtime=runtime(owner),
+        mode=SIGNAL_DESK_MODE,
+    )
+    running = turns.running(turn_id)
+    await running.task
+
+    assert routed == [(DEEP, toolsets.SIGNAL_DESK_TOOLSETS)]
+    assert running.lane is DEEP
+    assert running.mode == SIGNAL_DESK_MODE
+    # The reason is the mode itself, not a keyword the router invented.
+    assert running.lane_reason == "mode:signal_desk"
+    assert "get_market_data" in toolsets.resolve_toolset(routed[0][1])
+
+
+@pytest.mark.asyncio
+async def test_a_chat_turn_cannot_reach_the_market_read(owner):
+    """The other half, and the one that matters for a capability this narrow."""
+    thread_id = await thread_for(owner)
+    routed: list[tuple[str, ...]] = []
+
+    def loop_factory(*, checkpoint, publisher, lane, toolsets):
+        routed.append(tuple(toolsets))
+        return AgentLoop(
+            client=FakeClient([answer("Xong.")]),
+            config=config(),
+            lane=lane,
+            checkpoint=checkpoint,
+            publisher=publisher,
+            toolsets=toolsets,
+        )
+
+    turns = TurnService(store=store(), loop_factory=loop_factory, config=config())
+    turn_id = uuid.uuid4()
+
+    await turns.create(
+        user_id=owner,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        user_text="Viết memo về FPT giúp tôi.",
+        runtime=runtime(owner),
+    )
+    await turns.running(turn_id).task
+
+    assert routed == [toolsets.CHAT_TOOLSETS]
+    assert "get_market_data" not in toolsets.resolve_toolset(routed[0])
 
 
 @pytest.mark.asyncio

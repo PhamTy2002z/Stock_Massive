@@ -80,11 +80,10 @@ describe("the Turn id", () => {
     expect(keys).toEqual([turnId, turnId])
   })
 
-  it("sends no mode, because the schema forbids a field it does not declare", async () => {
-    // `CreateTurnRequest` is `extra="forbid"` and declares no mode, so a body
-    // carrying one fails the whole Turn with a 422 — and because the mode was
-    // sent whether the desk was on or off, that was every Turn. The desk is a
-    // state of the surface until the request learns to carry it.
+  it("sends the desk the reader is at, as the mode the schema declares", async () => {
+    // The switch is a boolean here because that is what a two-position control
+    // is; it is a named mode on the wire so the server can add a third desk
+    // without every old client meaning something new by `false`.
     fetchMock.mockResolvedValue(json({ id: "t-1", created: true }))
 
     await createTurn({
@@ -94,7 +93,29 @@ describe("the Turn id", () => {
       signalDesk: true,
     })
 
-    expect(sentBody()).not.toHaveProperty("mode")
+    expect(sentBody().mode).toBe("signal_desk")
+  })
+
+  it("sends chat when the switch is off, and when nobody set it", async () => {
+    // Stated rather than omitted. `CreateTurnRequest` is `extra="forbid"` and
+    // now declares `mode` with a `chat` default, so both of these are the Turn
+    // this client has always created — but a body that said nothing would make
+    // "the reader turned the desk off" and "this client is older than the desk"
+    // the same request, and only one of those is a choice.
+    fetchMock.mockImplementation(async () => json({ id: "t-1", created: true }))
+
+    await createTurn({
+      threadId: "thread-1",
+      turnId: newTurnId(),
+      text: "VCB?",
+      signalDesk: false,
+    })
+    await createTurn({ threadId: "thread-1", turnId: newTurnId(), text: "VCB?" })
+
+    const modes = fetchMock.mock.calls.map(
+      (call) => JSON.parse(call[1].body as string).mode,
+    )
+    expect(modes).toEqual(["chat", "chat"])
   })
 
   it("sends no analysis lens, because nothing behind the request reads one", async () => {

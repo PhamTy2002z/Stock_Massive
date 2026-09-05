@@ -173,14 +173,19 @@ describe("what Flint refuses, and what it lets through", () => {
     // catches every case above: every required channel is encoded, and every
     // encoded field is present and finite on every row. Written here so the
     // rule is proven against the real library rather than asserted in a plan.
-    const encodedFieldsArePresent = (input: typeof CANDLESTICK_INPUT) => {
-      const encodings = input.chart_spec.encodings as Record<string, string>
+    type Assembly = {
+      data: { values: readonly Record<string, unknown>[] }
+      chart_spec: { encodings: Record<string, string> }
+    }
+
+    const encodedFieldsArePresent = (input: Assembly) => {
+      const encodings = input.chart_spec.encodings
       const missingChannel = CANDLESTICK_REQUIRED_CHANNELS.some(
         (channel) => !encodings[channel],
       )
       if (missingChannel) return false
       return input.data.values.every((row) =>
-        Object.values(encodings).every((field) => field in (row as Record<string, unknown>)),
+        Object.values(encodings).every((field) => field in row),
       )
     }
 
