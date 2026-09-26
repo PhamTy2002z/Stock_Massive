@@ -21,6 +21,7 @@ to the logic that produces the number gets tuned by whoever is failing it.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -49,8 +50,18 @@ DIMENSIONS = (
     "temporal_validity",
     "refusal_policy",
     "budget",
+    "visual_grounding",
+    "visual_replay",
+    "mode_isolation",
     "multi_source_label",
 )
+
+#: The tool a chart's numbers can only have come from.
+MARKET_TOOL = "get_market_data"
+
+#: The desk a chart is permitted on. Chat is the other one, and on it a chart is
+#: not a lesser outcome — it is a boundary that was crossed.
+SIGNAL_DESK = "signal_desk"
 
 
 @dataclass(frozen=True)
@@ -362,6 +373,19 @@ def grade_refusal_policy(
     )
 
 
+def _visual(case: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    visual = case.get("visual")
+    return visual if isinstance(visual, Mapping) else None
+
+
+def _market_calls(case: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
+    return tuple(
+        call
+        for call in _calls(case)
+        if call.get("name") == MARKET_TOOL and call.get("status") == "ok"
+    )
+
+
 def _ceilings_for(
     case: Mapping[str, Any], limits: Mapping[str, Any]
 ) -> tuple[str, Any, Any]:
@@ -382,7 +406,18 @@ def _ceilings_for(
     if isinstance(lanes, Mapping):
         from src.agent.lanes import route_intent
 
-        name = route_intent(str(case.get("question") or "")).name
+        # Signal Desk is not a guess about the question: the reader threw a
+        # switch, the service gives that Turn the deep lane by mode, and a
+        # grader that re-routed by keyword would hold a deep Turn to the light
+        # lane's cap and read it doing its job as a breach. The lane the Turn
+        # actually reported is preferred over both.
+        recorded = str(case.get("lane") or "")
+        if recorded and recorded in lanes:
+            name = recorded
+        elif str(case.get("turn_mode") or "") == SIGNAL_DESK:
+            name = "deep"
+        else:
+            name = route_intent(str(case.get("question") or "")).name
         profile = lanes.get(name)
         if isinstance(profile, Mapping):
             return (
@@ -490,8 +525,309 @@ def grade_multi_source_label(
     )
 
 
+def grade_visual_grounding(
+    case: Mapping[str, Any], corpus: Mapping[str, Any], run: Mapping[str, Any]
+) -> Finding:
+    """Whether every number in the chart is a field of a call this Turn made.
+
+    The strongest claim the visual makes is that nobody wrote its figures, and
+    this is where that claim is checked rather than asserted: every value in
+    every assembly has to appear in the rows of a successful ``get_market_data``
+    call recorded in the same trial, and every call and evidence id the part
+    names has to resolve to something in the same artifact.
+
+    Undecided — ``None``, not a pass — when there is no chart. Most cases have
+    none, and scoring them as passes would let a corpus with no charts at all
+    report a hundred per cent on the dimension that exists to police charts.
+    """
+    visual = _visual(case)
+    expect = _expect(case)
+    if visual is None:
+        # A case that declares the answer owes a chart is decided here even
+        # though there is nothing to check the values of: no chart on a case
+        # written to produce one means the capability did not run, and scoring
+        # that as undecided would hide the loudest failure this dimension has.
+        if expect.get("must_draw_chart"):
+            return _finding(
+                case, "visual_grounding", value=0, passed=False,
+                detail="the case declares a chart is owed and the Turn produced none",
+            )
+        return _finding(
+            case, "visual_grounding", value=None, passed=None,
+            detail="no chart on this Turn",
+        )
+    if expect.get("must_not_draw_chart"):
+        return _finding(
+            case, "visual_grounding", value=0, passed=False,
+            detail="a chart on a case whose evidence cannot support one",
+        )
+
+    market = {str(call.get("id")): call for call in _market_calls(case)}
+    named = [str(item) for item in (visual.get("sourceCallIds") or ())]
+    missing = [call_id for call_id in named if call_id not in market]
+    if missing or not named:
+        return _finding(
+            case, "visual_grounding", value=0, passed=False,
+            detail=(
+                "the chart names no call at all"
+                if not named
+                else "the chart names calls this trial has no result for: "
+                + ", ".join(missing[:5])
+            ),
+        )
+
+    ledger = case.get("claim_ledger") or {}
+    known_evidence = {
+        str(item.get("evidenceId"))
+        for item in (ledger.get("evidence") or ())
+        if isinstance(item, Mapping)
+    }
+    unknown = [
+        str(item)
+        for item in (visual.get("evidenceIds") or ())
+        if str(item) not in known_evidence
+    ]
+    if unknown or not visual.get("evidenceIds"):
+        return _finding(
+            case, "visual_grounding", value=0, passed=False,
+            detail=(
+                "the chart rests on no evidence row"
+                if not visual.get("evidenceIds")
+                else "evidence the ledger does not hold: " + ", ".join(unknown[:5])
+            ),
+        )
+
+    rows = _recorded_rows(market.values())
+    ungrounded = [
+        f"{field}={value}"
+        for field, value in _drawn_values(visual)
+        if value not in rows.get(field, frozenset())
+    ]
+    return _finding(
+        case,
+        "visual_grounding",
+        value=len(ungrounded),
+        passed=not ungrounded,
+        detail=(
+            f"{sum(1 for _ in _drawn_values(visual))} drawn value(s), "
+            f"all of them read from {len(named)} call(s)"
+            if not ungrounded
+            else "drawn but never read: " + ", ".join(ungrounded[:5])
+        ),
+    )
+
+
+def _recorded_rows(calls: Any) -> dict[str, frozenset[Any]]:
+    """Every value each market call returned, under the column the chart draws it as.
+
+    The column names come from the assembler rather than from a list here, and
+    the x axis is widened to every form its label may take: the category label
+    is the bar close written short, so a drawn label is grounded when some row
+    the call returned closes at that moment.
+    """
+    from datetime import datetime
+
+    from src.agent.visual import COLUMNS, LABEL_FORMATS
+
+    patterns = {pattern for formats in LABEL_FORMATS.values() for pattern in formats}
+    seen: dict[str, set[Any]] = {}
+    for call in calls:
+        try:
+            payload = json.loads(str(call.get("result_text") or ""))
+        except (TypeError, ValueError):
+            continue
+        for row in (payload.get("rows") or ()) if isinstance(payload, Mapping) else ():
+            if not isinstance(row, Mapping):
+                continue
+            for field, value in row.items():
+                seen.setdefault(COLUMNS.get(field, field), set()).add(value)
+            try:
+                closed_at = datetime.fromisoformat(str(row.get("bar_closed_at") or ""))
+            except (TypeError, ValueError):
+                continue
+            for pattern in patterns:
+                seen.setdefault(COLUMNS["bar_closed_at"], set()).add(
+                    closed_at.strftime(pattern)
+                )
+        if isinstance(payload, Mapping):
+            seen.setdefault(COLUMNS["symbol"], set()).add(payload.get("symbol"))
+    return {field: frozenset(values) for field, values in seen.items()}
+
+
+def _drawn_values(visual: Mapping[str, Any]):
+    """Every value the chart actually draws, with the field it is drawn as."""
+    for assembly in visual.get("assemblies") or ():
+        if not isinstance(assembly, Mapping):
+            continue
+        data = assembly.get("data")
+        rows = (data or {}).get("values") if isinstance(data, Mapping) else ()
+        for row in rows or ():
+            if not isinstance(row, Mapping):
+                continue
+            for field, value in row.items():
+                yield field, value
+
+
+def grade_visual_replay(
+    case: Mapping[str, Any], corpus: Mapping[str, Any], run: Mapping[str, Any]
+) -> Finding:
+    """Whether the stored chart is exactly what the assembler builds again.
+
+    This is the replay property stated as something a command can decide. A
+    reopened Thread re-renders from the persisted payload and makes no model or
+    tool call, so "the same chart comes back" is true if and only if the payload
+    is a deterministic function of evidence the artifact already holds — which
+    is what re-running the host assembler over the recorded calls checks.
+
+    It also catches the failure the grounding dimension cannot: a chart that is
+    perfectly grounded in real figures and yet is not the chart those figures
+    produce, because something between the assembler and the store edited it.
+    """
+    visual = _visual(case)
+    if visual is None:
+        return _finding(
+            case, "visual_replay", value=None, passed=None,
+            detail="no chart on this Turn",
+        )
+    rebuilt = _rebuild(case)
+    if rebuilt is None:
+        return _finding(
+            case, "visual_replay", value=0, passed=False,
+            detail="the assembler builds no chart from this trial's own calls",
+        )
+    same = json.dumps(rebuilt, sort_keys=True, ensure_ascii=False) == json.dumps(
+        dict(visual), sort_keys=True, ensure_ascii=False
+    )
+    return _finding(
+        case,
+        "visual_replay",
+        value=1 if same else 0,
+        passed=same,
+        detail=(
+            "the stored chart is the one the assembler rebuilds"
+            if same
+            else "the stored chart differs from what the same calls assemble"
+        ),
+    )
+
+
+def _rebuild(case: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The chart this trial's own calls and ledger produce, or nothing."""
+    from datetime import datetime
+
+    from src.agent.messages import ToolCallStatus, TurnToolCall
+    from src.agent.visual import build_visual
+
+    ledger_payload = case.get("claim_ledger")
+    if not isinstance(ledger_payload, Mapping):
+        return None
+    try:
+        ledger = _ledger_from(ledger_payload)
+    except (KeyError, TypeError, ValueError):
+        return None
+    calls = tuple(
+        TurnToolCall(
+            id=str(call.get("id") or ""),
+            name=str(call.get("name") or ""),
+            status=ToolCallStatus.OK,
+            result_text=str(call.get("result_text") or ""),
+        )
+        for call in _market_calls(case)
+    )
+    as_of = ledger.as_of
+    assert isinstance(as_of, datetime)
+    return build_visual(calls=calls, ledger=ledger, as_of=as_of)
+
+
+def _ledger_from(payload: Mapping[str, Any]) -> Any:
+    """The persisted ledger back as the dataclass the assembler's gate reads."""
+    from datetime import datetime
+
+    from src.agent.evidence.contracts import (
+        ClaimKind,
+        ClaimLedger,
+        VerificationVerdict,
+        VerifiedClaim,
+        VerifierOutcome,
+        build_evidence_ref,
+        EvidenceKind,
+        SourceClass,
+    )
+
+    evidence = tuple(
+        build_evidence_ref(
+            kind=EvidenceKind(str(item["kind"])),
+            source_class=SourceClass(str(item["sourceClass"])),
+            title=str(item["title"]),
+            source=str(item["source"]),
+            excerpt=str(item["excerpt"]),
+            content_sha256=str(item["contentSha256"]),
+        )
+        for item in (payload.get("evidence") or ())
+        if isinstance(item, Mapping)
+    )
+    claims = tuple(
+        VerifiedClaim(
+            claim_id=str(item["claimId"]),
+            text=str(item["text"]),
+            kind=ClaimKind(str(item["kind"])),
+            material=bool(item["material"]),
+            verdict=VerificationVerdict(str(item["verdict"])),
+            supporting_evidence_ids=tuple(item.get("supportingEvidenceIds") or ()),
+            contradicting_evidence_ids=tuple(item.get("contradictingEvidenceIds") or ()),
+        )
+        for item in (payload.get("claims") or ())
+        if isinstance(item, Mapping)
+    )
+    return ClaimLedger(
+        version=str(payload["version"]),
+        policy_version=str(payload["policyVersion"]),
+        as_of=datetime.fromisoformat(str(payload["asOf"])),
+        evidence=evidence,
+        claims=claims,
+        gaps=tuple(str(item) for item in (payload.get("gaps") or ())),
+        assumptions=tuple(str(item) for item in (payload.get("assumptions") or ())),
+        verifier_outcome=VerifierOutcome(str(payload["verifierOutcome"])),
+    )
+
+
+def grade_mode_isolation(
+    case: Mapping[str, Any], corpus: Mapping[str, Any], run: Mapping[str, Any]
+) -> Finding:
+    """Whether the desk the reader asked from is the desk they got.
+
+    Two directions, and the one that matters is Chat. A chat Turn must reach no
+    market tool and produce no chart: the toolset is chosen by mode, so either
+    of those appearing means the boundary moved rather than that the answer was
+    generous. The other direction is not symmetric — a Signal Desk Turn with no
+    chart is an ordinary outcome, and the ledger says why.
+    """
+    mode = str(case.get("turn_mode") or "chat")
+    if mode == SIGNAL_DESK:
+        return _finding(
+            case, "mode_isolation", value=1, passed=True,
+            detail="signal desk: the market surface and a chart are permitted",
+        )
+    breaches: list[str] = []
+    market = [call for call in _calls(case) if call.get("name") == MARKET_TOOL]
+    if market:
+        breaches.append(f"{len(market)} market call(s) on a chat Turn")
+    if _visual(case) is not None:
+        breaches.append("a chart on a chat Turn")
+    return _finding(
+        case,
+        "mode_isolation",
+        value=len(breaches),
+        passed=not breaches,
+        detail="chat: no market call and no chart" if not breaches else "; ".join(breaches),
+    )
+
+
 GRADERS: dict[str, Any] = {
     "settlement": grade_settlement,
+    "visual_grounding": grade_visual_grounding,
+    "visual_replay": grade_visual_replay,
+    "mode_isolation": grade_mode_isolation,
     "citation_url": grade_citation_url,
     "evidence_identity": grade_evidence_identity,
     "material_claim": grade_material_claim,
@@ -522,8 +858,11 @@ __all__ = [
     "grade_citation_url",
     "grade_evidence_identity",
     "grade_material_claim",
+    "grade_mode_isolation",
     "grade_multi_source_label",
     "grade_refusal_policy",
     "grade_settlement",
     "grade_temporal_validity",
+    "grade_visual_grounding",
+    "grade_visual_replay",
 ]

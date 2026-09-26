@@ -359,10 +359,13 @@ def test_budget_holds_a_deep_turn_to_the_deep_ceiling_not_the_light_one():
             for lane in (LIGHT, DEEP)
         },
     }
+    # The two lanes share ceilings in this build, so the light one is narrowed
+    # here: the grader's subject is which lane's cap it reads, not the values.
+    limits["lanes"]["light"]["max_external_calls"] = DEEP.max_external_calls - 5
     calls = [
         {"kind": "external", "round": index % DEEP.max_tool_rounds, "status": "ok",
          "result_chars": 100}
-        for index in range(LIGHT.max_external_calls + 2)
+        for index in range(DEEP.max_external_calls - 3)
     ]
     deep_case = {
         "id": "deep", "trial": 1,
@@ -393,3 +396,247 @@ def test_budget_falls_back_to_the_flat_pair_for_an_artifact_without_lanes():
     }
 
     assert grade_budget(case, {}, {"runtime_constants": limits}).passed
+
+
+# -- the three the visual mode adds ----------------------------------------
+
+import json as _json  # noqa: E402 - the visual fixtures are JSON the runtime wrote
+
+from golden.graders import (  # noqa: E402
+    grade_mode_isolation,
+    grade_visual_grounding,
+    grade_visual_replay,
+)
+from src.agent.evidence.pipeline import evidence_from_calls  # noqa: E402
+from src.agent.messages import ToolCallStatus, TurnToolCall  # noqa: E402
+from src.agent.visual import build_visual  # noqa: E402
+
+MARKET_RESULT = {
+    "symbol": "FPT",
+    "interval": "1D",
+    "provider": "vnstock",
+    "provider_version": "3.2.0",
+    "source": "kbs",
+    "publisher": "KB Securities",
+    "source_class": "store",
+    "currency": "VND",
+    "price_unit": "VND",
+    "price_scale_applied": 1000,
+    "timezone": "Asia/Ho_Chi_Minh",
+    "requested": {"start": "2026-08-24", "end": "2026-08-25"},
+    "actual": {"start": "2026-08-24T15:00:00+07:00", "end": "2026-08-25T15:00:00+07:00"},
+    "row_count": 2,
+    "rows_dropped_after_horizon": 0,
+    "truncated": False,
+    "quality": "ok",
+    "retrieved_at": "2026-09-04T17:00:00+07:00",
+    "content_sha256": "d" * 64,
+    "rows": [
+        {
+            "bar_opened_at": "2026-08-24T07:00:00+07:00",
+            "bar_closed_at": "2026-08-24T15:00:00+07:00",
+            "open": 72_500, "high": 72_700, "low": 71_400, "close": 71_400,
+            "volume": 4_611_900,
+        },
+        {
+            "bar_opened_at": "2026-08-25T07:00:00+07:00",
+            "bar_closed_at": "2026-08-25T15:00:00+07:00",
+            "open": 71_400, "high": 72_000, "low": 71_000, "close": 71_900,
+            "volume": 3_100_200,
+        },
+    ],
+    "excerpt": (
+        "FPT · nến 1D · nguồn KB Securities qua vnstock\n"
+        "2026-08-24T15:00:00+07:00: đóng 71.400 đồng · khối lượng 4.611.900 cổ phiếu"
+    ),
+}
+
+
+def _market_call() -> TurnToolCall:
+    return TurnToolCall(
+        id="call-m1",
+        name="get_market_data",
+        status=ToolCallStatus.OK,
+        result_text=_json.dumps(MARKET_RESULT, ensure_ascii=False),
+    )
+
+
+def _ledger_payload():
+    """A validated ledger over that one market read, as the store holds it."""
+    from datetime import datetime, timezone
+
+    from src.agent.evidence.contracts import (
+        ClaimKind, ClaimLedger, VerificationVerdict, VerifiedClaim, VerifierOutcome,
+    )
+    from src.agent.evidence.pipeline import LEDGER_VERSION
+    from src.agent.evidence.source_policy import POLICY_VERSION
+
+    evidence = evidence_from_calls([_market_call()])
+    ledger = ClaimLedger(
+        version=LEDGER_VERSION,
+        policy_version=POLICY_VERSION,
+        as_of=datetime(2026, 9, 4, 17, 0, tzinfo=timezone.utc),
+        evidence=evidence,
+        claims=(
+            VerifiedClaim(
+                claim_id="c1",
+                text="FPT đóng cửa ở 71.400 đồng.",
+                kind=ClaimKind.FACT,
+                material=True,
+                verdict=VerificationVerdict.SINGLE_SOURCE,
+                supporting_evidence_ids=(evidence[0].evidence_id,),
+            ),
+        ),
+        gaps=(),
+        assumptions=("Không phải khuyến nghị cá nhân hóa.",),
+        verifier_outcome=VerifierOutcome.VERIFIED,
+    )
+    return ledger, ledger.to_payload()
+
+
+def desk_case(**overrides):
+    """One settled Signal Desk Turn, exactly as the runner records it."""
+    ledger, payload = _ledger_payload()
+    call = _market_call()
+    visual = build_visual(calls=[call], ledger=ledger, as_of=ledger.as_of)
+    assert visual is not None
+    body = case(
+        turn_mode="signal_desk",
+        lane="deep",
+        claim_ledger=payload,
+        visual=visual,
+        tool_calls=[
+            {
+                "id": call.id,
+                "name": call.name,
+                "round": 1,
+                "kind": "store",
+                "status": "ok",
+                "arguments": {"symbol": "FPT"},
+                "result_text": call.result_text,
+            }
+        ],
+    )
+    body.update(overrides)
+    return body
+
+
+def test_a_chart_whose_every_value_was_read_is_grounded():
+    finding = grade_visual_grounding(desk_case(), CORPUS, RUN)
+
+    assert finding.passed is True
+
+
+def test_a_single_edited_price_fails_grounding():
+    """The assertion the whole dimension exists for, stated as a mutation."""
+    body = desk_case()
+    body["visual"]["assemblies"][0]["data"]["values"][0]["close"] = 99_999
+
+    finding = grade_visual_grounding(body, CORPUS, RUN)
+
+    assert finding.passed is False
+    assert "99999" in finding.detail.replace(",", "")
+
+
+def test_an_evidence_id_the_ledger_does_not_hold_fails_grounding():
+    body = desk_case()
+    body["visual"]["evidenceIds"] = ["ev_invented"]
+
+    finding = grade_visual_grounding(body, CORPUS, RUN)
+
+    assert finding.passed is False
+    assert "ev_invented" in finding.detail
+
+
+def test_a_chart_naming_a_call_this_trial_never_made_fails_grounding():
+    body = desk_case()
+    body["visual"]["sourceCallIds"] = ["call-elsewhere"]
+
+    finding = grade_visual_grounding(body, CORPUS, RUN)
+
+    assert finding.passed is False
+
+
+def test_a_case_that_owes_a_chart_and_has_none_fails_rather_than_abstains():
+    body = desk_case(visual=None, expect={"must_draw_chart": True})
+
+    assert grade_visual_grounding(body, CORPUS, RUN).passed is False
+
+
+def test_a_case_that_must_not_draw_one_fails_when_it_does():
+    body = desk_case(expect={"must_not_draw_chart": True})
+
+    assert grade_visual_grounding(body, CORPUS, RUN).passed is False
+
+
+def test_a_turn_with_no_chart_is_undecided_rather_than_a_free_pass():
+    assert grade_visual_grounding(case(), CORPUS, RUN).passed is None
+
+
+def test_the_stored_chart_replays_from_the_same_calls():
+    finding = grade_visual_replay(desk_case(), CORPUS, RUN)
+
+    assert finding.passed is True
+
+
+def test_a_chart_edited_after_assembly_fails_replay():
+    """The failure grounding cannot see: real figures, wrong chart."""
+    body = desk_case()
+    # Both rows are genuinely read values, so grounding still passes; what has
+    # changed is that these are not the rows the assembler produces.
+    body["visual"]["assemblies"][0]["data"]["values"].reverse()
+
+    assert grade_visual_grounding(body, CORPUS, RUN).passed is True
+    assert grade_visual_replay(body, CORPUS, RUN).passed is False
+
+
+def test_replay_is_undecided_when_there_is_no_chart():
+    assert grade_visual_replay(case(), CORPUS, RUN).passed is None
+
+
+def test_a_chat_turn_with_no_market_call_and_no_chart_is_isolated():
+    assert grade_mode_isolation(case(turn_mode="chat"), CORPUS, RUN).passed is True
+
+
+def test_a_market_call_on_a_chat_turn_is_the_boundary_moving():
+    body = case(
+        turn_mode="chat",
+        tool_calls=[{"id": "call-m1", "name": "get_market_data", "round": 1, "kind": "store"}],
+    )
+
+    finding = grade_mode_isolation(body, CORPUS, RUN)
+
+    assert finding.passed is False
+    assert "market call" in finding.detail
+
+
+def test_a_chart_on_a_chat_turn_is_the_boundary_moving():
+    body = desk_case(turn_mode="chat", tool_calls=[])
+
+    assert grade_mode_isolation(body, CORPUS, RUN).passed is False
+
+
+def test_a_signal_desk_turn_is_permitted_both():
+    assert grade_mode_isolation(desk_case(), CORPUS, RUN).passed is True
+
+
+def test_a_signal_desk_turn_is_measured_against_the_deep_lane():
+    """A ceiling read off the wording would fail a deep Turn for doing its job."""
+    limits = {
+        "runtime_constants": {
+            "lanes": {
+                "light": {"max_tool_rounds": 3, "max_external_calls": 7},
+                "deep": {"max_tool_rounds": 10, "max_external_calls": 20},
+            }
+        }
+    }
+    body = desk_case(
+        lane="deep",
+        tool_calls=[
+            {"id": f"c{i}", "name": "web_search", "round": i, "kind": "external",
+             "status": "ok", "result_chars": 10}
+            for i in range(1, 9)
+        ],
+    )
+
+    assert grade_budget(body, CORPUS, limits).passed is True

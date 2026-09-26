@@ -35,10 +35,20 @@ KNOWN_EXPECT_KEYS = {
     "must_ask",
     "must_not_ask",
     "ask_budget",
+    "must_draw_chart",
+    "must_not_draw_chart",
 }
 
 #: The four jobs of roadmap §1 plus the five answer shapes §10 Phase 1 adds.
 REQUIRED_FAMILIES = {
+    # The six the Signal Desk visual mode adds, and the control that measures
+    # the boundary rather than the answer.
+    "price_volume_history",
+    "event_explanation",
+    "multi_symbol_comparison",
+    "provider_conflict",
+    "no_visual",
+    "chat_control",
     "thesis_check",
     "event_memo",
     "fact_verification",
@@ -106,6 +116,13 @@ def test_the_hard_dimensions_are_the_ones_the_roadmap_names(corpus):
         "temporal_validity",
         "refusal_policy",
         "budget",
+        # The Signal Desk visual mode adds three, and all three are hard for the
+        # same reason the first seven are: a chart nobody can trace to a call, a
+        # chart a reopened Thread cannot reproduce, and a chart on a desk the
+        # reader never switched on are each a wrong answer rather than a worse one.
+        "visual_grounding",
+        "visual_replay",
+        "mode_isolation",
     }
 
 
@@ -182,3 +199,52 @@ def test_every_curated_date_is_a_date_and_says_how_it_was_read(corpus):
         }
         assert provenance[url]["confidence"] in {"high", "medium", "low"}
     assert set(provenance) == set(curated)
+
+
+def test_every_case_says_which_desk_it_runs_on(corpus):
+    """The mode is not inferable from the wording, and one case proves it.
+
+    ``rl-cc-001`` asks a Signal Desk question from Chat on purpose: a build that
+    resolved the market surface from the words rather than from the mode would
+    pass every other case and fail that one.
+    """
+    for case in corpus["cases"]:
+        assert case["mode"] in {"chat", "signal_desk"}
+    desk = [case for case in corpus["cases"] if case["mode"] == "signal_desk"]
+    control = [case for case in corpus["cases"] if case["family"] == "chat_control"]
+    assert len(desk) >= 10, "too few desk cases for the visual dimensions to decide anything"
+    assert control, "no chat control, so mode_isolation can only ever pass"
+    assert all(case["mode"] == "chat" for case in control)
+
+
+def test_every_case_declares_the_right_under_which_it_reads(corpus):
+    """A case that needs the community feed and does not say so could be run
+    somewhere that feed's licence does not reach."""
+    allowed = set(corpus["markers"]["source_rights"]["values"])
+    for case in corpus["cases"]:
+        rights = case["source_rights"]
+        assert rights, f"{case['id']} declares no source right"
+        assert set(rights) <= allowed, f"{case['id']} claims a right nobody defines"
+
+
+def test_only_desk_cases_may_read_the_internal_market_feed(corpus):
+    """The market read is reachable from one mode, so a chat case marked for it
+    is a corpus that disagrees with the runtime about the capability plane."""
+    for case in corpus["cases"]:
+        if "market_internal" in case["source_rights"]:
+            assert case["mode"] == "signal_desk", case["id"]
+
+
+def test_the_chart_expectations_are_declared_only_where_a_chart_is_possible(corpus):
+    for case in corpus["cases"]:
+        expect = case.get("expect", {})
+        if expect.get("must_draw_chart") or expect.get("must_not_draw_chart"):
+            assert case["mode"] == "signal_desk", case["id"]
+        # A case cannot demand a chart and forbid one.
+        assert not (expect.get("must_draw_chart") and expect.get("must_not_draw_chart"))
+
+
+def test_a_case_that_must_draw_a_chart_can_actually_get_the_data(corpus):
+    for case in corpus["cases"]:
+        if case.get("expect", {}).get("must_draw_chart"):
+            assert "market_internal" in case["source_rights"], case["id"]

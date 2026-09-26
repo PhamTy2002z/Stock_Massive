@@ -378,6 +378,32 @@ def check_mode(mode: str) -> str:
 # -- reading one finished Turn back out of the store -----------------------
 
 
+def _lane_of(progress: Sequence[Mapping[str, Any]]) -> str | None:
+    """Which lane the loop reported choosing, or nothing on an older artifact."""
+    for part in progress:
+        if part.get("kind") == "lane_selected":
+            return str((part.get("payload") or {}).get("lane") or "") or None
+    return None
+
+
+def _stages_of(progress: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The pipeline passes the Turn made, in order, with what each concluded."""
+    stages: list[dict[str, Any]] = []
+    for part in progress:
+        if part.get("kind") != "pipeline_pass":
+            continue
+        payload = part.get("payload") or {}
+        stages.append(
+            {
+                "stage": payload.get("stage"),
+                "outcome": payload.get("outcome"),
+                "evidence": payload.get("evidence"),
+                "claims": payload.get("claims"),
+            }
+        )
+    return stages
+
+
 def _domain(url: str) -> str | None:
     host = urlsplit(url or "").netloc.lower()
     return host or None
@@ -572,6 +598,7 @@ async def read_case(
     wall_ms: int,
     terminal_reason: str | None = None,
     mode: str = WEB_FIRST_MODE,
+    turn_mode: str = "chat",
     trial: int = 1,
     retrieval_times: Mapping[tuple[str, str], float] | None = None,
 ) -> dict[str, Any]:
@@ -591,6 +618,8 @@ async def read_case(
     turn_status = "unknown"
     answer_message_id: int | None = None
     asked_question: Mapping[str, Any] | None = None
+    visual: Mapping[str, Any] | None = None
+    progress: tuple[Mapping[str, Any], ...] = ()
     for message in reversed(view.messages if view else ()):
         if message.role != "assistant":
             continue
@@ -603,6 +632,15 @@ async def read_case(
         answer_message_id = int(message.id)
         raw_question = content.get("question")
         asked_question = dict(raw_question) if isinstance(raw_question, Mapping) else None
+        # The chart, exactly as it was persisted. Read rather than rebuilt: the
+        # whole point of the replay dimension is to compare what was stored with
+        # what the assembler produces from the same calls, and a grader handed a
+        # freshly built payload would be comparing a thing with itself.
+        raw_visual = content.get("visual")
+        visual = dict(raw_visual) if isinstance(raw_visual, Mapping) else None
+        progress = tuple(
+            item for item in (content.get("progress") or ()) if isinstance(item, Mapping)
+        )
         break
 
     # The checked ledger, read from where the runtime wrote it rather than
@@ -717,6 +755,19 @@ async def read_case(
         # lane stays byte-identical to what it was before the deep lane existed.
         "claim_ledger": ledger,
         "asked_question": asked_question,
+        # Which desk the reader asked from. It decides the lane and the tool
+        # surface, so a grader reading a ceiling or asking whether a chart was
+        # even permitted has to know it — and it cannot be inferred from the
+        # question, which is exactly why the mode exists.
+        "turn_mode": turn_mode,
+        # The lane the loop actually ran on and the pipeline passes it made, off
+        # the Turn's own trail. Both are what a bound or a stage is measured
+        # against, and neither can be recomputed from the answer.
+        "lane": _lane_of(progress),
+        "stages": _stages_of(progress),
+        # Present only on a Turn that produced one, so a chat artifact stays
+        # byte-identical to what it was before the desk had a chart.
+        "visual": visual,
         "external_evidence_text": "\n".join(external_chunks),
         "store_evidence_text": "\n".join(store_chunks),
         "cost": spend_for(request_message_id),
@@ -792,12 +843,18 @@ async def run_corpus(
             )
             turn_id = uuid.uuid4()
             began = time.monotonic()
+            # The desk the case is written for. Chat is the default and is what
+            # every case written before the desk existed means; a case that
+            # declares `signal_desk` is asking for the deep lane and the market
+            # surface, which is the difference the visual dimensions measure.
+            turn_mode = str(case.get("mode") or "chat")
             handle = await desk.turns.create(
                 user_id=user_id,
                 thread_id=thread.id,
                 turn_id=turn_id,
                 user_text=str(case.get("question") or ""),
                 runtime=RuntimeContext(today=datetime.now().date(), user_name=GOLDEN_NAME),
+                mode=turn_mode,
             )
             running = desk.turns.running(turn_id)
             if running is not None and running.task is not None:
@@ -817,6 +874,7 @@ async def run_corpus(
                 wall_ms=wall_ms,
                 terminal_reason=terminal_reason,
                 mode=mode,
+                turn_mode=turn_mode,
                 trial=trial,
                 retrieval_times=lane.retrieval_times(),
             )

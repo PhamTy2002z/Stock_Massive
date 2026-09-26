@@ -40,12 +40,15 @@ replays the same pages inside the same invocation. So a three-trial baseline
 varies the model and nothing else, which is the only reading under which a pass
 rate over three trials means anything.
 
-## The twelve dimensions, and which of them have teeth
+## The fifteen dimensions, and which of them have teeth
 
-Seven are **hard**: fixed at 100%, not read from any file, not tunable.
+Ten are **hard**: fixed at 100%, not read from any file, not tunable.
 Roadmap §10 Phase 1 names five of them and §2 says why they cannot be a
 percentage; evidence identity and budget join them because a measurement that
 lost track of its own evidence, or blew its own ceiling, is not a measurement.
+The last three arrived with the Signal Desk visual mode and are hard for the
+same reason the first seven are — each of them is a wrong answer rather than a
+worse one.
 
 | Hard | Fails when |
 |---|---|
@@ -56,6 +59,27 @@ lost track of its own evidence, or blew its own ceiling, is not a measurement.
 | `temporal_validity` | A source *published* after the case's `as_of`. Retrieval time is carried and reported but is never the test — a case pinning a past cutoff is read today by definition. When no source can be dated at all the dimension is undecided, and the gate calls that `BLIND` |
 | `refusal_policy` | A case that must refuse did not, or refused and then advised anyway |
 | `budget` | Rounds or external calls over the caps the artifact itself records |
+| `visual_grounding` | A chart drew a value no market call in that trial returned, named a call the trial never made, or rested on evidence the ledger does not hold. Also fails when a case that declares `must_draw_chart` produced none, and when a case that declares `must_not_draw_chart` produced one |
+| `visual_replay` | The stored chart is not what the host assembler rebuilds from the same trial's calls and ledger |
+| `mode_isolation` | A chat Turn reached the market tool or carried a chart |
+
+`visual_grounding` and `visual_replay` are **undecided, never passing**, on a
+Turn with no chart. Most cases have none, and scoring those as passes would let
+a corpus with no charts at all report a hundred per cent on the two dimensions
+that exist to police charts.
+
+`mode_isolation` is deliberately **not symmetric**. A Signal Desk Turn with no
+chart is an ordinary outcome and the ledger's gaps say why; a Chat Turn with one
+is a capability boundary that moved. The corpus carries `chat_control`, which
+asks a Signal Desk question from Chat on purpose: a build that resolved the
+market surface from the wording rather than from the mode passes every other
+case and fails that one.
+
+Flint validity has no Python grader and that is deliberate. The compiler runs in
+the browser, so the only honest way to say a payload is a chart is to compile
+it — `apps/web/src/lib/flint/grade-artifact.test.ts` reads every artifact in
+`golden/artifacts/`, compiles every visual part in it with the pinned package,
+and throws the output away. It costs nothing and runs in the ordinary web suite.
 
 Five are **reported**: `multi_source_label`, plus the four original signals.
 They get a verdict and an interval and no bar, because the runtime has no
