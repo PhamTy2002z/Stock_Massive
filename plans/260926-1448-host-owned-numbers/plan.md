@@ -1,6 +1,6 @@
 # Host-owned numbers — plan
 
-Status: in progress · Branch: `feat/host-owned-numbers` · Precedes `260906-1557-financial-research-agent`
+Status: delivered (P0–P3), awaiting owner on data source and merge · Branch: `feat/host-owned-numbers` · Precedes `260906-1557-financial-research-agent`
 Source: `plans/reports/brainstorm-260926-1427-end-to-end-gap-and-proposal.md`
 
 **Outcome.** Every financial figure in an answer comes from this Turn's tool
@@ -12,6 +12,7 @@ to prose, on every lane, with `kiro-glm-5` as the test model.
 after one repair · financial statements behind an adapter, vnstock for dev/test
 only, no data purchase · keep `kiro-glm-5` · watchlist/alerts (P4) out of scope ·
 golden harness removed (2026-09-26), acceptance is live Turns + unit tests.
+Owner granted full refactor authority mid-delivery (2026-09-26).
 
 **Defaults chosen here** (owner left blanks): paid runs budget 0 · stale web
 source for financial figures > 120 days, news > 30 days; a price is dated by its
