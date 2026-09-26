@@ -190,6 +190,9 @@ class KbsFinancials:
     source = "kbs"
     not_carried = NOT_IN_KBS
 
+    def __init__(self, *, max_wait: float = vnstock_provider.MAX_WAIT_SECONDS) -> None:
+        self._max_wait = max_wait
+
     def ratios(self, symbol: str, *, quarterly: bool, periods: int) -> Statement:
         import_vnstock()
 
@@ -208,7 +211,7 @@ class KbsFinancials:
                 page_size=KBS_PAGE_SIZE,
             )
 
-        raw = vnstock_provider.call(read, symbol=symbol)
+        raw = vnstock_provider.call(read, symbol=symbol, max_wait=self._max_wait)
         if not isinstance(raw, Mapping):
             raise MarketDataError("no_data", f"the provider returned no statements for {symbol}")
         paired, dropped = pair_periods(raw, quarterly=quarterly)

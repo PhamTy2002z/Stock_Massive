@@ -133,13 +133,17 @@ class FakeVci:
         return financials.Statement(symbol=symbol, publisher="Vietcap", source="vci", periods=(period,))
 
 
+LISTINGS = {"ngân hàng": ["STB", "VCB", "TCB"], "vn30": ["FPT", "TCB", "VCB", "STB"]}
+
+
 def screen(covered: set[str], **arguments: Any) -> tuple[dict[str, Any], FakeVci]:
     fake = FakeVci(covered)
     tools = screener.ScreenerTools(
         settings=settings(),
-        fundamentals=fake,  # type: ignore[arg-type]
+        ratios=fake,
+        quality=fake,
         board=lambda symbols: [{"symbol": s, "time": SESSION_MS, **BOARD[s]} for s in symbols if s in BOARD],
-        listing=lambda name: ["STB", "VCB", "TCB"],
+        listing=lambda name: LISTINGS[name.casefold()],
     )
     return dict(tools.screen_stocks(CONTEXT, arguments)), fake
 
@@ -158,7 +162,7 @@ def test_reported_filters_name_the_tickers_not_yet_covered():
     assert result["symbols"] == ["TCB", "VCB"]
     assert result["not_covered"] == ["STB"]
     assert "Chưa đọc được số liệu báo cáo" in result["excerpt"] and "STB" in result["excerpt"].splitlines()[-1]
-    assert "2026-06-30: TCB · quý 2/2026 · nguồn Vietcap · P/B 1,25 lần" in result["excerpt"]
+    assert "2026-06-30: TCB · quý 2/2026 · P/B 1,25 lần" in result["excerpt"]
 
 
 def test_screener_figures_are_grounded_per_part_and_per_ticker():
@@ -179,3 +183,33 @@ def test_the_screener_refuses_what_it_cannot_run():
         screen(set())
     with pytest.raises(MarketDataError):
         screen(set(), universe="Ngân hàng", filters=[{"field": "dividend", "op": ">", "value": 1}])
+
+
+def test_a_universe_is_narrowed_by_industry():
+    result, _ = screen(set(), universe="VN30", industry="Ngân hàng", sort_by="price")
+
+    assert result["universe"] == "VN30 · Ngân hàng"
+    assert result["symbols"] == ["STB", "VCB", "TCB"]  # FPT is not a bank
+
+
+def test_a_slow_source_is_cut_off_and_its_tickers_named(monkeypatch):
+    import time as _time
+
+    monkeypatch.setattr(screener, "FUNDAMENTALS_BUDGET_SECONDS", 0.05)
+
+    class Slow(FakeVci):
+        def ratios(self, symbol: str, **kwargs: Any) -> financials.Statement:
+            _time.sleep(0.3)
+            return super().ratios(symbol, **kwargs)
+
+    slow = Slow({"STB", "VCB", "TCB"})
+    tools = screener.ScreenerTools(
+        settings=settings(), ratios=slow, quality=slow,
+        board=lambda symbols: [{"symbol": s, "time": SESSION_MS, **BOARD[s]} for s in symbols if s in BOARD],
+        listing=lambda name: LISTINGS[name.casefold()],
+    )
+
+    result = dict(tools.screen_stocks(CONTEXT, {"universe": "Ngân hàng", "filters": [{"field": "pb", "op": "<", "value": 5}]}))
+
+    assert result["symbols"] == []
+    assert sorted(result["not_covered"]) == ["STB", "TCB", "VCB"]
