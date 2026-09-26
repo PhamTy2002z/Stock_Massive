@@ -180,8 +180,12 @@ _URL = re.compile(r"(?i)\b(?:https?://|www\.)\S+")
 _ISO_DATE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 _VN_DATE = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
 
+#: Words that put a figure at "now". "Gần nhất" alone is not one of them:
+#: "đỉnh gần nhất 79.000 đồng (11/09)" is the most recent peak, a dated past
+#: figure, and only "phiên gần nhất" means the latest session.
 _CURRENT = re.compile(
-    r"\b(hien tai|hom nay|hien nay|moi nhat|gan nhat|luc nay|phien nay|dang o muc)\b"
+    r"\b(hien tai|hom nay|hien nay|luc nay|phien nay|dang o muc|"
+    r"phien (?:gan nhat|moi nhat)|gia (?:gan nhat|moi nhat))\b"
 )
 _YESTERDAY = re.compile(r"\bhom qua\b")
 _DOWN_WORDS = re.compile(r"(giam|mat|lo|am|sut|di xuong|thap hon)\s*$")
@@ -620,7 +624,9 @@ def _same(figure: _Figure, value: _Value) -> bool:
             if small and not (value.unit or value.percent):
                 continue
             return True
-        if wanted.significant >= 3 or (wanted.percent and wanted.significant >= 2):
+        if wanted.significant >= 3 or (
+            wanted.significant >= 2 and (wanted.percent or wanted.unit in _SCALE)
+        ):
             if abs(candidate - wanted.base) * 2 <= wanted.quantum:
                 return True
     # The same digits in the source's own unit: a table printed "in tỷ đồng"

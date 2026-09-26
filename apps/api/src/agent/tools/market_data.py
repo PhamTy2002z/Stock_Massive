@@ -48,6 +48,7 @@ import io
 import json
 import logging
 import re
+import threading
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -767,8 +768,21 @@ def _summarise(arguments: Mapping[str, Any]) -> str:
     return f"Đọc dữ liệu giá {symbol} · {interval} · {start or '…'} → {end or 'hôm nay'}"
 
 
+def _warm() -> None:
+    try:
+        _import_vnstock()
+    except Exception as exc:  # noqa: BLE001 - a failed warm-up is retried by the first call
+        logger.warning("Market data provider did not import at start-up: %s", exc)
+
+
 def register_market_data_tools(*, settings: Settings | None = None) -> tuple[ToolEntry, ...]:
     tools = MarketDataTools(settings=settings)
+    if tools.available():
+        # The provider's import phones home before it returns, and measured 26s
+        # on 2026-09-26 while that host was timing out — longer than a tool call
+        # may take, so the first market read after every restart failed. Paid
+        # here, off the request path, while the rest of start-up runs.
+        threading.Thread(target=_warm, name="market-data-warm", daemon=True).start()
     return tuple(register(entry) for entry in tools.entries())
 
 

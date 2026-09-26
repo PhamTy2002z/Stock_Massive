@@ -361,3 +361,22 @@ def test_a_date_after_so_voi_is_a_comparison_not_the_figures_period():
     report = check("Giá: 76.500 đồng (so với phiên 24/09).", [STB_NOW])
 
     assert [f.status for f in report.figures] == [FigureStatus.GROUNDED]
+
+
+def test_a_recent_peak_is_not_a_claim_about_now():
+    peak = market_call(
+        [("2026-09-11", 79_000, 3_000_000), ("2026-09-25", 76_500, 1_606_900)], call_id="peak"
+    )
+
+    report = check("Đỉnh gần nhất: 79.000 đồng (ngày 11/09).", [peak])
+
+    assert [f.status for f in report.figures] == [FigureStatus.GROUNDED]
+
+
+def test_a_volume_rounded_to_millions_is_the_volume():
+    report = check("Khối lượng phiên 25/09 đạt 1,6 triệu cổ phiếu.", [STB_NOW])
+
+    assert [f.status for f in report.figures] == [FigureStatus.GROUNDED]
+    # Two digits still have to round correctly.
+    wrong = check("Khối lượng phiên 25/09 đạt 1,8 triệu cổ phiếu.", [STB_NOW])
+    assert [f.status for f in wrong.figures] == [FigureStatus.UNVERIFIED]
