@@ -26,6 +26,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import io
+import logging
 import math
 import threading
 import time
@@ -34,6 +35,8 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 PROVIDER = "vnstock"
+
+logger = logging.getLogger(__name__)
 
 #: Stable failure vocabulary. The provider's own message is never passed through
 #: as if it were trustworthy prose — it is third-party text, and a model reading
@@ -147,7 +150,14 @@ def call(
         # is one refused call, not a stopped server.
         raise MarketDataError(RATE_LIMITED, "the provider refused: request quota reached") from exc
     except Exception as exc:  # noqa: BLE001 - provider failures are classified
-        raise classify(exc, symbol) from exc
+        refused = classify(exc, symbol)
+        # The provider's own words stay in the log, where an operator looks;
+        # the model is given only the stable code.
+        logger.warning(
+            "vnstock call for %s failed as %s: %s: %s",
+            symbol, refused.code, type(exc).__name__, str(exc)[:300],
+        )
+        raise refused from exc
 
 
 def classify(exc: BaseException, symbol: str) -> MarketDataError:

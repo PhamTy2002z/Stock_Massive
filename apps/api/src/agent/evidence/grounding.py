@@ -704,8 +704,10 @@ def _figures(answer: str) -> list[_Figure]:
             # A year. "năm 2025" names a period; the period rule reads it.
             continue
         financial = value.unit in _FINANCIAL_UNITS
-        if value.significant < 3 and abs(value.base) < 1000 and not financial:
+        whole = value.written == value.written.to_integral_value()
+        if whole and value.significant < 3 and abs(value.base) < 1000 and not financial:
             # "3 tháng", "5 năm", "top 10": counts, not figures a source prints.
+            # A decimal is never a count — "| LPB | 0.86 |" is a P/B.
             continue
         unit_match = _UNIT.match(trailing)
         stop = end + (unit_match.end() if unit_match else 0)

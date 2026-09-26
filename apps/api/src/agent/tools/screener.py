@@ -27,6 +27,7 @@ import importlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from concurrent.futures import TimeoutError as FuturesTimeout
 import operator
+import re
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -50,6 +51,7 @@ from ..registry import (
 )
 from ..symbols import normalize_symbol
 from . import vnstock_provider
+from ..evidence.numbers import fold
 from .financials import KbsFinancials, VciFinancials
 from .market_data import ICT, INTERNAL_PROFILE, is_index
 from .vnstock_provider import MarketDataError, import_vnstock
@@ -194,7 +196,7 @@ class ScreenerTools:
                 toolset=TOOLSET,
                 description=(
                     "Filter and rank listed Vietnamese tickers. Give a universe — an index "
-                    "group (VN30, VN100, HNX30, VNFIN…), an ICB industry name in Vietnamese "
+                    "group (VN30, VN100, HNX30, VNFIN…), an industry name in Vietnamese "
                     "(e.g. Ngân hàng), or an explicit ticker list, optionally narrowed by "
                     "industry (VN30 + Ngân hàng) — then filters and an "
                     "optional sort over: price, change_pct, volume, value_bn, foreign_net "
@@ -395,7 +397,8 @@ class ScreenerTools:
         cached = self._universes.get(name.casefold())
         if cached is None:
             cached = [s for s in self._listing(name) if s and not is_index(s)]
-            self._universes.put(name.casefold(), cached)
+            if cached:  # an empty answer is not remembered: it may be a bad moment
+                self._universes.put(name.casefold(), cached)
         return list(cached)
 
     @staticmethod
@@ -475,26 +478,32 @@ def _read_board(symbols: list[str]) -> list[dict[str, Any]]:
     return vnstock_provider.call(read, symbol=",".join(symbols[:3]))
 
 
+_GROUP_CODE = re.compile(r"^[A-Z][A-Z0-9]{1,11}$")
+
+
 def _read_listing(name: str) -> list[str]:
-    """An index group's members, or an ICB industry's, by Vietcap's listing."""
+    """An index group's members (``VN30``), or an industry's (``Ngân hàng``).
+
+    KB's listing, not Vietcap's: Vietcap serves it from the trading host that
+    timed out repeatedly on 2026-09-26. A name written like a code is a group;
+    anything else is matched against KB's industry names with diacritics folded
+    on both sides — the listing and a typed name do not reliably share one
+    Unicode form.
+    """
     import_vnstock()
+    code = name.upper().replace(" ", "")
 
     def read() -> list[str]:
-        listing = importlib.import_module("vnstock.explorer.vci.listing").Listing()
-        group = name.upper().replace(" ", "")
-        try:
-            members = listing.symbols_by_group(group)
-            found = [str(item).upper() for item in list(members)]
-            if found:
-                return found
-        except Exception:  # noqa: BLE001 - not a group name; try an industry
-            pass
+        listing = importlib.import_module("vnstock.explorer.kbs.listing").Listing()
+        if _GROUP_CODE.match(code):
+            return [str(item).upper() for item in list(listing.symbols_by_group(code))]
         frame = listing.symbols_by_industries()
-        folded = name.casefold()
-        rows = frame[frame["icb_name"].astype(str).str.casefold().str.contains(folded, regex=False)]
-        return [str(item).upper() for item in rows["symbol"].tolist()]
+        wanted = fold(name).strip()
+        names = frame["industry_name"].astype(str).map(fold)
+        found = frame[names.str.contains(wanted, regex=False)]["symbol"].astype(str).str.upper()
+        return list(dict.fromkeys(found.tolist()))
 
-    return vnstock_provider.call(read, symbol=name, weight=2)
+    return vnstock_provider.call(read, symbol=name)
 
 
 def register_screener_tools(*, settings: Settings | None = None) -> tuple[ToolEntry, ...]:

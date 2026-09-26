@@ -394,3 +394,11 @@ def test_a_page_cannot_price_a_session_the_market_feed_prices_differently():
     # A figure no price feed could speak to is still the page's.
     other = check("Ngày 24/9 khối ngoại bán ròng 4.000 tỷ đồng.", [STB_NOW, page_call("Bán ròng 4.000 tỷ đồng.", published="2026-09-25T16:00:00+07:00")])
     assert [f.status for f in other.figures] == [FigureStatus.GROUNDED]
+
+
+def test_a_bare_decimal_in_a_table_is_a_figure_not_a_count():
+    """The live miss: "| LPB | 0.86 |" was skipped as if it were "top 10"."""
+    report = check("| LPB | 0.86 |", [STB_NOW])
+
+    assert [f.status for f in report.figures] == [FigureStatus.UNVERIFIED]
+    assert check("Trong 3 tháng, top 10 mã.", [STB_NOW]).figures == ()
