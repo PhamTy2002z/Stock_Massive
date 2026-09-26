@@ -1784,7 +1784,13 @@ class AgentLoop:
         for: four queries that are one query asked four ways is a planning pass
         that learned nothing. The market read is not a query and has nothing to
         be distinct from.
+
+        One market read on its own is the other accepted batch: a request for a
+        chart has nothing for three searches to plan, and refusing it for not
+        searching made the gate stricter than the job.
         """
+        if market and len(calls) == 1 and calls[0].name == MARKET_TOOL:
+            return True
         if len(calls) != 4:
             return False
         searches = [call for call in calls if call.name == "web_search"]

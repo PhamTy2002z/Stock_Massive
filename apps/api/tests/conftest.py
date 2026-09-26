@@ -6,6 +6,12 @@ import os
 # deliberately set before importing `src.main`; no production code detects
 # pytest, CI, or a test environment on its own.
 os.environ["LLM_CAPABILITY_PROBE_ENABLED"] = "false"
+# The same kind of flag for the request limiter. `.env` can name a shared Redis,
+# and a suite of a few hundred requests from one address spends that window for
+# every other process using it — then fails its own later tests with 429s that
+# say nothing about the code. The limiter's behaviour is tested against explicit
+# Settings in `tests/test_ratelimit.py`.
+os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 import pytest
 from fastapi.testclient import TestClient

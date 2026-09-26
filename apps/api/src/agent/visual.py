@@ -231,7 +231,17 @@ def _market_reads(calls: Sequence[TurnToolCall]) -> list[dict[str, Any]]:
                 "rows": rows,
             }
         )
-    return reads
+    # A follow-up read of the same symbol on the same interval — usually the
+    # model topping up the most recent bars — is the same series again, not a
+    # second one. Two entries for one symbol would fail the comparability rule
+    # and cost the Turn its chart, so the widest read stands for the symbol.
+    widest: dict[tuple[str, str], dict[str, Any]] = {}
+    for read in reads:
+        key = (read["symbol"], read["interval"])
+        kept = widest.get(key)
+        if kept is None or len(read["rows"]) > len(kept["rows"]):
+            widest[key] = read
+    return [read for read in reads if widest[(read["symbol"], read["interval"])] is read]
 
 
 def _payload(result_text: str | None) -> Mapping[str, Any] | None:
