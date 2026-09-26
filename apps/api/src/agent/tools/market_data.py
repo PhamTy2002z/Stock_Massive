@@ -270,7 +270,16 @@ def _render_rows(
     index = is_index(symbol)
     head = (
         f"{symbol} · {INTERVAL_LABELS[interval]} · nguồn {PUBLISHER} · "
-        + (f"đơn vị {INDEX_UNIT}" if index else f"giá đã quy đổi sang {CURRENCY} đầy đủ")
+        + (
+            f"đơn vị {INDEX_UNIT}"
+            if index
+            # Measured 2026-09-26: MBB's quarter-end closes sat a constant 1,24×
+            # below the price its own reported P/B implied, the signature of a
+            # series adjusted for a share dividend. Said here so a historical
+            # close is not quoted as the price that traded that day.
+            else f"giá đã quy đổi sang {CURRENCY} đầy đủ; giá lịch sử có thể đã được "
+            "nguồn điều chỉnh theo cổ tức hoặc chia tách"
+        )
     )
     lines = [head]
     if date_note:

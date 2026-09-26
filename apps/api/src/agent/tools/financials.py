@@ -68,6 +68,7 @@ TOOL_NAME = "get_financial_ratios"
 MAX_PERIODS = 8
 DEFAULT_PERIODS = 4
 MAX_RESULT_CHARS = 24_000
+KBS_PAGE_SIZE = 8
 
 #: Metrics a bank question asks for most, which this source does not publish.
 #: Named so the tool can say so instead of the model filling the gap.
@@ -205,9 +206,12 @@ class KbsFinancials:
                 report_type="CSTC",
                 period_type=2 if quarterly else 1,
                 page=1,
-                # Asked for twice the periods wanted: duplicated headers are
-                # dropped, and the ones left still have to fill the request.
-                page_size=min(periods * 2, 12),
+                # Always eight, whatever was asked. Measured on 2026-09-26: at
+                # four the feed's values slide one period against its headers
+                # (TCB's Q3/2025 figures arrived under Q2/2026), while six and
+                # eight agree with each other and with the market close at each
+                # quarter end. The page is trimmed to ``periods`` afterwards.
+                page_size=KBS_PAGE_SIZE,
             )
         except Exception as exc:  # noqa: BLE001 - provider failures become a stable code
             raise MarketDataError(
