@@ -267,6 +267,9 @@ class _Source:
     #: A calculation's inputs, and whether every one was found in another source.
     inputs: tuple[_Value, ...] = ()
     valid: bool = True
+    #: The tickers a structured source is about. A figure in a sentence that
+    #: names tickers may only rest on structured data about one of them.
+    symbols: frozenset[str] = frozenset()
 
 
 def _values_of(text: str) -> tuple[_Value, ...]:
@@ -459,7 +462,13 @@ def _structured(call: TurnToolCall, payload: Mapping[str, Any]) -> _Source | Non
         label=f"{publisher} — {title}",
         role=role,
         inputs=inputs,
+        symbols=(
+            frozenset(_TICKER.findall(excerpt)) if calculation else frozenset({symbol} if symbol else ())
+        ),
     )
+
+
+_TICKER = re.compile(r"(?<![A-Za-z0-9])[A-Z][A-Z0-9]{2,9}(?![A-Za-z0-9])")
 
 
 def _input_value(item: Mapping[str, Any]) -> _Value:
@@ -858,7 +867,20 @@ def _decide(
     candidates: list[tuple[tuple[int, int, int], _Source, date | None, bool]] = []
     matched_somewhere = False
     invalid_calculation = False
+    known = frozenset().union(
+        *(item.symbols for item in sources.items if item.role in ("market", "statement"))
+    )
+    named_symbols = frozenset(_TICKER.findall(figure.line)) & known
     for source in sources.items:
+        if (
+            named_symbols
+            and source.kind is SourceKind.STRUCTURED
+            and source.symbols
+            and not (source.symbols & named_symbols)
+        ):
+            # "STB … 12,83%" cannot rest on TCB's statement line, however the
+            # digits fall.
+            continue
         for line in source.lines:
             if not any(_same(figure, value) for value in line.values):
                 continue

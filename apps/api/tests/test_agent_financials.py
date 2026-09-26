@@ -242,3 +242,35 @@ def test_a_calculators_inputs_do_not_ground_themselves():
     report = check("Giá 99.999 đồng.", [calc])
 
     assert [f.status for f in report.figures] == [FigureStatus.UNVERIFIED]
+
+
+def test_a_figure_about_one_ticker_cannot_rest_on_anothers_data():
+    """The live miss: STB's "ROE 12,83%" cited to a TCB statement line."""
+    other = _call(
+        "f2",
+        "get_financial_ratios",
+        {
+            **dict(tool().get_financial_ratios(ToolContext(user_id=1, now=NOW), {"symbol": "TCB"})),
+            "symbol": "TCB",
+        },
+    )
+
+    # Tickers are recognised from the data this Turn read — so "ROE" or "CAR"
+    # in a sentence is never mistaken for one — which is why STB's own price
+    # read is here.
+    report = check("| **STB** | ROE 2,17% |", [_market(), other])
+    assert [f.status for f in report.figures] == [FigureStatus.UNVERIFIED]
+
+    same = check("| **TCB** | ROE 2,17% |", [_market(), other])
+    assert [f.status for f in same.figures] == [FigureStatus.GROUNDED]
+
+
+def test_a_calculation_is_cited_for_the_ticker_it_was_run_for():
+    pb_a = _calc("c5", "divide", [{"label": "giá STB", "value": 76500, "unit": "đồng"}, {"label": "BVPS STB", "value": 33315.68, "unit": "đồng"}])
+    pb_b = _calc("c6", "divide", [{"label": "giá ACB", "value": 76500, "unit": "đồng"}, {"label": "BVPS ACB", "value": 33315.68, "unit": "đồng"}])
+
+    report = check("| STB | 2,30x |", [_market(), _ratios(), pb_b, pb_a])
+
+    [figure] = report.figures
+    assert figure.status is FigureStatus.GROUNDED
+    assert figure.evidence_id == grounding.collect_sources([pb_a]).items[0].evidence.evidence_id
