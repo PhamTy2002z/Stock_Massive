@@ -402,3 +402,9 @@ def test_a_bare_decimal_in_a_table_is_a_figure_not_a_count():
 
     assert [f.status for f in report.figures] == [FigureStatus.UNVERIFIED]
     assert check("Trong 3 tháng, top 10 mã.", [STB_NOW]).figures == ()
+
+
+def test_the_readers_threshold_is_theirs_whatever_unit_the_answer_adds():
+    report = check("Có 9 mã có P/B dưới 1,5 lần.", [STB_NOW], user_text="mã nào có P/B dưới 1,5?")
+
+    assert report.figures == ()

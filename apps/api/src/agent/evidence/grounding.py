@@ -759,6 +759,15 @@ def _same(figure: _Figure, value: _Value) -> bool:
     return False
 
 
+def _theirs(figure: _Figure, value: _Value) -> bool:
+    """Whether the reader wrote this number themselves.
+
+    By value alone: "P/B dưới 1,5?" in a question and "dưới 1,5 lần" in the
+    answer are the reader's threshold repeated, whatever unit the answer adds.
+    """
+    return value.written == figure.value.written or value.base == figure.value.base
+
+
 # -- time ------------------------------------------------------------------
 
 
@@ -884,7 +893,7 @@ def check_answer(
     for figure in _figures(answer):
         if figure.start >= checked_until:
             break
-        if any(_same(figure, value) for value in sources.exempt):
+        if any(_theirs(figure, value) for value in sources.exempt):
             continue
         results.append(_decide(figure, sources, today, latest_session))
     return GroundingReport(answer=answer, figures=tuple(results), sources=sources, today=today)
