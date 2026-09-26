@@ -391,8 +391,16 @@ def _structured(call: TurnToolCall, payload: Mapping[str, Any]) -> _Source | Non
     except ValueError:
         kind = EvidenceKind.STORE_FIGURE
     symbol = str(payload.get("symbol") or "").strip()
+    first, last = _day(_aware(actual.get("start"))), _day(_aware(actual.get("end")))
+    span = (
+        f"{first.strftime('%d/%m/%Y')}–{last.strftime('%d/%m/%Y')}"
+        if first and last and first != last
+        else (last.strftime("%d/%m/%Y") if last else "")
+    )
     title = str(payload.get("title") or "").strip() or " · ".join(
-        part for part in (symbol, str(payload.get("interval_label") or "").strip()) if part
+        part
+        for part in (symbol, str(payload.get("interval_label") or "").strip(), span)
+        if part
     ) or call.name
     publisher = str(payload.get("publisher") or payload.get("source") or call.name).strip()
     content = str(payload.get("content_sha256") or "")
@@ -643,7 +651,13 @@ def _month_end(year: int, month: int) -> date:
 
 def periods(line: str, today: date) -> tuple[tuple[_Period, ...], bool]:
     """The periods a line names, and whether it says it is about now."""
-    text = numbers.fold(line)
+    # A date after "so với" is what the figure is compared against, not when it
+    # was true: "232.000 đồng (+0,87% so với phiên 24/09)" is the 25/09 close.
+    text = re.sub(
+        r"so voi\s*(?:phien|ngay|cung ky|thang|quy|nam)?\s*[\d/\-]+",
+        lambda m: " " * (m.end() - m.start()),
+        numbers.fold(line),
+    )
     found: list[_Period] = []
 
     def take(pattern: str, build) -> None:
@@ -768,14 +782,18 @@ def _decide(
             if source.kind is SourceKind.STRUCTURED:
                 if when is None:
                     ok = not named and not current
-                elif named:
-                    ok = any(period.start <= when <= period.end for period in named)
                 elif current:
+                    # "Hiện tại" is checked first and a date beside it does not
+                    # excuse it: "giá hiện tại 56.500 (26/09/2025)" names a real
+                    # session, a year before today, and calls it now — the exact
+                    # sentence a model working in its remembered year writes.
                     ok = (
                         latest_session is not None
                         and when == latest_session
                         and (today - when).days <= CURRENT_SESSION_DAYS
                     )
+                elif named:
+                    ok = any(period.start <= when <= period.end for period in named)
                 else:
                     ok = True
             else:
@@ -832,15 +850,33 @@ def annotate(report: GroundingReport, *, cite: bool = True) -> str:
     """
     answer = report.answer
     by_id = {item.evidence.evidence_id: item for item in report.sources.items}
+    # One number per address: a search snippet and the page it came from are
+    # one source to a reader, whichever of the two a figure matched.
+    key = {
+        evidence_id: (
+            item.evidence.canonical_url
+            if item.kind is not SourceKind.STRUCTURED and item.evidence.canonical_url
+            else evidence_id
+        )
+        for evidence_id, item in by_id.items()
+    }
     order: list[str] = []
+    shown: dict[str, str] = {}
     for figure in report.figures:
-        if cite and figure.evidence_id and figure.evidence_id not in order:
-            order.append(figure.evidence_id)
+        if not cite or not figure.evidence_id:
+            continue
+        address = key[figure.evidence_id]
+        if address not in order:
+            order.append(address)
+        # The page wins over the snippet for the line in the source list.
+        current = shown.get(address)
+        if current is None or by_id[figure.evidence_id].kind is SourceKind.PAGE:
+            shown[address] = figure.evidence_id
 
     pieces: list[str] = []
     cursor = 0
     for figure in sorted(report.figures, key=lambda item: item.start):
-        label = _label(figure, order, cite=cite)
+        label = _label(figure, order, key, cite=cite)
         if label is None:
             continue
         pieces.append(answer[cursor : figure.end])
@@ -852,9 +888,8 @@ def annotate(report: GroundingReport, *, cite: bool = True) -> str:
     footer: list[str] = []
     if order:
         footer.append(SOURCES_HEADING)
-        for index, evidence_id in enumerate(order, start=1):
-            source = by_id[evidence_id]
-            footer.append(f"[{index}] {_source_line(source)}")
+        for index, address in enumerate(order, start=1):
+            footer.append(f"[{index}] {_source_line(by_id[shown[address]])}")
     if report.unverified:
         footer.append(
             f"Số có nhãn [{UNVERIFIED_LABEL}] không có trong dữ liệu công cụ của lượt "
@@ -870,12 +905,15 @@ def annotate(report: GroundingReport, *, cite: bool = True) -> str:
     return f"{annotated.rstrip()}\n\n---\n" + "\n".join(footer)
 
 
-def _label(figure: FigureCheck, order: list[str], *, cite: bool) -> str | None:
+def _label(
+    figure: FigureCheck, order: list[str], key: Mapping[str, str], *, cite: bool
+) -> str | None:
     if figure.status is FigureStatus.UNVERIFIED:
         return f" [{UNVERIFIED_LABEL}]"
-    if not cite or figure.evidence_id not in order:
+    address = key.get(figure.evidence_id or "")
+    if not cite or address not in order:
         return None
-    index = order.index(figure.evidence_id) + 1
+    index = order.index(address) + 1
     if figure.source_date is None:
         when = UNDATED_LABEL
     elif figure.kind is SourceKind.STRUCTURED:

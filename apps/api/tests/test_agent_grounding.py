@@ -244,7 +244,7 @@ def test_a_failed_market_read_backs_nothing():
 
 
 def test_periods_read_the_ways_a_sentence_names_time():
-    named, current = grounding.periods("Quý 2/2026 so với tháng 9/2025, hiện tại", TODAY)
+    named, current = grounding.periods("Quý 2/2026 và tháng 9/2025, hiện tại", TODAY)
 
     spans = {(p.start, p.end) for p in named}
     assert (date(2026, 4, 1), date(2026, 6, 30)) in spans
@@ -307,3 +307,57 @@ def test_the_ledger_has_one_claim_per_figure_and_cites_only_what_backed_one():
     assert len(ledger.evidence) == 1
     assert ledger.verifier_outcome is VerifierOutcome.INSUFFICIENT_EVIDENCE
     assert ledger.to_payload()["version"] == grounding.LEDGER_VERSION
+
+
+def test_a_dated_price_called_current_must_still_be_the_latest_session():
+    """The live miss of 2026-09-26: a real close, correctly dated, a year old."""
+    report = check("Giá hiện tại: 56.500 đồng (tính đến 26/09/2025).", [STB, STB_NOW])
+
+    [figure] = report.figures
+    assert figure.status is FigureStatus.UNVERIFIED
+    assert figure.reason == "wrong_period"
+
+
+def test_two_reads_of_one_symbol_are_told_apart_by_their_range():
+    report = check("Phiên 25/09/2026 đóng 76.500 đồng; phiên 26/09/2025 đóng 56.500 đồng.", [STB, STB_NOW])
+
+    text = grounding.annotate(report)
+
+    assert "STB · nến ngày · 24/09/2026–25/09/2026" in text
+    assert "STB · nến ngày · 25/09/2025–26/09/2025" in text
+
+
+def test_a_snippet_and_its_page_are_one_citation():
+    page = page_call("NPL 6,31%. CAR 12,50%.", published="2026-08-20T08:00:00+07:00")
+    snippet = TurnToolCall(
+        id="s1",
+        name="web_search",
+        status=ToolCallStatus.OK,
+        result_text=json.dumps(
+            {
+                "results": [
+                    {
+                        "url": "https://cafef.vn/stb-2025.chn",
+                        "canonical_url": "https://cafef.vn/stb-2025.chn",
+                        "title": "Sacombank năm 2025",
+                        "publisher": "cafef.vn",
+                        "snippet": "CAR 12,50%",
+                        "publication": {"publishedAt": "2026-08-20T08:00:00+07:00"},
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+    )
+    report = check("NPL 6,31%, CAR 12,50%.", [snippet, page])
+
+    text = grounding.annotate(report)
+
+    assert "[2 ·" not in text
+    assert text.count("cafef.vn — Sacombank năm 2025") == 1
+
+
+def test_a_date_after_so_voi_is_a_comparison_not_the_figures_period():
+    report = check("Giá: 76.500 đồng (so với phiên 24/09).", [STB_NOW])
+
+    assert [f.status for f in report.figures] == [FigureStatus.GROUNDED]

@@ -96,9 +96,17 @@ def _validate(value: Any, schema: Mapping[str, Any], *, path: str) -> None:
                 raise ArgumentSchemaError(
                     f"{path} contains undeclared field {extras[0]!r}"
                 )
+        required = set(schema.get("required", ()))
         for name, child in properties.items():
-            if name in value:
-                _validate(value[name], child, path=f"{path}.{name}")
+            if name not in value:
+                continue
+            if value[name] is None and name not in required:
+                # How strict mode spells "omitted": ``protocol.strict_parameters``
+                # widens every optional property to admit null on the wire, so a
+                # null here is the absence the tool author declared, not a
+                # value of the wrong type.
+                continue
+            _validate(value[name], child, path=f"{path}.{name}")
     elif kind == "string":
         if not isinstance(value, str):
             raise ArgumentSchemaError(f"{path} must be a string")

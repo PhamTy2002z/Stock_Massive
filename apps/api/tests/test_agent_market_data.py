@@ -567,3 +567,24 @@ def test_a_window_ending_inside_the_last_week_carries_no_note():
     result = read(tools_returning(daily(24, 25, 26)), start="2026-08-20", end="2026-08-28")
 
     assert result["date_note"] is None
+
+
+def test_an_index_is_read_in_points_and_never_scaled_like_a_price():
+    frame = FakeFrame(
+        [
+            {"time": datetime(2026, 8, 27, 7, 0), "open": 1775.09, "high": 1790, "low": 1770, "close": 1775.09, "volume": 500_000_000},
+            {"time": datetime(2026, 8, 28, 7, 0), "open": 1776, "high": 1790.5, "low": 1771.2, "close": 1785.11, "volume": 624_262_395},
+        ]
+    )
+    result = read(tools_returning(frame), symbol="VNINDEX", start="2026-08-20", end="2026-09-04")
+
+    assert market_data.is_index("VNINDEX") and market_data.is_index("VN30")
+    assert not market_data.is_index("STB")
+    assert result["rows"][-1]["close"] == 1785.11
+    assert result["price_unit"] == "điểm"
+    assert result["price_scale_applied"] == 1
+    lines = result["excerpt"].splitlines()
+    assert "đơn vị điểm" in lines[0]
+    assert "đóng 1.785,11 điểm" in lines[1]
+    assert "thay đổi +10,02 điểm (+0,56%)" in lines[1]
+    assert "đồng" not in result["excerpt"]

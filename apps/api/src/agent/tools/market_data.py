@@ -101,6 +101,18 @@ INTERNAL_PROFILE = "personal_internal"
 PRICE_SCALE = 1000
 CURRENCY = "VND"
 
+#: Market indices are quoted in points, and the provider sends them as points:
+#: 1785.11 is VN-Index at 1.785,11 điểm. Multiplying an index by the equity
+#: scale printed "đóng 1.785.110 đồng" into every excerpt until 2026-09-26, and
+#: no sentence about an index could ever match the data it was written from.
+INDEX_UNIT = "điểm"
+_INDEX = re.compile(r"^(?:[A-Z]*INDEX|VN\d+|HNX\d+|VNX\w*|VN(?:MID|SML|ALL|DIAMOND|FIN\w*))$")
+
+
+def is_index(symbol: str) -> bool:
+    """Whether ``symbol`` names a market index rather than a security."""
+    return bool(_INDEX.match(symbol.upper()))
+
 #: When a Vietnamese equity session ends. A daily bar is knowable from here.
 SESSION_CLOSE = time(15, 0)
 
@@ -203,6 +215,11 @@ def _bar_close(stamp: datetime, interval: str) -> datetime:
     return stamp.replace(tzinfo=ICT) + width
 
 
+def _points(value: Any) -> float:
+    """One index level, in points, to the hundredth the exchange publishes."""
+    return round(float(value), 2)
+
+
 def _price(value: Any) -> int:
     """One provider price as whole dong.
 
@@ -216,6 +233,14 @@ def _price(value: Any) -> int:
 def _grouped(value: int) -> str:
     """A whole number as a Vietnamese page prints it: ``4.611.900``."""
     return f"{value:,}".replace(",", ".")
+
+
+def _level(value: float | int, index: bool) -> str:
+    """A price or an index level, written with its unit the way a page writes it."""
+    if not index:
+        return f"{_grouped(int(value))} đồng"
+    whole = f"{float(value):,.2f}"
+    return whole.replace(",", "_").replace(".", ",").replace("_", ".") + f" {INDEX_UNIT}"
 
 
 def _render_rows(
@@ -241,28 +266,29 @@ def _render_rows(
     # sentence about the data the model reads in prose, and a package name in it
     # comes back out in the answer as if it were a source the reader could go
     # and check. The publisher is the source; how the host reached it is not.
+    index = is_index(symbol)
     head = (
         f"{symbol} · {INTERVAL_LABELS[interval]} · nguồn {PUBLISHER} · "
-        f"giá đã quy đổi sang {CURRENCY} đầy đủ"
+        + (f"đơn vị {INDEX_UNIT}" if index else f"giá đã quy đổi sang {CURRENCY} đầy đủ")
     )
     lines = [head]
     if date_note:
         lines.append(f"LƯU Ý: {date_note}")
     if latest:
-        lines.append(_latest_line(latest))
+        lines.append(_latest_line(latest, index=index))
     for row in rows:
         lines.append(
             f"{row['bar_closed_at']}: "
-            f"mở {_grouped(row['open'])} đồng · "
-            f"cao {_grouped(row['high'])} đồng · "
-            f"thấp {_grouped(row['low'])} đồng · "
-            f"đóng {_grouped(row['close'])} đồng · "
+            f"mở {_level(row['open'], index)} · "
+            f"cao {_level(row['high'], index)} · "
+            f"thấp {_level(row['low'], index)} · "
+            f"đóng {_level(row['close'], index)} · "
             f"khối lượng {_grouped(row['volume'])} cổ phiếu"
         )
     return "\n".join(lines)
 
 
-def _latest_line(latest: Mapping[str, Any]) -> str:
+def _latest_line(latest: Mapping[str, Any], *, index: bool = False) -> str:
     session = date.fromisoformat(str(latest["session_date"]))
     today = date.fromisoformat(str(latest["today"]))
     when = (
@@ -272,13 +298,13 @@ def _latest_line(latest: Mapping[str, Any]) -> str:
     )
     line = (
         f"{latest['bar_closed_at']}: PHIÊN GẦN NHẤT {session.strftime('%d/%m/%Y')} "
-        f"({when}) · đóng {_grouped(int(latest['close']))} đồng"
+        f"({when}) · đóng {_level(latest['close'], index)}"
     )
     if latest.get("change") is not None and latest.get("previous_session_date"):
         previous = date.fromisoformat(str(latest["previous_session_date"]))
-        change = int(latest["change"])
+        change = latest["change"]
         sign = "+" if change > 0 else ("-" if change < 0 else "")
-        line += f" · thay đổi {sign}{_grouped(abs(change))} đồng"
+        line += f" · thay đổi {sign}{_level(abs(change), index)}"
         if latest.get("change_pct") is not None:
             pct = float(latest["change_pct"])
             line += f" ({'+' if pct > 0 else ('-' if pct < 0 else '')}{abs(pct):.2f}%)".replace(".", ",")
@@ -445,7 +471,9 @@ class MarketDataTools:
 
         frame = self._history(symbol, start, end, interval)
         raw_payload, records = _raw(frame)
-        rows, dropped_future = _normalise(records, start, end, interval, horizon)
+        rows, dropped_future = _normalise(
+            records, start, end, interval, horizon, index=is_index(symbol)
+        )
 
         if not rows:
             raise MarketDataError(
@@ -473,9 +501,9 @@ class MarketDataTools:
             "source": SOURCE,
             "publisher": PUBLISHER,
             "source_class": "store",
-            "currency": CURRENCY,
-            "price_unit": "VND",
-            "price_scale_applied": PRICE_SCALE,
+            "currency": "POINT" if is_index(symbol) else CURRENCY,
+            "price_unit": INDEX_UNIT if is_index(symbol) else "VND",
+            "price_scale_applied": 1 if is_index(symbol) else PRICE_SCALE,
             "timezone": str(ICT),
             "requested": {"start": start.isoformat(), "end": end.isoformat()},
             "actual": {
@@ -601,7 +629,8 @@ def _latest(
             datetime.fromisoformat(str(before["bar_closed_at"])).astimezone(ICT).date().isoformat()
         )
         latest["previous_close"] = previous
-        latest["change"] = last["close"] - previous
+        change = last["close"] - previous
+        latest["change"] = round(change, 2) if isinstance(change, float) else change
         if previous:
             latest["change_pct"] = round((last["close"] - previous) * 100 / previous, 2)
     return latest
@@ -677,6 +706,8 @@ def _normalise(
     end: date,
     interval: str,
     horizon: datetime,
+    *,
+    index: bool = False,
 ) -> tuple[list[dict[str, Any]], int]:
     """Provider rows as evidence rows, filtered to what was asked and knowable.
 
@@ -687,6 +718,7 @@ def _normalise(
     """
     rows: list[dict[str, Any]] = []
     dropped_future = 0
+    convert = _points if index else _price
     for record in records:
         stamp = record.get("time")
         if not isinstance(stamp, datetime):
@@ -709,10 +741,10 @@ def _normalise(
             row = {
                 "bar_opened_at": stamp.replace(tzinfo=ICT).isoformat(),
                 "bar_closed_at": closed_at.isoformat(),
-                "open": _price(record["open"]),
-                "high": _price(record["high"]),
-                "low": _price(record["low"]),
-                "close": _price(record["close"]),
+                "open": convert(record["open"]),
+                "high": convert(record["high"]),
+                "low": convert(record["low"]),
+                "close": convert(record["close"]),
                 "volume": int(record["volume"]),
             }
         except (KeyError, TypeError, ValueError) as exc:
@@ -743,6 +775,7 @@ def register_market_data_tools(*, settings: Settings | None = None) -> tuple[Too
 __all__ = [
     "CURRENCY",
     "DEFAULT_SPAN_DAYS",
+    "INDEX_UNIT",
     "ICT",
     "INTERNAL_PROFILE",
     "INTERVALS",
@@ -756,5 +789,6 @@ __all__ = [
     "PROVIDER",
     "SOURCE",
     "TOOLSET",
+    "is_index",
     "register_market_data_tools",
 ]

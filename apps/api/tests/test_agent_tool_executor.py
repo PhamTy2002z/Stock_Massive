@@ -992,3 +992,19 @@ async def test_a_scan_that_runs_out_of_budget_says_unknown_rather_than_low(
     assert result.ok is True
     assert result.text == ADVERSARIAL_PAGE
     assert result.scan["risk"] == untrusted.RISK_UNKNOWN
+
+
+def test_a_null_optional_argument_is_the_omission_strict_mode_spells_it_as():
+    """The wire widens optional properties to admit null; the check must agree."""
+    from src.agent.schema_validation import ArgumentSchemaError, validate_arguments
+    from src.agent.registry import object_schema
+
+    schema = object_schema(
+        {"symbol": {"type": "string"}, "start": {"type": "string"}}, ("symbol",)
+    )
+
+    validate_arguments({"symbol": "STB", "start": None}, schema)
+    with pytest.raises(ArgumentSchemaError):
+        validate_arguments({"symbol": None, "start": None}, schema)
+    with pytest.raises(ArgumentSchemaError):
+        validate_arguments({"symbol": "STB", "start": 5}, schema)
