@@ -509,3 +509,61 @@ def test_the_declared_result_cap_is_wide_enough_for_a_full_result():
     entry = tools_returning(daily(24)).entries()[0]
 
     assert len(json.dumps(result, ensure_ascii=False)) <= entry.max_result_size_chars
+
+
+# -- the window the host picks, and what leads the result -------------------
+
+
+def test_no_dates_means_the_host_reads_the_three_months_ending_today():
+    """A question about now cannot start in the model's remembered year."""
+    seen: dict[str, Any] = {}
+    tools = tools_returning(daily(24, 25, 26))
+
+    def history(symbol: str, start: date, end: date, interval: str) -> FakeFrame:
+        seen.update(start=start, end=end, interval=interval)
+        return daily(24, 25, 26)
+
+    tools._history = history  # type: ignore[method-assign]
+    result = tools.get_market_data(CONTEXT, {"symbol": "FPT", "start": None, "end": ""})
+
+    assert seen["end"] == NOW.date()
+    assert seen["start"] == NOW.date() - timedelta(days=market_data.DEFAULT_SPAN_DAYS["1D"])
+    assert seen["interval"] == "1D"
+    assert result["date_note"] is None
+
+
+def test_the_latest_session_leads_the_payload_and_the_excerpt():
+    frame = FakeFrame(
+        [
+            {"time": datetime(2026, 8, 27, 7, 0), "open": 70, "high": 71, "low": 69, "close": 70, "volume": 100},
+            {"time": datetime(2026, 8, 28, 7, 0), "open": 70, "high": 72, "low": 70, "close": 71.4, "volume": 2_500},
+        ]
+    )
+    result = read(tools_returning(frame), start="2026-08-20", end="2026-09-04")
+
+    latest = result["latest"]
+    assert latest["session_date"] == "2026-08-28"
+    assert latest["close"] == 71_400
+    assert latest["previous_close"] == 70_000
+    assert latest["change"] == 1_400
+    assert latest["change_pct"] == 2.0
+    # 4 September had no bar yet at 17:00 in this fixture: today is not a session.
+    assert latest["session_today"] is False
+    lines = result["excerpt"].splitlines()
+    assert "PHIÊN GẦN NHẤT 28/08/2026" in lines[1]
+    assert "đóng 71.400 đồng" in lines[1]
+    assert "thay đổi +1.400 đồng (+2,00%)" in lines[1]
+    assert "chưa có phiên đóng cửa" in lines[1]
+
+
+def test_a_window_ending_long_before_today_says_what_today_is():
+    result = read(tools_returning(daily(24, 25, 26)), start="2026-08-01", end="2026-08-26")
+
+    assert result["date_note"].startswith("Hôm nay là 04/09/2026")
+    assert result["excerpt"].splitlines()[1].startswith("LƯU Ý: Hôm nay là 04/09/2026")
+
+
+def test_a_window_ending_inside_the_last_week_carries_no_note():
+    result = read(tools_returning(daily(24, 25, 26)), start="2026-08-20", end="2026-08-28")
+
+    assert result["date_note"] is None

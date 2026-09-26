@@ -126,6 +126,19 @@ INTERVAL_LABELS: Mapping[str, str] = {
 #: model's context and into an evidence excerpt.
 MAX_SPAN_DAYS: Mapping[str, int] = {"1D": 400, "15m": 40}
 
+#: The window a call gets when the model names no dates: the last three months
+#: of daily bars, ending today. The host picks it because the model picks it
+#: badly — on 2026-09-26 a model told today's date in the Turn context still
+#: asked for 2024-01-01 → 2025-01-20, the year it remembered, and answered a
+#: question about "now" from a series that ended twenty months earlier. With the
+#: window the host's, a question about the present cannot start in the past.
+DEFAULT_SPAN_DAYS: Mapping[str, int] = {"1D": 92, "15m": 5}
+
+#: How far before today a requested ``end`` may fall before the result says so.
+#: A week covers a long holiday; past it the most likely reading is that the
+#: model is working in the wrong year, and the note puts today in front of it.
+STALE_END_DAYS = 7
+
 #: The most rows one call returns. A window that holds more is answered with its
 #: most recent rows and says so, rather than being refused: the recent end is
 #: what a question about a move is about.
@@ -205,13 +218,24 @@ def _grouped(value: int) -> str:
     return f"{value:,}".replace(",", ".")
 
 
-def _render_rows(symbol: str, interval: str, rows: Sequence[Mapping[str, Any]]) -> str:
+def _render_rows(
+    symbol: str,
+    interval: str,
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    latest: Mapping[str, Any] | None = None,
+    date_note: str | None = None,
+) -> str:
     """The rows as a page of text, which is the only form the ledger can check.
 
     Every figure carries its unit in the same breath, because
     ``numbers.contains`` accepts a value with fewer than three significant
     digits only when its unit is printed beside it — and a volume of ``500`` or
     a price a claim rounds to ``72`` is exactly that case.
+
+    The latest session leads, dated, and a stale window's note comes before
+    anything else: the figure check dates each number by the session its line
+    names, and a reader of the excerpt meets the present before the past.
     """
     # The connector's own name is deliberately absent. This line is the one
     # sentence about the data the model reads in prose, and a package name in it
@@ -222,6 +246,10 @@ def _render_rows(symbol: str, interval: str, rows: Sequence[Mapping[str, Any]]) 
         f"giá đã quy đổi sang {CURRENCY} đầy đủ"
     )
     lines = [head]
+    if date_note:
+        lines.append(f"LƯU Ý: {date_note}")
+    if latest:
+        lines.append(_latest_line(latest))
     for row in rows:
         lines.append(
             f"{row['bar_closed_at']}: "
@@ -232,6 +260,31 @@ def _render_rows(symbol: str, interval: str, rows: Sequence[Mapping[str, Any]]) 
             f"khối lượng {_grouped(row['volume'])} cổ phiếu"
         )
     return "\n".join(lines)
+
+
+def _latest_line(latest: Mapping[str, Any]) -> str:
+    session = date.fromisoformat(str(latest["session_date"]))
+    today = date.fromisoformat(str(latest["today"]))
+    when = (
+        "phiên hôm nay"
+        if latest.get("session_today")
+        else f"hôm nay {today.strftime('%d/%m/%Y')} chưa có phiên đóng cửa"
+    )
+    line = (
+        f"{latest['bar_closed_at']}: PHIÊN GẦN NHẤT {session.strftime('%d/%m/%Y')} "
+        f"({when}) · đóng {_grouped(int(latest['close']))} đồng"
+    )
+    if latest.get("change") is not None and latest.get("previous_session_date"):
+        previous = date.fromisoformat(str(latest["previous_session_date"]))
+        change = int(latest["change"])
+        sign = "+" if change > 0 else ("-" if change < 0 else "")
+        line += f" · thay đổi {sign}{_grouped(abs(change))} đồng"
+        if latest.get("change_pct") is not None:
+            pct = float(latest["change_pct"])
+            line += f" ({'+' if pct > 0 else ('-' if pct < 0 else '')}{abs(pct):.2f}%)".replace(".", ",")
+        line += f" so với phiên {previous.strftime('%d/%m/%Y')}"
+    line += f" · khối lượng {_grouped(int(latest['volume']))} cổ phiếu"
+    return line
 
 
 def _import_vnstock() -> Any:
@@ -312,7 +365,10 @@ class MarketDataTools:
                     "financial statements or company events. Take the symbol from "
                     "the question or from a source you read; if you only have a "
                     "company name, find its ticker first. Derive start and end "
-                    "from the question and today's date in the turn context. A "
+                    "from the question only when it names a period; leave them "
+                    "out for anything about now and the host reads the last three "
+                    "months ending today. The result starts with the latest "
+                    "session — quote current figures from there, with its date. A "
                     f"daily window may span {MAX_SPAN_DAYS['1D']} days and a 15m "
                     f"window {MAX_SPAN_DAYS['15m']} days; at most the latest "
                     f"{MAX_ROWS} bars come back. Provider-reported "
@@ -328,11 +384,17 @@ class MarketDataTools:
                         },
                         "start": {
                             "type": "string",
-                            "description": "First session to include, YYYY-MM-DD.",
+                            "description": (
+                                "First session to include, YYYY-MM-DD. Omit it "
+                                "unless the question names a period."
+                            ),
                         },
                         "end": {
                             "type": "string",
-                            "description": "Last session to include, YYYY-MM-DD.",
+                            "description": (
+                                "Last session to include, YYYY-MM-DD. Omit it and "
+                                "the host uses today."
+                            ),
                         },
                         "interval": {
                             "type": "string",
@@ -344,7 +406,7 @@ class MarketDataTools:
                             ),
                         },
                     },
-                    ("symbol", "start", "end", "interval"),
+                    ("symbol", "interval"),
                 ),
                 handler=self.get_market_data,
                 display_name="Đọc dữ liệu giá",
@@ -374,8 +436,8 @@ class MarketDataTools:
     def get_market_data(
         self, context: ToolContext, arguments: Mapping[str, Any]
     ) -> Mapping[str, Any]:
-        symbol, start, end, interval = _validate(arguments)
         now = (context.now or datetime.now(tz=ICT)).astimezone(ICT)
+        symbol, start, end, interval = _validate(arguments, today=now.date())
         # The evidence boundary the question named, when it named one. A bar
         # that closed after it is not admissible and is dropped here, so the
         # model never sees a row it could not have known about.
@@ -397,7 +459,9 @@ class MarketDataTools:
             # of the series rather than its beginning.
             rows = rows[-MAX_ROWS:]
 
-        excerpt = _render_rows(symbol, interval, rows)
+        latest = _latest(rows, interval, now.date())
+        date_note = _date_note(end, now.date())
+        excerpt = _render_rows(symbol, interval, rows, latest=latest, date_note=date_note)
         return {
             "symbol": symbol,
             "interval": interval,
@@ -418,6 +482,11 @@ class MarketDataTools:
                 "start": rows[0]["bar_closed_at"],
                 "end": rows[-1]["bar_closed_at"],
             },
+            # Ahead of the rows on purpose. A model reads the head of a result
+            # and skims the rest, so the one figure a question about "now" needs
+            # is the first one it meets, already dated.
+            "latest": latest,
+            "date_note": date_note,
             "row_count": len(rows),
             "rows_dropped_after_horizon": dropped_future,
             "truncated": truncated,
@@ -456,22 +525,33 @@ class MarketDataTools:
             raise _classify(exc, symbol) from exc
 
 
-def _validate(arguments: Mapping[str, Any]) -> tuple[str, date, date, str]:
-    """Everything the model may choose, checked before anything leaves the host."""
+def _validate(
+    arguments: Mapping[str, Any], *, today: date
+) -> tuple[str, date, date, str]:
+    """Everything the model may choose, checked before anything leaves the host.
+
+    ``start`` and ``end`` are optional and the host fills them: ``end`` is
+    today, ``start`` the default span before it. A strict route restates every
+    property, so "omitted" also arrives as ``null`` or an empty string.
+    """
     try:
         symbol = normalize_symbol(str(arguments.get("symbol") or ""))
     except ValueError as exc:
         raise MarketDataError(INVALID_REQUEST, str(exc)) from exc
 
-    interval = str(arguments.get("interval") or "").strip()
+    interval = str(arguments.get("interval") or "1D").strip()
     if interval not in INTERVALS:
         raise MarketDataError(
             INVALID_REQUEST,
             f"interval must be one of {', '.join(INTERVALS)}",
         )
 
-    start = _iso_date(arguments.get("start"), "start")
-    end = _iso_date(arguments.get("end"), "end")
+    end = _iso_date(arguments["end"], "end") if _given(arguments.get("end")) else today
+    start = (
+        _iso_date(arguments["start"], "start")
+        if _given(arguments.get("start"))
+        else end - timedelta(days=DEFAULT_SPAN_DAYS[interval])
+    )
     if start > end:
         raise MarketDataError(INVALID_REQUEST, "start must not be after end")
 
@@ -483,6 +563,59 @@ def _validate(arguments: Mapping[str, Any]) -> tuple[str, date, date, str]:
             f"a {interval} request covers at most {cap} days and this one covers {span}",
         )
     return symbol, start, end, interval
+
+
+def _given(value: Any) -> bool:
+    return value is not None and bool(str(value).strip())
+
+
+def _latest(
+    rows: Sequence[Mapping[str, Any]], interval: str, today: date
+) -> dict[str, Any]:
+    """The most recent bar, its change on the one before, and whether it is today's.
+
+    Computed here rather than left to the model because it is arithmetic on two
+    rows the host already holds: a change the model works out in its head is a
+    number no source prints, and one the host prints is a number the figure
+    check can find.
+    """
+    last = rows[-1]
+    closed = datetime.fromisoformat(str(last["bar_closed_at"]))
+    session = closed.astimezone(ICT).date()
+    latest: dict[str, Any] = {
+        "session_date": session.isoformat(),
+        "bar_closed_at": last["bar_closed_at"],
+        "close": last["close"],
+        "volume": last["volume"],
+        "session_today": session == today,
+        "today": today.isoformat(),
+        "previous_session_date": None,
+        "previous_close": None,
+        "change": None,
+        "change_pct": None,
+    }
+    if len(rows) > 1 and interval == "1D":
+        before = rows[-2]
+        previous = before["close"]
+        latest["previous_session_date"] = (
+            datetime.fromisoformat(str(before["bar_closed_at"])).astimezone(ICT).date().isoformat()
+        )
+        latest["previous_close"] = previous
+        latest["change"] = last["close"] - previous
+        if previous:
+            latest["change_pct"] = round((last["close"] - previous) * 100 / previous, 2)
+    return latest
+
+
+def _date_note(end: date, today: date) -> str | None:
+    """A sentence saying today's date, when the window asked for ends well before it."""
+    if (today - end).days <= STALE_END_DAYS:
+        return None
+    return (
+        f"Hôm nay là {today.strftime('%d/%m/%Y')}; khoảng dữ liệu bạn xin kết thúc "
+        f"{end.strftime('%d/%m/%Y')}. Số liệu dưới đây không phải giá hiện tại. Nếu "
+        "câu hỏi hỏi về hiện tại, gọi lại mà không truyền start và end."
+    )
 
 
 def _classify(exc: Exception, symbol: str) -> MarketDataError:
@@ -594,10 +727,12 @@ def _normalise(
 def _summarise(arguments: Mapping[str, Any]) -> str:
     """The rail row, composed because no single argument says what was read."""
     symbol = str(arguments.get("symbol") or "?").strip().upper()
-    interval = str(arguments.get("interval") or "?").strip()
-    start = str(arguments.get("start") or "?").strip()
-    end = str(arguments.get("end") or "?").strip()
-    return f"Đọc dữ liệu giá {symbol} · {interval} · {start} → {end}"
+    interval = str(arguments.get("interval") or "1D").strip()
+    start = str(arguments.get("start") or "").strip()
+    end = str(arguments.get("end") or "").strip()
+    if not start and not end:
+        return f"Đọc dữ liệu giá {symbol} · {interval} · 3 tháng gần nhất"
+    return f"Đọc dữ liệu giá {symbol} · {interval} · {start or '…'} → {end or 'hôm nay'}"
 
 
 def register_market_data_tools(*, settings: Settings | None = None) -> tuple[ToolEntry, ...]:
@@ -607,6 +742,7 @@ def register_market_data_tools(*, settings: Settings | None = None) -> tuple[Too
 
 __all__ = [
     "CURRENCY",
+    "DEFAULT_SPAN_DAYS",
     "ICT",
     "INTERNAL_PROFILE",
     "INTERVALS",

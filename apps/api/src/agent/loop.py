@@ -149,6 +149,7 @@ from .executor import (
 from .executor import ToolCall as ExecutorToolCall
 from .executor import ToolResult as ExecutorToolResult
 from .evidence import ClaimLedger, render_claim_ledger, validate_claim_ledger
+from .evidence import grounding
 from .visual import build_visual
 from .evidence.source_policy import as_of_from_text
 from .evidence.pipeline import (
@@ -541,6 +542,11 @@ EMPTY_AFTER_TOOLS_NOTE = (
 # route cannot do this, and the Turn then settles with what it already has
 # rather than leaving through an exception that throws its evidence away.
 MAX_ARGUMENT_REPAIRS = 1
+#: How many times a draft that states unsupported figures is sent back before
+#: its figures are labelled instead. Once: a model that cannot copy a number off
+#: a result it has in front of it will not learn to on the second asking, and
+#: the owner's rule for what survives is a label, never a deletion.
+MAX_FIGURE_REPAIRS = 1
 MALFORMED_ARGUMENTS_NOTE = (
     "Your last tool call could not be run: its arguments were not a valid JSON "
     "object. Nothing was dispatched. Send the call again with arguments that "
@@ -1134,6 +1140,19 @@ class _TurnState:
     # that sent it: a Turn told twice about one observation has been charged
     # twice for it.
     note: str | None = None
+    #: What the waiting note is charged, when it is longer than a note usually
+    #: is. The figure check's repair note carries the whole draft, and charging
+    #: it the fixed note price would let the context overrun the ceiling it was
+    #: trimmed to.
+    note_tokens: int | None = None
+    #: The reader's question, whole. ``question`` above is cut for logs; the
+    #: figure check needs every number the reader wrote, because those are
+    #: theirs and are not labelled.
+    user_text: str = ""
+    figure_repairs: int = 0
+    #: Set once the figure check has written its labels into the answer, so a
+    #: terminal path reached twice does not label twice.
+    figures_checked: bool = False
     # Whether this Turn carries the active pack's half of the prompt.
     #
     # Per-Turn, like ``mode`` above and for the same reason: whether the reader
@@ -1379,6 +1398,7 @@ class AgentLoop:
             question=_asked(request.user_text),
             as_of=turn_as_of,
             cancel_event=cancel_event,
+            user_text=request.user_text,
         )
         surface = resolve_tool_surface(self._toolsets)
         tools = surface.offered_schemas
@@ -1687,6 +1707,11 @@ class AgentLoop:
                         # different thing to fix from one that answered nothing on
                         # its first call.
                         rounds_exhausted=exhausted,
+                    )
+                await self._repair_figures(system_prompt, request, state, turn_budget)
+                if cancelled():
+                    return await self._ended(
+                        state, TurnStatus.CANCELLED, CANCELLED_BY_USER
                     )
                 return await self._ended(
                     state, TurnStatus.COMPLETE, None, rounds_exhausted=exhausted
@@ -2227,7 +2252,7 @@ class AgentLoop:
                 (
                     Message(role=Role.SYSTEM, content=state.note),
                     SYSTEM_DYNAMIC,
-                    SYSTEM_NOTE_TOKENS,
+                    max(SYSTEM_NOTE_TOKENS, state.note_tokens or 0),
                 )
             )
         return tuple(appended)
@@ -2526,6 +2551,7 @@ class AgentLoop:
             # Spent on the call that carried it, so a model that answers a note
             # with tool calls does not carry it into a third attempt.
             state.note = None
+            state.note_tokens = None
             return completion
 
     def _repair_arguments(
@@ -3316,6 +3342,7 @@ class AgentLoop:
                 evidence=evidence_from_calls(state.calls),
             )
             self._append_text(state, render_claim_ledger(state.claim_ledger))
+        self._check_figures(state)
         self._settle_orphans(state, status)
         await self._save(state, boundary=True)
         return TurnOutcome(
@@ -3342,6 +3369,121 @@ class AgentLoop:
             ),
             visual=state.visual,
         )
+
+    # -- the figure check ---------------------------------------------------
+
+    def _figure_report(self, state: _TurnState) -> grounding.GroundingReport:
+        """Every figure in the answer so far, decided against this Turn's calls."""
+        today = (state.as_of or self._clock()).astimezone(grounding.ICT).date()
+        sources = grounding.collect_sources(state.calls, user_text=state.user_text)
+        deep = self._lane.name == DEEP.name
+        return grounding.check_answer(
+            grounding.normalise(state.answer or ""),
+            sources,
+            today=today,
+            # The deep memo ends in its own source list, whose dates and counts
+            # are a bibliography rather than claims.
+            skip_after="### Nguồn" if deep else None,
+        )
+
+    async def _repair_figures(
+        self,
+        system_prompt: str,
+        request: TurnRequest,
+        state: _TurnState,
+        turn_budget: TurnBudget,
+    ) -> None:
+        """Send a draft back once when it states figures nothing this Turn read.
+
+        One tool-free call carrying the draft and the list of figures that did
+        not match. The rewrite replaces the draft only if it leaves fewer
+        figures unsupported than the draft did — a rewrite that makes things
+        worse is not a repair — and whatever is still unsupported afterwards is
+        labelled by :meth:`_check_figures`, never removed.
+
+        The draft has already streamed, so a reader watching live sees it until
+        the Turn settles; the settled message is the canonical answer and
+        replaces the draft on every surface, which is the same promise a
+        reconnecting reader already relies on.
+        """
+        if state.figure_repairs >= MAX_FIGURE_REPAIRS or not state.answer:
+            return
+        report = self._figure_report(state)
+        if not report.unverified:
+            return
+        state.figure_repairs += 1
+        logger.info(
+            "Turn %s draft states %d unsupported figure(s); asking once for a rewrite",
+            request.request_message_id,
+            len(report.unverified),
+        )
+        state.note = grounding.repair_note(report)
+        state.note_tokens = estimate_tokens(
+            Message(role=Role.SYSTEM, content=state.note)
+        )
+        self._attempt(state, ATTEMPT_RUNNING)
+        try:
+            completion = await self._call(
+                system_prompt, request, state, turn_budget, (), True, False
+            )
+        except TurnCancelled:
+            self._cancelled_attempt(state)
+            return
+        except TimeoutError:
+            self._attempt(state, ATTEMPT_ERROR, terminal_reason=LLM_CALL_TIMEOUT)
+            return
+        except (BudgetRefusal, ModelRefusal, ConstructedContextTooLarge, LLMError) as error:
+            # The draft stands and is labelled. A repair that could not be paid
+            # for or answered is not a reason to lose the answer it was repairing.
+            if isinstance(error, ModelRefusal):
+                state.add_usage(error.usage)
+            self._attempt(state, ATTEMPT_ERROR, terminal_reason="figure_repair_failed")
+            return
+        finally:
+            state.note = None
+            state.note_tokens = None
+        self._attempt(state, ATTEMPT_COMPLETED)
+        state.add_usage(completion.usage)
+        rewrite = (completion.text or "").strip()
+        if not rewrite or completion.finish_reason == TRUNCATED or completion.tool_calls:
+            return
+        previous = state.answer
+        self._replace_answer(state, rewrite)
+        if len(self._figure_report(state).unverified) > len(report.unverified):
+            self._replace_answer(state, previous or "")
+        await self._save(state)
+
+    def _replace_answer(self, state: _TurnState, answer: str) -> None:
+        """Swap the reader's answer, keeping the model's prose record in step."""
+        old = state.answer or ""
+        if state.text and old and state.text.endswith(old):
+            state.text = state.text[: len(state.text) - len(old)] + answer
+        else:
+            state.text = answer if not state.text else f"{state.text}\n\n{answer}"
+        state.answer = answer
+
+    def _check_figures(self, state: _TurnState) -> None:
+        """Label every figure in the answer and write the Turn's figure ledger.
+
+        On every lane and every terminal path, because an incomplete Turn's
+        partial answer is read too. The light lane gets citations and dates in
+        place plus a ledger with one claim per figure; the deep lane already
+        cites its own sources and keeps its verifier's ledger, so only what
+        failed is labelled there.
+        """
+        if state.figures_checked:
+            return
+        state.figures_checked = True
+        report = self._figure_report(state)
+        deep = self._lane.name == DEEP.name
+        if report.figures:
+            self._replace_answer(state, grounding.annotate(report, cite=not deep))
+        # Only beside an answer: a ledger is anchored to the message it
+        # substantiates, and a Turn that wrote no prose — or ended on a question
+        # card — has no answer for figures to be checked in.
+        if state.claim_ledger is None and state.answer and state.question_part is None:
+            as_of = state.as_of or self._clock()
+            state.claim_ledger = grounding.to_ledger(report, as_of=as_of)
 
     # -- clocks -----------------------------------------------------------
 

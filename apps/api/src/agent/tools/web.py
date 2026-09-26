@@ -316,6 +316,29 @@ def _outside_as_of(payload: Mapping[str, Any], as_of: datetime | None) -> bool:
     return stamped.astimezone(ICT).date() > as_of.astimezone(ICT).date()
 
 
+_QUERY_YEAR = re.compile(r"(?<!\d)(19[89]\d|20\d\d)(?!\d)")
+
+
+def year_note(query: str, now: datetime) -> str | None:
+    """A sentence naming today, when a query searches a year already past.
+
+    Not a rewrite: the model may be asking about that year on purpose, and only
+    the question it was given can say. The query goes out as written and the
+    result says what today is, because a model working in the year it remembers
+    was measured doing exactly this (2026-09-26: "giá STB ngày 26/9/2025" on 26
+    September 2026) and a sentence it reads next is the cheapest correction.
+    """
+    today = now.astimezone(ICT).date()
+    past = sorted({int(year) for year in _QUERY_YEAR.findall(query) if int(year) < today.year})
+    if not past:
+        return None
+    years = ", ".join(str(year) for year in past)
+    return (
+        f"Hôm nay là {today.strftime('%d/%m/%Y')}. Truy vấn này tìm theo năm {years}. "
+        "Nếu câu hỏi hỏi về hiện tại, tìm lại với năm hiện tại hoặc bỏ năm."
+    )
+
+
 def _terms(looking_for: str) -> tuple[str, ...]:
     """The distinct words of a question, lowercased, shortest ones dropped."""
     found = re.findall(r"\w+", (looking_for or "").lower(), flags=re.UNICODE)
@@ -803,7 +826,9 @@ class WebTools:
     async def web_search(
         self, context: ToolContext, arguments: Mapping[str, Any]
     ) -> Mapping[str, Any]:
-        return await asyncio.to_thread(self._web_search, dict(arguments), context.as_of)
+        found = await asyncio.to_thread(self._web_search, dict(arguments), context.as_of)
+        note = year_note(str(arguments.get("query") or ""), context.now or datetime.now(timezone.utc))
+        return {**found, "year_note": note} if note else found
 
     def _web_search(
         self, arguments: Mapping[str, Any], as_of: datetime | None = None

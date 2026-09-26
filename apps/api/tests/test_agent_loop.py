@@ -397,7 +397,7 @@ def _world():
 @pytest.mark.asyncio
 async def test_the_answer_is_exactly_the_concatenation_of_its_deltas() -> None:
     publisher = RecordingPublisher()
-    client = FakeClient([wants("web_search"), answer("Khoảng 6,5% một năm.")])
+    client = FakeClient([wants("web_search"), answer("Khoảng sáu phẩy năm phần trăm một năm.")])
 
     outcome = await loop(client, publisher=publisher).run(turn_request())
 
@@ -417,7 +417,7 @@ async def test_prose_before_a_tool_call_is_narration_and_not_the_answer() -> Non
                 text="Để tôi tra đã.",
                 tool_calls=(ToolCall(id="c1", name="web_search", arguments={"query": "x"}),),
             ),
-            answer("Kết quả là 6,5%."),
+            answer("Kết quả là sáu phẩy năm phần trăm."),
         ]
     )
 
@@ -426,14 +426,14 @@ async def test_prose_before_a_tool_call_is_narration_and_not_the_answer() -> Non
     # The sentence that introduced the search describes work, so it goes to the
     # timeline. The reply is what is left.
     assert publisher.thoughts == ["Để tôi tra đã."]
-    assert publisher.deltas == ["Kết quả là 6,5%."]
+    assert publisher.deltas == ["Kết quả là sáu phẩy năm phần trăm."]
     assert "".join(publisher.deltas) == outcome.answer
     assert outcome.thoughts == ({"round": 0, "text": "Để tôi tra đã."},)
 
     # The load-bearing half: splitting the two for the screen must not change
     # what the model is shown next Turn, so the full string still holds both,
     # joined exactly as it was before the split existed.
-    assert outcome.text == "Để tôi tra đã.\n\nKết quả là 6,5%."
+    assert outcome.text == "Để tôi tra đã.\n\nKết quả là sáu phẩy năm phần trăm."
 
     # The narration precedes the call it introduced, and both precede the reply:
     # the transcript on screen has to read in the order it happened. The loop's
@@ -487,14 +487,14 @@ async def test_a_round_of_tools_with_no_reply_is_nudged_once_and_then_answers() 
         [
             narrated("Để tôi tra đã."),
             Completion(model=SESSION_MODEL, text=None),
-            answer("Kết quả là 6,5%."),
+            answer("Kết quả là sáu phẩy năm phần trăm."),
         ]
     )
 
     outcome = await loop(client).run(turn_request())
 
     assert outcome.status is TurnStatus.COMPLETE
-    assert outcome.answer == "Kết quả là 6,5%."
+    assert outcome.answer == "Kết quả là sáu phẩy năm phần trăm."
     # Three calls: the round, the round that answered nothing, and the one the
     # nudge bought. The nudge does not spend a round.
     assert len(client.requests) == 3
@@ -530,7 +530,7 @@ async def test_the_nudge_is_spent_once_and_the_narration_survives_the_turn() -> 
 
 @pytest.mark.asyncio
 async def test_a_reply_that_arrives_without_narration_is_not_nudged() -> None:
-    client = FakeClient([wants("web_search"), answer("Kết quả là 6,5%.")])
+    client = FakeClient([wants("web_search"), answer("Kết quả là sáu phẩy năm phần trăm.")])
 
     outcome = await loop(client).run(turn_request())
 
@@ -1680,7 +1680,7 @@ async def test_the_trail_opens_with_the_lane_and_why_it_was_chosen() -> None:
 @pytest.mark.asyncio
 async def test_every_asking_of_the_model_is_opened_and_closed_in_order() -> None:
     publisher = RecordingPublisher()
-    client = FakeClient([wants("web_search"), answer("Khoảng 6,5%.")])
+    client = FakeClient([wants("web_search"), answer("Khoảng sáu phẩy năm phần trăm.")])
 
     outcome = await loop(client, publisher=publisher).run(turn_request())
 
@@ -1922,7 +1922,7 @@ async def test_no_part_of_the_trail_reaches_the_model() -> None:
         [
             ContextOverflow("the input did not fit"),
             wants("web_search"),
-            answer("Khoảng 6,5%."),
+            answer("Khoảng sáu phẩy năm phần trăm."),
         ]
     )
     request = turn_request(history=long_history())
@@ -1978,7 +1978,7 @@ def test_an_extra_key_on_a_stored_message_cannot_change_what_the_model_sees():
                 seq=2,
                 role="assistant",
                 content=assistant_message(
-                    text="Khoảng 6,5%.", status="complete", **extra
+                    text="Khoảng sáu phẩy năm phần trăm.", status="complete", **extra
                 ),
                 created_at=when,
             ),
@@ -2648,7 +2648,7 @@ async def test_every_turn_carries_the_web_first_domain_body() -> None:
                     ToolCall(id="c1", name="web_search", arguments={"query": "x"}),
                 ),
             ),
-            answer("Khoảng 6,5%."),
+            answer("Khoảng sáu phẩy năm phần trăm."),
         ]
     )
 

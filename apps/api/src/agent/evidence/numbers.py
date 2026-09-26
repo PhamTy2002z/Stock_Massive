@@ -71,6 +71,8 @@ MAGNITUDES: tuple[tuple[str, Decimal], ...] = (
     ("nghin", Decimal(10) ** 3),
     ("ngan", Decimal(10) ** 3),
     ("thousand", Decimal(10) ** 3),
+    # ``56.5k`` — how a chat answer writes a price in thousands of dong.
+    ("k", Decimal(10) ** 3),
 )
 
 #: One number as a page writes it. Grouped thousands first, so ``1.234`` is read
@@ -296,6 +298,10 @@ def _unit_beside(occurrence: Occurrence, unit_key: str) -> bool:
 
 def _magnitude(trailing: str) -> Decimal | None:
     """The factor the word after a number scales it by, if there is one."""
+    if trailing.lstrip().lower().startswith(("ngân", "ngan hang")):
+        # "10 ngân hàng" is ten banks. Folding erases the one mark that tells
+        # ``ngân`` from ``ngàn``, so the word is read before it is folded.
+        return None
     folded = fold(trailing).lstrip()
     for word, factor in MAGNITUDES:
         if folded.startswith(word):

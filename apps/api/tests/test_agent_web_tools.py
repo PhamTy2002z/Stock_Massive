@@ -995,3 +995,24 @@ async def test_a_page_without_a_title_is_still_named():
     assert web._named_from({}, "https://x.example/quan-he-co-dong.html") == (
         "quan-he-co-dong.html"
     )
+
+
+# -- a query searching a year already past ---------------------------------
+
+
+def test_a_query_naming_a_past_year_says_what_today_is():
+    from datetime import datetime as _dt, timezone as _tz
+
+    from src.agent.tools.web import year_note
+
+    now = _dt(2026, 9, 26, 7, 0, tzinfo=_tz.utc)
+
+    note = year_note("STB giá cổ phiếu ngày 26/9/2025", now)
+
+    assert note is not None
+    assert note.startswith("Hôm nay là 26/09/2026")
+    assert "2025" in note
+    assert year_note("STB giá cổ phiếu 2026", now) is None
+    assert year_note("STB giá cổ phiếu hôm nay", now) is None
+    # A price or a count is not a year.
+    assert year_note("STB 56500 đồng 12000 cổ phiếu", now) is None
