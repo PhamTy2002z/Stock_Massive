@@ -455,11 +455,9 @@ def test_the_projection_does_not_add_a_second_scan():
     """
     import inspect
 
-    from golden import context_replay
     from src.agent import messages
 
-    for module in (messages, context_replay):
-        assert "scan_for_threats" not in inspect.getsource(module)
+    assert "scan_for_threats" not in inspect.getsource(messages)
 
 
 def test_the_projection_is_still_wrapped_as_outside_content():

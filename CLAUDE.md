@@ -40,7 +40,7 @@ Backend (run on the host, from `apps/api`; the Makefile prefers `.venv/`):
 make test                                              # full suite
 make test-one T=tests/test_agent_loop.py K="tool"      # one file / -k filter
 .venv/bin/pytest tests/test_agent_loop.py::test_name -q
-python -m compileall -q src golden tests
+python -m compileall -q src tests
 ```
 
 `pytest.ini` excludes the `network` (live vnstock), `redis_server` and
@@ -60,18 +60,8 @@ pnpm --dir apps/web test:e2e                    # playwright; boots tests.e2e.se
 `next build` writes into `.next` and breaks a running `next dev`; build into
 another dir instead: `E2E_NEXT_DIST_DIR=.next-verify pnpm --dir apps/web build`.
 
-Golden harness (answer quality is measured, never asserted). Runs spend real
-money and refuse to start without a ceiling; grading an existing artifact is free:
-
-```bash
-make golden-release CEILING_USD=<amount> TRIALS=<n>
-make golden-grade ARTIFACT=golden/artifacts/<file>.json
-```
-
-The runner reads `.env` relative to `apps/api`, so the root `.env` is not loaded,
-and its `LLM_BASE_URL`/`DATABASE_URL` are container values. A local Homebrew
-Postgres also shadows the Docker one on `localhost`. Follow the env setup in
-`apps/api/golden/README.md` before any host-side run that touches the DB or LLM.
+A local Homebrew Postgres shadows the Docker one on `localhost`; a host-side run
+that touches the DB must point `DATABASE_URL` at the container explicitly.
 
 ## Architecture
 
@@ -137,7 +127,6 @@ Vietnamese). The big picture:
 
 ## References
 
-- `apps/api/golden/README.md` — golden dimensions, thresholds, host env.
 - `plans/260906-1557-financial-research-agent/` — current (proposed, not yet
   approved) system plan; `plans/260905-0001-signal-desk-visual-harness/` blocks it.
 - `docs/hermes/` (start from `hermes-synthesis-*.md`) and `docs/opencode/` are

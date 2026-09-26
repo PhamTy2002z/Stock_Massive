@@ -1,6 +1,6 @@
 # API Development Commands
 
-.PHONY: dev run test lint clean golden-run golden-grade golden-release golden-context-export golden-context-replay probe-prompt-cache probe-vision
+.PHONY: dev run test lint clean probe-prompt-cache probe-vision
 
 # Use venv python if exists
 PYTHON := $(shell if [ -d ".venv" ]; then echo ".venv/bin/python"; else echo "python"; fi)
@@ -52,44 +52,3 @@ clean:
 probe-prompt-cache:
 	@test -n "$(CEILING_USD)" || (echo "CEILING_USD=<amount> is required" >&2; exit 2)
 	$(PYTHON) -m scripts.probe_prompt_cache --ceiling-usd "$(CEILING_USD)" $(PROBE_ARGS)
-
-# The golden harness (apps/api/golden). Running and grading are two targets on
-# purpose: a run spends real money, and a score has to be repeatable for free.
-#
-# CEILING_USD has no default and the runner refuses to start without it. The
-# whole model envelope is $45 a month, so an unbounded run is not a thing this
-# repository knows how to do.
-golden-run:
-	@test -n "$(CEILING_USD)" || (echo "CEILING_USD is required: a run spends real money" >&2; exit 2)
-	$(PYTHON) -m golden.run --ceiling-usd "$(CEILING_USD)" $(if $(MODE),--mode "$(MODE)",) $(GOLDEN_ARGS)
-
-# Rebuild every context one finished run constructed, from its own trace. Two
-# halves on purpose: ``golden-context-export`` reads the store once, and
-# ``golden-context-replay`` is pure — no network, no model, no clock — so a
-# number from before a change and a number from after it differ only by the
-# change.
-golden-context-export:
-	@test -n "$(ARTIFACT)" || (echo "ARTIFACT=<path> is required" >&2; exit 2)
-	$(PYTHON) -m golden.context_replay export --artifact "$(ARTIFACT)" $(if $(CORPUS),--out "$(CORPUS)",)
-
-golden-context-replay:
-	@test -n "$(OUT)" || (echo "OUT=<path> is required" >&2; exit 2)
-	$(PYTHON) -m golden.context_replay replay $(if $(CORPUS),--corpus "$(CORPUS)",) --out "$(OUT)"
-
-# Reads one artifact file. No network, no database, no model.
-golden-grade:
-	@test -n "$(ARTIFACT)" || (echo "ARTIFACT=path/to/artifact.json is required" >&2; exit 2)
-	$(PYTHON) -m golden.grade "$(ARTIFACT)" $(GRADE_ARGS)
-
-# The whole release corpus behind one invocation: run, rubric pass, score, gate.
-# Roadmap §10 Phase 1 asks for one command because a four-step measurement is a
-# measurement somebody eventually runs three steps of. The exit code is the
-# verdict: 0 green, 1 a hard dimension under 100% or a run that did not finish,
-# 2 an artifact that cannot be scored at all.
-#
-# TRIALS defaults to one. The first trial records the tape and the rest replay
-# it, so a multi-trial baseline varies the model and nothing else.
-golden-release:
-	@test -n "$(CEILING_USD)" || (echo "CEILING_USD is required: a run spends real money" >&2; exit 2)
-	$(PYTHON) -m golden.release --ceiling-usd "$(CEILING_USD)" \
-		--trials "$(or $(TRIALS),1)" $(RELEASE_ARGS)

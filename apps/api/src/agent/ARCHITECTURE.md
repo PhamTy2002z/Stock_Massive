@@ -206,8 +206,8 @@ là request/response theo Turn, và một pause giữa Turn cần một hợp đ
 
 ## 10. Rủi ro còn lại
 
-- Chất lượng reasoning thực tế chưa được đo: prompt và mô tả tool mới chưa chạy
-  qua golden harness (`make golden-release`, tốn tiền thật).
+- Chất lượng reasoning thực tế chưa được đo bằng bộ chấm tự động; kiểm chứng số
+  trong câu trả lời là lớp tất định chạy ở mọi Turn, không phải thước đo chất lượng.
 - Việc dùng lại call y hệt so chữ ký tuyệt đối của tham số; hai truy vấn gần
   giống nhau vẫn là hai call. Cảnh báo no-progress vẫn là lưới cho trường hợp đó.
 - `loop.py` vẫn là một file lớn; tách nó là việc bảo trì riêng.
