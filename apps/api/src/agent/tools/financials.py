@@ -232,6 +232,128 @@ class KbsFinancials:
         )
 
 
+#: Vietcap's ratio fields this tool reports, by the name a reader sees. Ratios
+#: arrive as fractions and are printed as percentages; a field the source sets to
+#: exactly 0 is treated as not published (CAR is 0 in every quarter the bank did
+#: not disclose it, not a bank with no capital).
+_VCI_FIELDS: tuple[tuple[str, str, str, float], ...] = (
+    ("npl", "Tỷ lệ nợ xấu (NPL)", "%", 100.0),
+    ("car", "Hệ số an toàn vốn (CAR)", "%", 100.0),
+    ("loansLossReservesToNPLs", "Tỷ lệ bao phủ nợ xấu (dự phòng/nợ xấu)", "%", 100.0),
+    ("roe", "ROE {span}", "%", 100.0),
+    ("roa", "ROA {span}", "%", 100.0),
+    ("netInterestMargin", "Biên lãi thuần (NIM) {span}", "%", 100.0),
+    ("ldrLoanDepositRatio", "Tỷ lệ cho vay/huy động (LDR)", "%", 100.0),
+    ("casaRatio", "Tỷ lệ CASA", "%", 100.0),
+    ("pb", "P/B", "lần", 1.0),
+    ("pe", "P/E", "lần", 1.0),
+    ("grossMargin", "Biên lợi nhuận gộp {span}", "%", 100.0),
+    ("afterTaxProfitMargin", "Biên lợi nhuận sau thuế {span}", "%", 100.0),
+    ("debtToEquity", "Nợ/Vốn chủ sở hữu", "lần", 1.0),
+    ("marketCap", "Vốn hóa", "tỷ đồng", 1e-9),
+)
+
+
+def pair_vci(records: Sequence[Mapping[str, Any]], *, quarterly: bool) -> tuple[list[Period], list[str]]:
+    """Vietcap's ratio rows as periods; a period listed twice is dropped."""
+    rows = []
+    for record in records:
+        try:
+            year = int(record.get("year"))
+            quarter = int(record.get("quarter"))
+        except (TypeError, ValueError):
+            continue
+        kind = str(record.get("ratioType") or "")
+        if quarterly and kind == "RATIO_TTM" and 1 <= quarter <= 4:
+            rows.append(((year, quarter), record))
+        elif not quarterly and (kind == "RATIO_YEAR" or quarter == 5):
+            rows.append(((year, None), record))
+    seen = Counter(key for key, _ in rows)
+    span = "4 quý gần nhất" if quarterly else "cả năm"
+    periods: list[Period] = []
+    dropped: list[str] = []
+    for (year, quarter), record in rows:
+        label = f"Quý {quarter}/{year}" if quarter else f"Năm {year}"
+        if seen[(year, quarter)] > 1:
+            if label not in dropped:
+                dropped.append(label)
+            continue
+        figures = []
+        for field_name, name, unit, scale in _VCI_FIELDS:
+            raw = record.get(field_name)
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if value != value or value == 0.0:  # NaN, or not published
+                continue
+            if field_name == "loansLossReservesToNPLs":
+                # Reported with the reserve's balance-sheet sign; coverage is its size.
+                value = abs(value)
+            figures.append(Figure(name=name.format(span=span).strip(), value=round(value * scale, 2), unit=unit))
+        periods.append(
+            Period(year=year, quarter=quarter, ended=_period_end(year, quarter), published=None, figures=tuple(figures))
+        )
+    periods.sort(key=lambda item: item.ended, reverse=True)
+    return periods, dropped
+
+
+class VciFinancials:
+    """Vietcap's ratio feed. Development and tests only (owner, 2026-09-26).
+
+    The one free source found with a bank's NPL by quarter. Read raw through
+    vnstock's client: its parser keeps the *first* four rows of a series sorted
+    oldest-first, which is why it only ever returned 2018.
+    """
+
+    publisher = "Vietcap"
+    source = "vci"
+    not_carried: tuple[str, ...] = ()
+
+    def ratios(self, symbol: str, *, quarterly: bool, periods: int) -> Statement:
+        _import_vnstock()
+        try:
+            vci = importlib.import_module("vnstock.explorer.vci.financial")
+            finance = vci.Finance(symbol=symbol, period="quarter" if quarterly else "year")
+            frame = finance._get_report(
+                "ratio", mode="raw", limit=10_000, period="quarter" if quarterly else "year"
+            )
+            records = frame.to_dict(orient="records")
+        except Exception as exc:  # noqa: BLE001 - provider failures become a stable code
+            raise MarketDataError(
+                "provider_unavailable", "the statements provider did not answer this call"
+            ) from exc
+        paired, dropped = pair_vci(records, quarterly=quarterly)
+        encoded = json.dumps(records, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        return Statement(
+            symbol=symbol,
+            publisher=self.publisher,
+            source=self.source,
+            periods=tuple(paired[:periods]),
+            dropped=tuple(dropped),
+            not_carried=self.not_carried,
+            raw_sha256=hashlib.sha256(encoded).hexdigest(),
+        )
+
+
+#: Metrics a question often turns on, and the token that finds each in a
+#: figure's name — so the result can say when no source had it for the latest
+#: period, rather than leaving the model to fill the gap.
+WATCHED_METRICS = {"tỷ lệ nợ xấu (NPL)": "NPL", "hệ số an toàn vốn (CAR)": "CAR"}
+
+
+def missing_latest(statements: Sequence[Statement]) -> list[str]:
+    """Watched metrics no source published for its latest period."""
+    missing = []
+    for label, token in WATCHED_METRICS.items():
+        if not any(
+            statement.periods and any(token in figure.name for figure in statement.periods[0].figures)
+            for statement in statements
+        ):
+            missing.append(label)
+    return missing
+
+
 def _number(value: float, unit: str) -> str:
     """A figure the way a Vietnamese page prints it, with its unit."""
     whole = float(value).is_integer() and abs(value) >= 1000
@@ -269,10 +391,13 @@ class FinancialsTools:
         self,
         *,
         settings: Settings | None = None,
-        provider: FinancialsProvider | None = None,
+        providers: Sequence[FinancialsProvider] | None = None,
     ) -> None:
         self._settings_override = settings
-        self._provider = provider or KbsFinancials()
+        # Both free sources, each for what only it has: KB's quarterly ROE,
+        # EPS and book value; Vietcap's asset quality. A paid provider replaces
+        # the pair by implementing the same protocol.
+        self._providers = tuple(providers) if providers else (KbsFinancials(), VciFinancials())
 
     def _settings(self) -> Settings:
         return self._settings_override or get_settings()
@@ -291,7 +416,8 @@ class FinancialsTools:
                 description=(
                     "Read one listed Vietnamese company's reported financial ratios "
                     "by quarter or year: valuation (EPS, BVPS, P/E, P/B), "
-                    "profitability (ROE, ROA, NIM, CIR), growth and liquidity. Use "
+                    "profitability (ROE, ROA, NIM, CIR), and for banks asset quality "
+                    "(NPL, coverage, CAR when published), LDR and CASA. Use "
                     "it for any ratio before searching the web, and quote each "
                     "figure with its period. Each line starts with the period's end "
                     "date. The result says which metrics the source does not carry; "
@@ -348,33 +474,58 @@ class FinancialsTools:
             raise MarketDataError(
                 "provider_unavailable", "financial statements are not enabled on this deployment"
             )
-        statement = self._provider.ratios(symbol, quarterly=quarterly, periods=periods)
-        if not statement.periods:
+        statements: list[Statement] = []
+        failed: list[str] = []
+        for provider in self._providers:
+            try:
+                statement = provider.ratios(symbol, quarterly=quarterly, periods=periods)
+            except MarketDataError:
+                failed.append(provider.publisher)
+                continue
+            if statement.periods:
+                statements.append(statement)
+        if not statements:
             raise MarketDataError("no_data", f"no unambiguous periods for {symbol}")
         now = (context.now or datetime.now(tz=ICT)).astimezone(ICT)
-        latest = statement.periods[0]
+        latest = max((statement.periods[0] for statement in statements), key=lambda p: p.ended)
+        missing = missing_latest(statements)
+        excerpt = "\n".join(
+            render(Statement(**{**statement.__dict__, "not_carried": ()})) for statement in statements
+        )
+        if failed:
+            excerpt += "\nKhông trả lời lượt này: " + ", ".join(failed)
+        if missing:
+            excerpt += "\nKỳ gần nhất chưa có trong nguồn nào: " + ", ".join(missing)
+        digest = hashlib.sha256("".join(s.raw_sha256 for s in statements).encode()).hexdigest()
         return {
             "symbol": symbol,
-            "publisher": statement.publisher,
-            "source": statement.source,
+            "publisher": "; ".join(statement.publisher for statement in statements),
+            "source": "+".join(statement.source for statement in statements),
             "source_class": "store",
             "evidence_kind": "store_figure",
             "title": f"{symbol} · chỉ số tài chính · {latest.label}",
             "as_of": datetime.combine(latest.ended, datetime.min.time(), tzinfo=ICT).isoformat(),
             "retrieved_at": now.isoformat(),
-            "content_sha256": statement.raw_sha256,
-            "periods": [
+            "content_sha256": digest,
+            "statements": [
                 {
-                    "label": period.label,
-                    "ended": period.ended.isoformat(),
-                    "published": period.published.isoformat() if period.published else None,
-                    "figures": {figure.name: [figure.value, figure.unit] for figure in period.figures},
+                    "publisher": statement.publisher,
+                    "periods": [
+                        {
+                            "label": period.label,
+                            "ended": period.ended.isoformat(),
+                            "published": period.published.isoformat() if period.published else None,
+                            "figures": {f.name: [f.value, f.unit] for f in period.figures},
+                        }
+                        for period in statement.periods
+                    ],
+                    "dropped_periods": list(statement.dropped),
                 }
-                for period in statement.periods
+                for statement in statements
             ],
-            "dropped_periods": list(statement.dropped),
-            "not_carried": list(statement.not_carried),
-            "excerpt": render(statement),
+            "unavailable_providers": failed,
+            "not_carried": missing,
+            "excerpt": excerpt,
         }
 
 
@@ -394,6 +545,9 @@ __all__ = [
     "Figure",
     "KbsFinancials",
     "NOT_IN_KBS",
+    "VciFinancials",
+    "missing_latest",
+    "pair_vci",
     "Period",
     "Statement",
     "TOOL_NAME",

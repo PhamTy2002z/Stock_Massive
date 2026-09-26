@@ -63,12 +63,31 @@ class FakeProvider:
         )
 
 
+VCI_ROWS = [
+    {"year": "2026", "quarter": 2, "ratioType": "RATIO_TTM", "npl": 0.0754007947, "car": 0.0, "roe": 0.0499, "loansLossReservesToNPLs": -0.5667, "pb": 2.2962, "marketCap": 144219002274000.0},
+    {"year": "2025", "quarter": 4, "ratioType": "RATIO_TTM", "npl": 0.064076, "car": 0.0, "roe": 0.1034, "pb": 2.0248},
+    {"year": "2025", "quarter": 2, "ratioType": "RATIO_TTM", "npl": 0.024615, "car": 0.0969, "roe": 0.207, "pb": 1.9098},
+    {"year": "2025", "quarter": 5, "ratioType": "RATIO_YEAR", "npl": 0.064, "roe": 0.103},
+]
+
+
+class FakeVci:
+    publisher = "Vietcap"
+    source = "vci"
+    not_carried = ()
+
+    def ratios(self, symbol: str, *, quarterly: bool, periods: int) -> financials.Statement:
+        paired, dropped = financials.pair_vci(VCI_ROWS, quarterly=quarterly)
+        return financials.Statement(symbol=symbol, publisher=self.publisher, source=self.source,
+                                    periods=tuple(paired[:periods]), dropped=tuple(dropped), raw_sha256="f" * 64)
+
+
 def settings(**overrides: Any) -> Settings:
     return Settings(**{"deployment_profile": INTERNAL_PROFILE, "market_data_enabled": True, **overrides})
 
 
 def tool(**overrides: Any) -> financials.FinancialsTools:
-    return financials.FinancialsTools(settings=settings(**overrides), provider=FakeProvider())
+    return financials.FinancialsTools(settings=settings(**overrides), providers=[FakeProvider()])
 
 
 # -- the adapter -----------------------------------------------------------
@@ -274,3 +293,52 @@ def test_a_calculation_is_cited_for_the_ticker_it_was_run_for():
     [figure] = report.figures
     assert figure.status is FigureStatus.GROUNDED
     assert figure.evidence_id == grounding.collect_sources([pb_a]).items[0].evidence.evidence_id
+
+
+def test_vietcap_rows_become_percentages_and_an_unpublished_car_is_absent():
+    periods, dropped = financials.pair_vci(VCI_ROWS, quarterly=True)
+
+    assert [p.label for p in periods] == ["Quý 2/2026", "Quý 4/2025", "Quý 2/2025"]
+    latest = {f.name: (f.value, f.unit) for f in periods[0].figures}
+    assert latest["Tỷ lệ nợ xấu (NPL)"] == (7.54, "%")
+    assert latest["Tỷ lệ bao phủ nợ xấu (dự phòng/nợ xấu)"] == (56.67, "%")
+    assert latest["ROE 4 quý gần nhất"] == (4.99, "%")
+    assert latest["Vốn hóa"] == (144219.0, "tỷ đồng")
+    # 0.0 is how the feed says "not disclosed this quarter".
+    assert "Hệ số an toàn vốn (CAR)" not in latest
+    assert {f.name: f.value for f in periods[2].figures}["Hệ số an toàn vốn (CAR)"] == 9.69
+    yearly, _ = financials.pair_vci(VCI_ROWS, quarterly=False)
+    assert [p.label for p in yearly] == ["Năm 2025"]
+
+
+def test_both_sources_render_and_the_latest_quarters_gaps_are_named():
+    both = financials.FinancialsTools(settings=settings(), providers=[FakeProvider(), FakeVci()])
+
+    result = both.get_financial_ratios(ToolContext(user_id=1, now=NOW), {"symbol": "STB"})
+
+    assert result["publisher"] == "KB Securities; Vietcap"
+    assert "nguồn Vietcap" in result["excerpt"] and "nguồn KB Securities" in result["excerpt"]
+    assert "Tỷ lệ nợ xấu (NPL) 7,54%" in result["excerpt"]
+    # NPL is published for the latest quarter by Vietcap; CAR by nobody.
+    assert result["not_carried"] == ["hệ số an toàn vốn (CAR)"]
+    assert "Kỳ gần nhất chưa có trong nguồn nào: hệ số an toàn vốn (CAR)" in result["excerpt"]
+
+    report = check("NPL của STB quý 2/2026 là 7,54%.", [_call("f9", "get_financial_ratios", dict(result))])
+    assert [f.status for f in report.figures] == [FigureStatus.GROUNDED]
+
+
+def test_one_source_down_still_answers_from_the_other():
+    class Down:
+        publisher = "KB Securities"
+        source = "kbs"
+        not_carried = ()
+
+        def ratios(self, *args: Any, **kwargs: Any) -> financials.Statement:
+            raise MarketDataError("provider_unavailable", "down")
+
+    result = financials.FinancialsTools(settings=settings(), providers=[Down(), FakeVci()]).get_financial_ratios(
+        ToolContext(user_id=1, now=NOW), {"symbol": "STB"}
+    )
+
+    assert result["unavailable_providers"] == ["KB Securities"]
+    assert "Không trả lời lượt này: KB Securities" in result["excerpt"]
