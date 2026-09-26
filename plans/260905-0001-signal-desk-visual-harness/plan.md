@@ -8,6 +8,7 @@ issue: null
 branch: "feat/signal-desk-mode"
 tags: [feature, backend, frontend, api, experimental]
 blockedBy: []
+blocks: [260906-1557-financial-research-agent]
 created: 2026-09-05
 ---
 
@@ -137,9 +138,9 @@ retired Study/Board/widget stack.
 | 2 | [Flint contract spike](./phase-02-flint-contract-spike.md) | Done | 2h | 1 |
 | 3 | [Vnstock market-data capability](./phase-03-vnstock-market-data-capability.md) | Done | 8h | 1 |
 | 4 | [Signal Desk mode + market evidence](./phase-04-evidence-readiness-agent-loop.md) | Done | 6h | 3 |
-| 5 | [Flint visual-artifact core](./phase-05-flint-visual-artifact-core.md) | Todo | 10h | 2, 4 |
-| 6 | [Signal Desk right panel](./phase-06-signal-desk-right-panel.md) | Todo | 10h | 5 |
-| 7 | [End-to-end quality gate](./phase-07-end-to-end-quality-gate.md) | Todo | 12h | 6 |
+| 5 | [Flint visual-artifact core](./phase-05-flint-visual-artifact-core.md) | Done | 10h | 2, 4 |
+| 6 | [Signal Desk right panel](./phase-06-signal-desk-right-panel.md) | Done | 10h | 5 |
+| 7 | [End-to-end quality gate](./phase-07-end-to-end-quality-gate.md) | Blocked | 12h | 6 |
 
 Phases are sequential at the roadmap level. Phase 2 and 3 may be developed in
 parallel only after Phase 1 is accepted because they do not share runtime files;
@@ -182,6 +183,19 @@ Phase 4 starts only after the market contract is fixed.
       quality gate is run once as part of the combined visual/evidence corpus.
 - [ ] API focused/full suites, migration check if needed, web lint/type/test/build,
       `compileall`, `git diff --check` and retired-path scan pass.
+
+## Phase 7 Blocker
+
+Downstream planning: [Financial Research Agent](../260906-1557-financial-research-agent/plan.md)
+nhận baseline/graduation của plan này. Đây chỉ là dependency tài liệu: không
+mở thêm scope, không thay gate và không đổi trạng thái Phase 7. Plan mới không
+là dependency ngược của plan này.
+
+Mọi gate offline của Phase 7 đã xanh; phần còn lại cần quyết định của product
+owner, không phải code: một `CEILING_USD`/`TRIALS` cho `make golden-release`,
+cộng một canary read-only tới provider Vnstock. Chi tiết, cùng hai defect Phase 4
+mà phase này phát hiện và sửa, nằm trong
+[graduation report](./reports/graduation-report.md).
 
 ## Risks And Rollback
 

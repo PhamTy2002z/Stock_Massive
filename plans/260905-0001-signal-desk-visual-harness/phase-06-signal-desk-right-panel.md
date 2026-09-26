@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "Signal Desk Right Panel"
-status: todo
+status: done
 priority: P1
 effort: "10h"
 dependencies: [5]

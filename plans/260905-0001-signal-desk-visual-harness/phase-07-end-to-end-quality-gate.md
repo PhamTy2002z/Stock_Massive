@@ -1,7 +1,7 @@
 ---
 phase: 7
 title: "End To End Quality Gate"
-status: todo
+status: blocked
 priority: P1
 effort: "12h"
 dependencies: [6]

@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Flint Visual Artifact Core"
-status: todo
+status: done
 priority: P1
 effort: "10h"
 dependencies: [2, 4]
