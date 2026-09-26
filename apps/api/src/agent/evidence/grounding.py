@@ -1035,11 +1035,18 @@ def annotate(report: GroundingReport, *, cite: bool = True) -> str:
     pieces.append(answer[cursor:])
     annotated = "".join(pieces)
 
+    # Markdown blocks, not bare lines: consecutive lines are one paragraph to a
+    # renderer, and the source list would read as a single run-on sentence.
     footer: list[str] = []
     if order:
-        footer.append(SOURCES_HEADING)
-        for index, address in enumerate(order, start=1):
-            footer.append(f"[{index}] {_source_line(by_id[shown[address]])}")
+        footer.append(
+            SOURCES_HEADING
+            + "\n\n"
+            + "\n".join(
+                f"- [{index}] {_source_line(by_id[shown[address]])}"
+                for index, address in enumerate(order, start=1)
+            )
+        )
     if report.unverified:
         footer.append(
             f"Số có nhãn [{UNVERIFIED_LABEL}] không có trong dữ liệu công cụ của lượt "
@@ -1047,12 +1054,12 @@ def annotate(report: GroundingReport, *, cite: bool = True) -> str:
         )
     if report.stale and cite:
         footer.append(
-            f"Số có nhãn [{STALE_LABEL}] lấy từ nguồn đăng hơn {WEB_FRESH_DAYS} ngày "
+            f"Số có nhãn {STALE_LABEL} lấy từ nguồn đăng hơn {WEB_FRESH_DAYS} ngày "
             "trước hôm nay."
         )
     if not footer:
         return annotated
-    return f"{annotated.rstrip()}\n\n---\n" + "\n".join(footer)
+    return f"{annotated.rstrip()}\n\n---\n\n" + "\n\n".join(footer)
 
 
 def _label(

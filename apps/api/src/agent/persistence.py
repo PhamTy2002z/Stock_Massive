@@ -84,6 +84,56 @@ THREAD_TITLE_LENGTH = 60
 INTERRUPTED_REASON = "interrupted_restart"
 
 
+def flagged_answers(
+    session: Session,
+    *,
+    reason: str | None = None,
+    since: datetime | None = None,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    """The answers readers flagged, newest flag first, each with what it answered.
+
+    This is the queue a "báo sai" press feeds: the message, the question that
+    produced it (the last user message before it in the Thread), the reason, and
+    the claim ledger the figure check wrote beside it — which is what a reviewer
+    needs to tell a wrong figure from a figure the check wrongly accepted.
+    """
+    query = select(AgentMessage).where(AgentMessage.flagged_reason.is_not(None))
+    if reason is not None:
+        query = query.where(AgentMessage.flagged_reason == reason)
+    if since is not None:
+        query = query.where(AgentMessage.flagged_at >= since)
+    query = query.order_by(AgentMessage.flagged_at.desc()).limit(limit)
+    cases: list[dict[str, Any]] = []
+    for message in session.execute(query).scalars():
+        question = session.execute(
+            select(AgentMessage.content)
+            .where(
+                AgentMessage.thread_id == message.thread_id,
+                AgentMessage.role == "user",
+                AgentMessage.id < message.id,
+            )
+            .order_by(AgentMessage.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        ledger = session.execute(
+            select(AgentClaimLedger.payload).where(AgentClaimLedger.message_id == message.id)
+        ).scalar_one_or_none()
+        content = message.content if isinstance(message.content, Mapping) else {}
+        cases.append(
+            {
+                "message_id": message.id,
+                "thread_id": str(message.thread_id),
+                "reason": message.flagged_reason,
+                "flagged_at": message.flagged_at.isoformat() if message.flagged_at else None,
+                "question": (question or {}).get("text") if isinstance(question, Mapping) else None,
+                "answer": content.get("answer") or content.get("text"),
+                "claim_ledger": ledger,
+            }
+        )
+    return cases
+
+
 def flag_counts_between(
     session: Session,
     *,

@@ -334,6 +334,38 @@
     animation: vg-bar-grow 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
+  /* The host's figure labels (`figure-markers.ts`). Small, tabular and in the
+     line of text, so a table of figures stays readable with a chip on every
+     cell. Doubt is the caution tone; the market's up/down colours mean
+     direction and can be swapped by the reader, so they are never used here. */
+  .vg-figure {
+    display: inline-block;
+    margin-left: 0.2em;
+    padding: 0 0.35em;
+    border-radius: 0.3em;
+    font-size: 0.72em;
+    line-height: 1.5;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    vertical-align: 0.08em;
+    cursor: help;
+  }
+  .vg-figure-cited {
+    color: hsl(var(--ink-3));
+    background: hsl(var(--surface-raised));
+  }
+  .vg-figure-stale {
+    color: hsl(var(--caution));
+    background: hsl(var(--surface-raised));
+    border: 1px dashed hsl(var(--caution) / 0.55);
+  }
+  .vg-figure-unverified {
+    color: hsl(var(--caution));
+    background: hsl(var(--caution) / 0.12);
+    border: 1px solid hsl(var(--caution) / 0.45);
+  }
+
   /* 0.26s is `CHUNK_FADE_MS` in `word-cadence.ts`, which is how the surface
      knows when the last word has finished arriving and the canonical message
      may take the draft's place. `backwards` keeps the first frame at zero

@@ -1,9 +1,10 @@
 "use client"
 
-import { useRef, type ComponentPropsWithoutRef } from "react"
+import { useMemo, useRef, type ComponentPropsWithoutRef } from "react"
 import ReactMarkdown, { type Options } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
+import { readSources, rehypeFigureMarkers } from "@/lib/alpha-desk/figure-markers"
 import { rehypeWordCadence } from "@/lib/alpha-desk/word-cadence"
 import { cn } from "@/lib/utils"
 
@@ -38,6 +39,11 @@ import { MarkdownCopyButton } from "./markdown-copy-button"
  * for it: the same message rendered from history is text that was always there,
  * and a fade on a re-render would animate a paragraph the reader is part-way
  * through.
+ *
+ * **The host's figure labels become chips** (`figure-markers`): a cited figure
+ * shows its source number and date, a stale one says so, and one nothing backs
+ * is marked in the caution tone — never the market's up/down red, which a reader
+ * can invert in settings and which means direction, not doubt.
  */
 export function Markdown({
   text,
@@ -49,7 +55,12 @@ export function Markdown({
   animate?: boolean
   className?: string
 }) {
-  const rehypePlugins: Options["rehypePlugins"] = animate ? [rehypeWordCadence] : undefined
+  const sources = useMemo(() => readSources(text), [text])
+  // Labels first, so a chip is one element before the cadence splits words.
+  const rehypePlugins: Options["rehypePlugins"] = [
+    [rehypeFigureMarkers, { sources }],
+    ...(animate ? [rehypeWordCadence] : []),
+  ]
   return (
     <div
       className={cn(

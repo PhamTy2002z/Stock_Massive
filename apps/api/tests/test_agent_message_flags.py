@@ -578,3 +578,28 @@ async def test_marking_helpful_without_a_session_is_refused(client, account):
     response = await client.post(f"{API}/messages/{message_id}/helpful")
 
     assert response.status_code == 401
+
+
+# -- the review queue ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_flagged_answer_is_read_back_with_its_question(owner):
+    from src.agent.persistence import flagged_answers
+
+    store = persistence()
+    _, _, answer = await _answered_thread(store, owner)
+    await store.flag_message(owner, answer.id, reason="wrong_figure")
+
+    with get_sync_db() as session:
+        cases = [
+            case
+            for case in flagged_answers(session, reason="wrong_figure")
+            if case["message_id"] == answer.id
+        ]
+
+    assert len(cases) == 1
+    assert cases[0]["question"] == "VCB thế nào?"
+    assert cases[0]["answer"] == "Một câu trả lời."
+    assert cases[0]["reason"] == "wrong_figure"
+    assert cases[0]["claim_ledger"] is None
