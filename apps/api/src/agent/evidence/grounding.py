@@ -831,6 +831,12 @@ def _decide(
             reason="wrong_period" if matched_somewhere else "not_in_sources",
         )
     _, source, when, stale = min(candidates, key=lambda item: item[0])
+    if source.kind is not SourceKind.STRUCTURED and named and _contradicts_market(
+        figure, named, sources
+    ):
+        # A page may print the same digits for another session; the feed says
+        # what this session closed at, and it is the one that answers.
+        return FigureCheck(**base, status=FigureStatus.UNVERIFIED, reason="conflicts_with_market_data")
     return FigureCheck(
         **base,
         status=FigureStatus.STALE if stale else FigureStatus.GROUNDED,
@@ -838,6 +844,36 @@ def _decide(
         source_date=when,
         kind=source.kind,
     )
+
+
+_PRICE_UNITS = frozenset({"đồng", "đ", "điểm"})
+
+
+def _contradicts_market(figure: _Figure, named: Sequence[_Period], sources: Sources) -> bool:
+    """Whether market rows for the named session price it differently.
+
+    Only for a figure that reads as a price or an index level — written in đồng
+    or điểm, or unitless and within a factor of two of that session's prices. A
+    page's "bán ròng 4.000 tỷ ngày 22/09" is not something a price feed could
+    contradict, and is left to the page.
+    """
+    for source in sources.items:
+        if source.kind is not SourceKind.STRUCTURED:
+            continue
+        for line in source.lines:
+            if line.when is None or not any(p.start <= line.when <= p.end for p in named):
+                continue
+            prices = [value for value in line.values if value.unit in _PRICE_UNITS and value.base]
+            if not prices:
+                continue
+            wanted = figure.value
+            price_like = wanted.unit in _PRICE_UNITS or (
+                wanted.unit is None
+                and any(Decimal("0.5") <= abs(wanted.base / value.base) <= 2 for value in prices)
+            )
+            if price_like and not any(_same(figure, value) for value in line.values):
+                return True
+    return False
 
 
 # -- what the reader and the model are shown ---------------------------------

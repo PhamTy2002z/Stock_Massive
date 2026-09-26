@@ -380,3 +380,17 @@ def test_a_volume_rounded_to_millions_is_the_volume():
     # Two digits still have to round correctly.
     wrong = check("Khối lượng phiên 25/09 đạt 1,8 triệu cổ phiếu.", [STB_NOW])
     assert [f.status for f in wrong.figures] == [FigureStatus.UNVERIFIED]
+
+
+def test_a_page_cannot_price_a_session_the_market_feed_prices_differently():
+    """The live miss: "22/9 | 1.775,09" backed by a weekly page, while 22/09 closed at 76.900."""
+    page = page_call("Chỉ số đóng cửa 76.500 trong tuần.", published="2026-09-25T16:00:00+07:00")
+
+    report = check("| 24/9 | 76.500 |", [STB_NOW, page])
+
+    [figure] = report.figures
+    assert figure.status is FigureStatus.UNVERIFIED
+    assert figure.reason == "conflicts_with_market_data"
+    # A figure no price feed could speak to is still the page's.
+    other = check("Ngày 24/9 khối ngoại bán ròng 4.000 tỷ đồng.", [STB_NOW, page_call("Bán ròng 4.000 tỷ đồng.", published="2026-09-25T16:00:00+07:00")])
+    assert [f.status for f in other.figures] == [FigureStatus.GROUNDED]
