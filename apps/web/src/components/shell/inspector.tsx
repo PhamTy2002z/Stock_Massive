@@ -27,10 +27,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
 
-import { SignalDeskEmpty } from "@/components/signal-desk/signal-desk-empty";
+import { SignalDeskPanel } from "@/components/signal-desk/signal-desk-panel";
 import { SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy";
 import { cn } from "@/lib/utils";
 
+import { useDesk } from "./desk-state";
 import { IconButton } from "./primitives";
 import {
   chatColumnWidth,
@@ -235,10 +236,21 @@ function Body({
   // can be asked. A desk switched *off* is a fact about the conversation
   // rather than an invitation, and drawing a ghost board for it would
   // advertise a mode the reader has not chosen.
-  if (signalDesk) return <SignalDeskEmpty />;
+  //
+  // The panel is what that opening became once there is something to draw: it
+  // still shows the ghost board before the first question, and takes over from
+  // there. Reached only on this branch, which is what keeps the chart runtime
+  // out of a chat-only reader's bundle.
+  if (signalDesk) return <DeskBody />;
   return (
     <p className="text-meta text-muted-foreground">
       {SIGNAL_DESK_COPY.noDeskView}
     </p>
   );
+}
+
+/** The desk's own body, and the one place the conversation's state reaches it. */
+function DeskBody() {
+  const { deskView } = useDesk();
+  return <SignalDeskPanel view={deskView} />;
 }

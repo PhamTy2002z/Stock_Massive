@@ -40,7 +40,7 @@ export const OHLCV_ROWS = [
 /** The right-hand pane's usable width, and the two heights a stacked pair gets. */
 export const PANE_WIDTH = 420
 export const CANDLE_HEIGHT = 260
-export const VOLUME_HEIGHT = 110
+export const VOLUME_HEIGHT = 190
 
 /**
  * The candlestick half.
@@ -94,6 +94,37 @@ describe("flint-chart compiles what the host will send", () => {
     expect(option.series?.map((series: { type: string }) => series.type)).toEqual(["bar"])
     expect(option._dataLength).toBe(OHLCV_ROWS.length)
     expect(option._warnings).toBeUndefined()
+  })
+
+  it("charges the bottom margin for the raw length of a category label", () => {
+    // Why the host sends "24/08" and not the bar's ISO close. The label the
+    // reader sees may be shortened by a formatter, but the axis area is
+    // reserved from the *raw* value — so a full instant on a short volume
+    // panel leaves more margin than chart.
+    const withInstants = {
+      data: {
+        values: OHLCV_ROWS.map((row) => ({ ...row, time: `${row.time}T15:00:00+07:00` })),
+      },
+      chart_spec: {
+        chartType: "Bar Chart",
+        encodings: { x: "time", y: "volume" },
+        baseSize: { width: PANE_WIDTH, height: VOLUME_HEIGHT },
+      },
+    }
+    const short = {
+      data: { values: OHLCV_ROWS.map((row) => ({ ...row, time: row.time.slice(8) + "/08" })) },
+      chart_spec: {
+        chartType: "Bar Chart",
+        encodings: { x: "time", y: "volume" },
+        baseSize: { width: PANE_WIDTH, height: VOLUME_HEIGHT },
+      },
+    }
+
+    const instants = assembleECharts(withInstants).grid.bottom
+    const compact = assembleECharts(short).grid.bottom
+
+    expect(instants).toBeGreaterThan(compact)
+    expect(compact + assembleECharts(short).grid.top).toBeLessThan(VOLUME_HEIGHT)
   })
 
   it("has no volume channel on the candlestick template", () => {

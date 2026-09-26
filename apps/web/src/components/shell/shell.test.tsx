@@ -7,6 +7,7 @@ import {
   chatColumnWidth,
   inspectorWidth,
   ShellProvider,
+  SIGNAL_DESK_PAUSED,
   sidebarFloats,
   useShell,
 } from "./shell-state"
@@ -47,7 +48,17 @@ describe("the chat-first workspace", () => {
     expect(shell.state.signalDesk).toBe(false)
   })
 
-  it("turning the desk on opens the pane beside the conversation", () => {
+  it.runIf(SIGNAL_DESK_PAUSED)("a paused desk stays off when asked to turn on", () => {
+    mount()
+
+    act(() => shell.dispatch({ type: "signal-desk", on: true }))
+    act(() => shell.dispatch({ type: "thread", signalDesk: true, opened: false }))
+
+    expect(shell.state.signalDesk).toBe(false)
+    expect(shell.state.inspector).toBeNull()
+  })
+
+  it.skipIf(SIGNAL_DESK_PAUSED)("turning the desk on opens the pane beside the conversation", () => {
     mount()
 
     act(() => shell.dispatch({ type: "signal-desk", on: true }))

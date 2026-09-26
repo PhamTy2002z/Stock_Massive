@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils"
 import { AttachmentChip } from "./attachment-chip"
 import { useDesk } from "./desk-state"
 import { IconButton, Menu, MenuItem, MenuSeparator } from "./primitives"
-import { useShell } from "./shell-state"
+import { SIGNAL_DESK_PAUSED, useShell } from "./shell-state"
 
 /**
  * The five-bar waveform on the send control.
@@ -297,7 +297,7 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
           </IconButton>
         </div>
 
-        <SignalDeskToggle />
+        {!SIGNAL_DESK_PAUSED && <SignalDeskToggle />}
 
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {/* `composer-model` is a container query, not a breakpoint: the row

@@ -166,6 +166,14 @@ type Action =
 
 /** The reference's own numbers. */
 export const SIDEBAR_WIDTH = 274
+
+/**
+ * The desk is paused (product owner, 2026-09-26): every Turn is a chat Turn.
+ * Held here, in the one transition that turns the desk on, so the pill, the
+ * default-mode preference and a Thread remembered as "desk on" all land on
+ * chat. The code stays; flipping this back restores the mode.
+ */
+export const SIGNAL_DESK_PAUSED = true
 /** A source list is a supporting drawer, not the Signal Desk workspace. */
 const SOURCE_DRAWER_WIDTH = 408
 /**
@@ -361,7 +369,7 @@ function reduce(state: ShellState, action: Action): ShellState {
       }
 
     case "signal-desk":
-      if (!action.on) {
+      if (!action.on || SIGNAL_DESK_PAUSED) {
         return {
           ...state,
           signalDesk: false,
@@ -421,7 +429,7 @@ function reduce(state: ShellState, action: Action): ShellState {
         sourcesMessageId: null,
                                 signalDesk: false,
       }
-      if (!action.signalDesk) return cleared
+      if (!action.signalDesk || SIGNAL_DESK_PAUSED) return cleared
       // Applied through the same transition the switch itself uses, so there is
       // one rule for what "on" does to the layout rather than two — the fold
       // included. Picking a conversation whose desk is on therefore folds the

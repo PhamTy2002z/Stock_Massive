@@ -30,7 +30,10 @@ import type { Usage } from "@/lib/alpha-desk/types"
 const fetchUsage = vi.fn<() => Promise<Usage>>()
 
 vi.mock("@/lib/alpha-desk/api", () => ({ fetchUsage: () => fetchUsage() }))
-vi.mock("./shell-state", () => ({ useShell: () => ({ dispatch: () => {} }) }))
+vi.mock("./shell-state", async (importOriginal) => ({
+  SIGNAL_DESK_PAUSED: (await importOriginal<typeof import("./shell-state")>()).SIGNAL_DESK_PAUSED,
+  useShell: () => ({ dispatch: () => {} }),
+}))
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({
     user: { email: "nha.dautu@example.com", full_name: "Nhà đầu tư" },
@@ -41,6 +44,7 @@ vi.mock("@/hooks/use-auth", () => ({
 import { readPreferences, writePreferences } from "@/lib/alpha-desk/preferences"
 
 import { SettingsDialog } from "./settings-dialog"
+import { SIGNAL_DESK_PAUSED } from "./shell-state"
 
 function allowance(used: number, limit: number | null, resetsAt: string | null = null) {
   return { used, limit, resets_at: resetsAt }
@@ -181,7 +185,8 @@ describe("the allowance", () => {
 
 const DEFAULT_DESK = "Signal Desk là chế độ mặc định"
 
-describe("how a new conversation opens", () => {
+// The default-mode switch is hidden while the desk is paused.
+describe.skipIf(SIGNAL_DESK_PAUSED)("how a new conversation opens", () => {
   it("starts from what the browser last chose", () => {
     writePreferences({ signalDeskByDefault: true })
     open()

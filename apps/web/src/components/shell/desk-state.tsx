@@ -32,6 +32,7 @@ import {
 } from "@/lib/alpha-desk/desk-session"
 import { readPreferences } from "@/lib/alpha-desk/preferences"
 import { isActive, isSettled, resendPlan } from "@/lib/alpha-desk/live-turn"
+import { selectDeskView, type DeskView } from "@/lib/alpha-desk/desk-visual"
 import {
   buildTranscript,
   questionBefore,
@@ -127,6 +128,14 @@ interface DeskApi {
    * mode would be read from on the day the request carries one.
    */
   setSignalDesk: (on: boolean) => void
+  /**
+   * What the right-hand pane is currently about, for the Thread on screen.
+   *
+   * Derived rather than stored, from the messages of this Thread and the Turn
+   * in flight, so switching Threads changes it by construction and a running
+   * Turn never leaves the previous answer's chart standing as the current one.
+   */
+  deskView: DeskView
   flagFailedFor: number | null
   submit: (text: string) => void
   /** What this unsent question carries, in the order it was added. */
@@ -219,6 +228,12 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   // have finished uploading, and a question must go out with what it was sent
   // with rather than with whatever had landed by the time a Thread existed.
   const [queuedAttachments, setQueuedAttachments] = useState<string[]>([])
+  // And the mode it was sent in. A question queued behind a Thread create goes
+  // out with the mode the reader pressed Send in, not with whatever the pill
+  // says by the time the Thread exists: the two are seconds apart and the
+  // toggle is one click away, so reading it again would silently send a
+  // different question from the one that was asked.
+  const [queuedSignalDesk, setQueuedSignalDesk] = useState(false)
   // What the unsent question carries. Beside `queuedQuestion` because it
   // belongs to the same thing: a question nobody has sent yet.
   const [pending, setPending] = useState<PendingAttachment[]>([])
@@ -487,6 +502,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       }
       setQueuedQuestion(text)
       setQueuedAttachments(attachments)
+      setQueuedSignalDesk(signalDesk)
       createThread.mutate(undefined, {
         onSuccess: (created) => setThreadId(created.id),
         onError: (error) => {
@@ -526,8 +542,8 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     setQueuedQuestion(null)
     const attachments = queuedAttachments
     setQueuedAttachments([])
-    void send({ text, signalDesk, attachments })
-  }, [threadId, queuedQuestion, queuedAttachments, signalDesk, send])
+    void send({ text, signalDesk: queuedSignalDesk, attachments })
+  }, [threadId, queuedQuestion, queuedAttachments, queuedSignalDesk, send])
 
   // The create commits the user message before it returns, so the copy on
   // screen stops being a local one as soon as the Thread comes back.
@@ -566,6 +582,11 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       pendingAttachmentViews,
       reveal,
     ],
+  )
+
+  const deskView = useMemo(
+    () => selectDeskView(messages, turn.state, threadId),
+    [messages, turn.state, threadId],
   )
 
   // Read through a ref so the callbacks below do not re-create themselves on
@@ -711,6 +732,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       refusalFailure: refusalError === null ? null : describeFailure(refusalError),
       signalDesk,
       setSignalDesk,
+      deskView,
       attachments: pending,
       attach: attachFiles,
       detach,
@@ -745,6 +767,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       flagging.failedMessageId,
       signalDesk,
       setSignalDesk,
+      deskView,
       pending,
       attachFiles,
       detach,

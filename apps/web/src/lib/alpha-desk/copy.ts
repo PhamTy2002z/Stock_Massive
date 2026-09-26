@@ -162,6 +162,33 @@ export const SIGNAL_DESK_COPY = {
   emptyUniverseHint: "Hiện hỗ trợ 30 mã VN30 — sẽ mở rộng dần.",
   /** What the pane says with the desk off and no picture in the conversation. */
   noDeskView: "Chưa có Signal Desk nào trong hội thoại này.",
+  /**
+   * The pane while a Signal Desk Turn is still running.
+   *
+   * It reports rather than reassures. The previous answer's chart is not shown
+   * behind this — a picture standing under a new question reads as an answer to
+   * it — so the line has to say plainly that one is being worked out.
+   */
+  chartWorking: "Đang dựng biểu đồ từ bằng chứng…",
+  /**
+   * The pane when the answer settled without a chart.
+   *
+   * One line, and no reason. The reason is a ledger of gaps and it is already
+   * written in full in the column to the left; restating it here would be the
+   * same explanation in two places, drifting apart at the first edit.
+   */
+  chartAbsent: "Câu trả lời này không có biểu đồ đủ bằng chứng.",
+  /** The pane when the chart could not be drawn at all. */
+  chartFailed: "Không dựng được biểu đồ cho câu trả lời này.",
+  /**
+   * The line under the chart: how many sources it rests on, and as of when.
+   *
+   * A count rather than the ids. The ids are the audit trail and they live in
+   * the ledger; what a reader glancing at a picture needs is that it *has* one
+   * and how old it is.
+   */
+  chartProvenance: (sources: number, asOf: string) =>
+    `${sources} nguồn · tính đến ${asOf.slice(0, 16).replace("T", " ")}`,
   chatMode: "Chat",
   toggle: "Signal Desk",
   sources: "Nguồn",

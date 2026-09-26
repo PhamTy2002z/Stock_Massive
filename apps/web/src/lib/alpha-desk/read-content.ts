@@ -22,6 +22,7 @@
  */
 
 import type {
+  ChartAssembly,
   ProgressKind,
   ProgressPart,
   QuestionOption,
@@ -30,6 +31,7 @@ import type {
   Thought,
   ToolCall,
   ToolResult,
+  VisualPart,
 } from "./types"
 
 /** The five statuses a call can be in, as either source may spell it. */
@@ -245,6 +247,94 @@ function readQuestionOptions(value: unknown): QuestionOption[] {
     options.push({ id, label, detail: detail === "" ? null : detail })
   }
   return options
+}
+
+/**
+ * One visual part, or nothing.
+ *
+ * Total like every reader here, and for a sharper reason than most: this
+ * payload is the only one in a message that a third-party compiler is handed.
+ * A part written by a build this one does not know — a newer version, another
+ * renderer, an assembly whose shape moved — comes back as `null`, the pane says
+ * there is no chart, and the answer beside it is untouched. Nothing here
+ * repairs a payload: a chart drawn from a half-read assembly would be a wrong
+ * picture of real evidence, which is worse than no picture.
+ *
+ * What it does *not* check is whether the assembly draws anything. That is
+ * `lib/flint/compile-visual.ts`, because the rule is a fact about the pinned
+ * templates rather than about the wire.
+ */
+export function readVisual(value: unknown): VisualPart | null {
+  const record = asRecord(value)
+  if (record === null) return null
+  const version = record.version
+  const renderer = asString(record.renderer)
+  const flintVersion = asString(record.flintVersion)
+  const asOf = asString(record.asOf)
+  if (typeof version !== "number" || !Number.isInteger(version)) return null
+  if (renderer === "" || flintVersion === "" || asOf === "") return null
+
+  const assemblies = readAssemblies(record.assemblies)
+  if (assemblies === null) return null
+  const evidenceIds = readStrings(record.evidenceIds)
+  const sourceCallIds = readStrings(record.sourceCallIds)
+  // A chart whose values name no evidence and no call is exactly the thing the
+  // whole pipeline exists to make impossible, so it is not drawn.
+  if (evidenceIds.length === 0 || sourceCallIds.length === 0) return null
+
+  return {
+    version,
+    renderer,
+    flintVersion,
+    asOf,
+    title: asString(record.title),
+    assemblies,
+    evidenceIds,
+    sourceCallIds,
+  }
+}
+
+/** The chart inputs, or null if any one of them is not one. */
+function readAssemblies(value: unknown): ChartAssembly[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null
+  const assemblies: ChartAssembly[] = []
+  for (const item of value) {
+    const record = asRecord(item)
+    const data = asRecord(record?.data)
+    const spec = asRecord(record?.chart_spec)
+    if (data === null || spec === null) return null
+    const chartType = asString(spec.chartType)
+    const encodings = asRecord(spec.encodings)
+    if (chartType === "" || encodings === null) return null
+    if (!Array.isArray(data.values)) return null
+    const rows: Record<string, unknown>[] = []
+    for (const row of data.values) {
+      const asObject = asRecord(row)
+      if (asObject === null) return null
+      rows.push(asObject)
+    }
+    const channels: Record<string, string> = {}
+    for (const [channel, field] of Object.entries(encodings)) {
+      if (typeof field !== "string") return null
+      channels[channel] = field
+    }
+    const baseSize = asRecord(spec.baseSize)
+    assemblies.push({
+      data: { values: rows },
+      chart_spec: {
+        chartType,
+        encodings: channels,
+        baseSize:
+          baseSize === null
+            ? undefined
+            : {
+                width: asNumber(baseSize.width, 0),
+                height: asNumber(baseSize.height, 0),
+              },
+      },
+    })
+  }
+  return assemblies
 }
 
 export function readThoughts(value: unknown): Thought[] {

@@ -291,6 +291,56 @@ export interface QuestionPart {
 }
 
 /**
+ * One chart assembly, in exactly the shape the pinned Flint package documents.
+ *
+ * Passed through untouched: the host wrote it from market evidence, the package
+ * compiles it, and nothing in between renames a field. Typed loosely on purpose
+ * — `values` is whatever columns the encodings name, and a stricter type here
+ * would be this client claiming to know a schema the backend owns.
+ */
+export interface ChartAssembly {
+  data: { values: Record<string, unknown>[] }
+  chart_spec: {
+    chartType: string
+    encodings: Record<string, string>
+    baseSize?: { width: number; height: number }
+  }
+}
+
+/**
+ * The chart a Signal Desk answer left behind, as the message stores it.
+ *
+ * A **sibling** of the answer rather than part of it: the chat column never
+ * draws it, and only the right-hand pane reads it. Absent on every Turn that
+ * has no chart — which is every chat-mode Turn and every Signal Desk Turn whose
+ * figures the ledger would not admit — so the pane asks whether the key is here
+ * rather than reading a status out of it.
+ *
+ * Every number in `assemblies` is a field of one of the `sourceCallIds`, and
+ * every series rests on one of the `evidenceIds`. The model contributed none of
+ * them: the host assembles this from the calls it made.
+ *
+ * `assemblies` is a list because one shape needs two charts. The pinned
+ * candlestick template has no volume channel, so price and volume are two
+ * inputs and two compiled options stacked in the pane — merging them would mean
+ * editing what Flint compiled.
+ */
+export interface VisualPart {
+  version: number
+  /** Which client runtime can draw this. `flint-echarts` is the only one. */
+  renderer: string
+  /** The exact Flint release the assembly was written for. */
+  flintVersion: string
+  /** The evidence boundary the Turn ran under, ISO and offset-aware. */
+  asOf: string
+  /** What the pane puts above the chart: symbols, bar, window. */
+  title: string
+  assemblies: ChartAssembly[]
+  evidenceIds: string[]
+  sourceCallIds: string[]
+}
+
+/**
  * What answering or skipping a question comes back as: what changed, and no more.
  *
  * The card itself is not restated. It is already in the transcript the caller is
@@ -359,6 +409,8 @@ export interface AssistantContent {
   progress: ProgressPart[]
   /** The card this answer ended by asking for, with its outcome merged in. */
   question: QuestionPart | null
+  /** The chart for the right-hand pane, or null on every answer without one. */
+  visual: VisualPart | null
 }
 
 /** The user message, as the create transaction wrote it. */

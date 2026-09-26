@@ -2,6 +2,7 @@
 
 import * as React from "react"
 
+import { SIGNAL_DESK_PAUSED } from "@/components/shell/shell-state"
 import { SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy"
 import { readPreferences, writePreferences } from "@/lib/alpha-desk/preferences"
 
@@ -81,7 +82,7 @@ export function ConversationSection() {
         label={`${SIGNAL_DESK_COPY.name} là chế độ mặc định`}
         description="Mỗi hội thoại mới mở sẵn bảng phân tích bên cạnh câu trả lời."
       >
-        <DefaultDeskToggle />
+        {!SIGNAL_DESK_PAUSED && <DefaultDeskToggle />}
       </SettingsRow>
 
       {UNBUILT.map((row) => (
