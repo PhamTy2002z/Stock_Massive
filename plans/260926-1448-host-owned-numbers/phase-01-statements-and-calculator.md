@@ -7,14 +7,15 @@
   (1,2,1,2,…) and `Value{i}` follows the original `Head` order. The raw payload
   itself carries several heads for one quarter (three "2025 Q4" entries) with
   different values — those periods are ambiguous at the source.
-- KBS balance sheet for banks is empty; VCI ratio (which lists NPL and CAR)
-  returns only 2018 through this community build. No free structured source
-  for NPL or CAR was found.
+- KBS balance sheet for banks is empty. VCI's ratio series *does* carry NPL by
+  quarter to Q2/2026 and CAR in the quarters a bank disclosed it (0 otherwise);
+  vnstock only returned 2018 because its parser keeps the first four rows of an
+  oldest-first series. Read raw, it is the free NPL source.
 
 ## Changes
-1. `tools/financials.py` — `FinancialsProvider` protocol (the adapter seam) and
-   `KbsFinancials` (dev/test only, same `personal_internal` + flag gate as the
-   market read). Pairs `Value{i}` with `Head[i-1]`, drops any period that
+1. `tools/financials.py` — `FinancialsProvider` protocol (the adapter seam),
+   `KbsFinancials` and `VciFinancials` (dev/test only, same `personal_internal`
+   + flag gate as the market read), read together by one tool. Pairs `Value{i}` with `Head[i-1]`, drops any period that
    appears more than once, returns metrics per period with period end and
    report date. Tool `get_financial_ratios(symbol, periods)` renders dated
    lines (period end first) for the figure check and states which metrics this
@@ -36,11 +37,16 @@ so a mechanical "mâu thuẫn" label would be wrong more often than right. The
 structured source still wins when both print the same figure, and the prompt
 asks for conflicts to be stated.
 
-## Gate
-ROE and P/B for 5 banks (STB, VCB, TCB, MBB, ACB) from tools with formula
-(P/B recomputed by `calculate` from the latest close and BVPS), checked by hand
-against the source rows on 10 samples; P0 re-run still holds.
-**NPL and CAR cannot pass on a free source** — needs the owner's data decision.
+## Gate (result, 2026-09-26)
+- ROE, P/B: 5 banks from tools; P/B recomputed by `calculate` in a live Turn.
+  10 samples P/B×BVPS vs quarter-end close: 7 exact, 3 off by a constant factor
+  explained by dividend-adjusted closes (P/E×EPS = P/B×BVPS holds in all).
+- NPL: 5 banks from Vietcap to Q2/2026. Cross-checked: VCB Q2/2026 0,61 %
+  (3 independent pages), STB Q4/2025 6,41 % (markettimes); TCB Q2/2026 1,08 %
+  vs one article's 1,15 % — unresolved (likely consolidated vs separate).
+- CAR: only where disclosed — STB 9,69 %, VCB 12,01 %, ACB 10,97 % at Q2/2025;
+  none in the last five quarters for TCB, MBB. The tool says so. Complete CAR
+  needs a paid source (below) or the banks' own disclosures via `fetch_url`.
 
 ## What a paid provider must supply to replace KBS
 Per bank per quarter: NPL (nợ nhóm 3–5 / tổng dư nợ), CAR (Basel II/III, as
