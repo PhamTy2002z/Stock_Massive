@@ -39,9 +39,9 @@ def test_the_market_note_states_the_three_rules_the_ledger_enforces():
 
     # 1. Whole dong, not the provider's thousands.
     assert "whole dong" in research
-    # 2. No calendar date inside a material claim's own sentence: the numeric
-    #    check reads it as small numbers no source prints a currency beside.
-    assert "24/08/2026" in research
+    # 2. Figures digit for digit: a rounded one is printed in no source, so the
+    #    numeric check refuses the claim that states it.
+    assert "10.196.800" in research
     # 3. A market-only material claim is single_source; labelling it verified
     #    invalidates the whole ledger, not just the claim.
     assert "single_source" in research

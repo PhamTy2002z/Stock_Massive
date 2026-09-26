@@ -84,6 +84,9 @@ ICT = ZoneInfo("Asia/Ho_Chi_Minh")
 #: and not the exchange. That distinction is the whole reason a market claim
 #: settles at ``SINGLE_SOURCE``: the number came from a broker's feed, and
 #: calling it an exchange figure would be a provenance claim nobody can support.
+#: The connector package, named here and nowhere the model can read: it is how
+#: the host reached the feed, not a source a reader could go and check, and a
+#: package name inside the result came back out of the answer as if it were one.
 PROVIDER = "vnstock"
 SOURCE = "kbs"
 PUBLISHER = "KB Securities"
@@ -108,6 +111,14 @@ SESSION_CLOSE = time(15, 0)
 INTERVALS: Mapping[str, timedelta | None] = {
     "1D": None,
     "15m": timedelta(minutes=15),
+}
+
+#: What each interval is called in a sentence a reader sees. The excerpt and the
+#: citation are prose, and ``1D`` in the middle of one is a code the reader has
+#: to decode — while every code the model reads is a code it may repeat back.
+INTERVAL_LABELS: Mapping[str, str] = {
+    "1D": "nến ngày",
+    "15m": "nến 15 phút",
 }
 
 #: How wide a window one call may ask for, per interval. Not a quota — a bound
@@ -202,8 +213,12 @@ def _render_rows(symbol: str, interval: str, rows: Sequence[Mapping[str, Any]]) 
     digits only when its unit is printed beside it — and a volume of ``500`` or
     a price a claim rounds to ``72`` is exactly that case.
     """
+    # The connector's own name is deliberately absent. This line is the one
+    # sentence about the data the model reads in prose, and a package name in it
+    # comes back out in the answer as if it were a source the reader could go
+    # and check. The publisher is the source; how the host reached it is not.
     head = (
-        f"{symbol} · nến {interval} · nguồn {PUBLISHER} qua {PROVIDER} · "
+        f"{symbol} · {INTERVAL_LABELS[interval]} · nguồn {PUBLISHER} · "
         f"giá đã quy đổi sang {CURRENCY} đầy đủ"
     )
     lines = [head]
@@ -233,7 +248,7 @@ def _import_vnstock() -> Any:
     """
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
-        return importlib.import_module("vnstock")
+        return importlib.import_module(PROVIDER)
 
 
 class MarketDataTools:
@@ -292,7 +307,15 @@ class MarketDataTools:
                 description=(
                     "Read one listed Vietnamese symbol's price and volume history "
                     "for a date range. Prices come back in whole dong and every "
-                    "bar is stamped with the time it closed. Provider-reported "
+                    "bar is stamped with the time it closed. Use it whenever an "
+                    "answer rests on prices or volumes; do not use it for news, "
+                    "financial statements or company events. Take the symbol from "
+                    "the question or from a source you read; if you only have a "
+                    "company name, find its ticker first. Derive start and end "
+                    "from the question and today's date in the turn context. A "
+                    f"daily window may span {MAX_SPAN_DAYS['1D']} days and a 15m "
+                    f"window {MAX_SPAN_DAYS['15m']} days; at most the latest "
+                    f"{MAX_ROWS} bars come back. Provider-reported "
                     "figures from a securities company's feed, not from the "
                     "exchange: cite them as one source."
                 ),
@@ -378,8 +401,11 @@ class MarketDataTools:
         return {
             "symbol": symbol,
             "interval": interval,
-            "provider": PROVIDER,
-            "provider_version": _package_version(),
+            "interval_label": INTERVAL_LABELS[interval],
+            # The connector and its version are deployment facts, and this
+            # payload is read by a model that quotes what it is given. They stay
+            # in the host's own logs, where an auditor looks, rather than in the
+            # context a sentence is composed from.
             "source": SOURCE,
             "publisher": PUBLISHER,
             "source_class": "store",
@@ -416,9 +442,14 @@ class MarketDataTools:
         module = _import_vnstock()
         try:
             quote = module.Quote(source=SOURCE, symbol=symbol)
+            # The provider reads ``end`` as exclusive: asking for a range that
+            # finishes on the last session returns everything before it, and a
+            # range whose two ends are the same day raises rather than returning
+            # that day. One day is added here and ``_normalise`` cuts the result
+            # back to the range that was actually asked for.
             return quote.history(
                 start=start.isoformat(),
-                end=end.isoformat(),
+                end=(end + timedelta(days=1)).isoformat(),
                 interval=interval,
             )
         except Exception as exc:  # noqa: BLE001 - provider failures are classified
@@ -560,15 +591,6 @@ def _normalise(
     return rows, dropped_future
 
 
-def _package_version() -> str:
-    try:
-        from importlib.metadata import version
-
-        return version(PROVIDER)
-    except Exception:  # noqa: BLE001 - a missing version is not a failed call
-        return "unknown"
-
-
 def _summarise(arguments: Mapping[str, Any]) -> str:
     """The rail row, composed because no single argument says what was read."""
     symbol = str(arguments.get("symbol") or "?").strip().upper()
@@ -588,6 +610,7 @@ __all__ = [
     "ICT",
     "INTERNAL_PROFILE",
     "INTERVALS",
+    "INTERVAL_LABELS",
     "MAX_ROWS",
     "MAX_SPAN_DAYS",
     "MarketDataError",

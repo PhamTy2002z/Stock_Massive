@@ -87,7 +87,9 @@ class MemoryTools:
                 toolset=TOOLSET,
                 description=(
                     "Search this user's earlier messages and answers by keyword. "
-                    "Use it to recover something the conversation established before."
+                    "Use it when the user refers to something said before that is "
+                    "not in the visible conversation, before asking them to repeat "
+                    "it. It is not a source of current market data."
                 ),
                 schema=object_schema(
                     {
@@ -120,9 +122,12 @@ class MemoryTools:
                 name="remember_fact",
                 toolset=TOOLSET,
                 description=(
-                    "Keep one durable note for this user across conversations. Use "
-                    "it only for something worth remembering later, not for notes "
-                    "about the current answer."
+                    "Keep one durable note for this user across conversations. This "
+                    "is the only tool that writes. Use it when the user asks you "
+                    "to remember something, or states a lasting preference or "
+                    "constraint such as their horizon or risk tolerance. Do not "
+                    "use it for market figures that go stale, or for notes about "
+                    "the current answer."
                 ),
                 schema=object_schema(
                     {
@@ -171,7 +176,9 @@ class MemoryTools:
                 toolset=TOOLSET,
                 description=(
                     "Search the notes this user asked to keep, by keyword. "
-                    "Accent-insensitive."
+                    "Accent-insensitive. Use it when an answer could depend on the "
+                    "user's stated preferences or constraints, before asking them "
+                    "again."
                 ),
                 schema=object_schema(
                     {

@@ -72,7 +72,7 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL_BATCH: ${LLM_MODEL_BATCH:-gpt-5.6-luna}
-      LLM_MODEL_SESSION: ${LLM_MODEL_SESSION:-gpt-5.6-terra}
+      LLM_MODEL_SESSION: ${LLM_MODEL_SESSION:-gpt-5.6-luna}
       LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-120}
       # Properties of the route rather than of a call: a route that streams tool
       # calls without the upstream index cannot be assembled safely, and a

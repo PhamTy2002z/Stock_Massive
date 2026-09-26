@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_api_key: str = ""
     llm_model_batch: str = "gpt-5.6-luna"
-    llm_model_session: str = "gpt-5.6-terra"
+    llm_model_session: str = "gpt-5.6-luna"
     llm_request_timeout_seconds: float = 120.0
     # Streaming là mặc định, nhưng nó là thuộc tính của *tuyến*, không phải của
     # lời gọi: một tuyến OpenAI-compatible có thể stream tool call mà không gửi
@@ -122,6 +122,8 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""
     web_tools_enabled: bool = False
     web_fetch_max_bytes: int = 512 * 1024
+    # Reports and filings are PDFs of a few megabytes; HTML keeps the cap above.
+    web_fetch_pdf_max_bytes: int = 8 * 1024 * 1024
     web_domain_denylist: str = ""
     # Redis-backed fleet windows. The first preserves the existing provider
     # allowance; the second prevents one hot publisher from consuming all of

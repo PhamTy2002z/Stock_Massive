@@ -54,11 +54,9 @@ TOOLSETS: dict[str, Toolset] = {
         ),
         "tools": ("session_search", "remember_fact", "recall_facts"),
     },
-    # Registered, and deliberately in neither :data:`CORE_TOOLSETS` nor the
-    # active pack. ``_check_the_selection_matches_the_pack`` holds
-    # ``CHAT_TOOLSETS`` equal to the core bundles plus the pack's, so a bundle
-    # added to the pack would reach every conversation — which is the opposite
-    # of what this one is for. The Signal Desk lane names it directly.
+    # The active pack's bundle, so it reaches every conversation: Chat carries
+    # the market read since the Signal Desk was paused on 2026-09-26. The tool
+    # itself still refuses outside the ``personal_internal`` profile.
     "market_data": {
         "description": (
             "Read one listed symbol's price and volume history for a date range."
@@ -87,7 +85,7 @@ SIGNAL_DESK_TOOLSETS: tuple[str, ...] = (*CORE_TOOLSETS, "market_data")
 #: stops being. Written down *and* held to the pack: the tuple a reader sees is
 #: the real one, and swapping the pack cannot leave it behind saying the last
 #: domain's name.
-CHAT_TOOLSETS: tuple[str, ...] = CORE_TOOLSETS
+CHAT_TOOLSETS: tuple[str, ...] = (*CORE_TOOLSETS, "market_data")
 
 
 class UnknownToolsetError(KeyError):

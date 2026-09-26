@@ -21,9 +21,9 @@ _DOMAIN_DIR = Path(domain.__file__).parent
 def test_active_pack_is_web_first_and_adds_no_local_analysis_tools():
     assert domain.active_pack() is PACK
     assert PACK.name == "vn-equity"
-    assert PACK.toolsets == ()
-    assert toolsets.CHAT_TOOLSETS == toolsets.CORE_TOOLSETS == ("web", "memory")
-    assert toolsets.resolve_toolset(toolsets.CHAT_TOOLSETS) == ("web_search", "fetch_url", "session_search", "remember_fact", "recall_facts")
+    assert PACK.toolsets == ("market_data",)
+    assert toolsets.CHAT_TOOLSETS == ("web", "memory", "market_data")
+    assert toolsets.resolve_toolset(toolsets.CHAT_TOOLSETS) == ("web_search", "fetch_url", "session_search", "remember_fact", "recall_facts", "get_market_data")
 
 
 def test_pack_guidance_requires_web_evidence_and_rejects_fake_local_analysis():

@@ -182,7 +182,7 @@ def test_conflict_is_disclosed_without_choosing_a_winner():
     assert supporting.canonical_url in memo and opposing.canonical_url in memo
 
 
-def test_renderer_drops_unsupported_citations_and_omits_every_unledgered_url():
+def test_renderer_drops_unsupported_claims_and_omits_every_unledgered_url():
     source = evidence("issuer", "Lợi nhuận đạt 1.245 tỷ đồng.", source_class=SourceClass.ISSUER)
     unsafe = claim(
         source,
@@ -198,6 +198,9 @@ def test_renderer_drops_unsupported_citations_and_omits_every_unledgered_url():
     memo = render_claim_ledger(report.ledger)
 
     assert report.ledger.claims[0].verdict is VerificationVerdict.UNSUPPORTED
+    assert "9.999 tỷ đồng" not in memo
+    assert "Chưa kiểm chứng" not in memo
+    assert "Luận điểm sai nếu lợi nhuận" not in memo
     assert "https://evil.example" not in memo
     assert "https://gap.example" not in memo
     assert source.canonical_url not in memo

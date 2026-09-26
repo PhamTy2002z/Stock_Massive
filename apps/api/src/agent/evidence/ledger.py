@@ -38,6 +38,27 @@ _PRIMARY_CLASSES = frozenset(
 )
 _URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)\S+")
 
+#: Calendar dates, in the forms a Vietnamese sentence writes them.
+#:
+#: Removed from a claim before its figures are checked, because a date is not a
+#: measured quantity and the numeric rule only makes sense about quantities. The
+#: rule asks whether every number a claim states is printed in the evidence it
+#: cites, in that claim's unit — and "đóng cửa 71.500 đồng ngày 04/08" states one
+#: figure, not three. Read literally, the 4 and the 8 were numbers no source
+#: prints a currency beside, so the whole claim was refused: every dated fact in
+#: an answer fell into the unverified list and only the vague sentences survived.
+#: When a date is wrong it is wrong about *time*, which is what ``_temporal_valid``
+#: and the evidence's own ``published_at`` already decide.
+#:
+#: The cost is a bare ratio written as a fraction — "tỷ lệ 3/4" — losing its two
+#: numbers. Prices, volumes and percentages are not written that way here, and
+#: the alternative is the failure above.
+_DATE_RE = re.compile(
+    r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b"  # 04/08 and 04/08/2026
+    r"|\b\d{1,2}/\d{4}\b"  # 08/2026
+    r"|\b\d{4}-\d{2}-\d{2}\b"  # 2026-08-04
+)
+
 
 @dataclass(frozen=True)
 class LedgerClaimAssessment:
@@ -146,7 +167,7 @@ def _publisher_identity(evidence: EvidenceRef) -> str:
 
 def _numbers_supported(claim: VerifiedClaim, evidence: tuple[EvidenceRef, ...]) -> tuple[str, ...]:
     failures: list[str] = []
-    for occurrence in numbers.occurrences(claim.text):
+    for occurrence in numbers.occurrences(_DATE_RE.sub(" ", claim.text)):
         target = occurrence.scaled if occurrence.scaled is not None else occurrence.written
         if any(
             numbers.contains(item.excerpt, target, claim.unit) is numbers.Verdict.MATCHED
@@ -305,6 +326,50 @@ def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", without_urls).strip().replace("[", "\\[").replace("]", "\\]")
 
 
+def _public_locator(source: str) -> str | None:
+    """The evidence's address, when it has one a reader can open.
+
+    Not every source is a page. A market read has no URL at all — its locator is
+    the provider request that produced the rows, which is a connector slug and
+    belongs in the trace rather than in the citation a reader is shown. So a
+    locator that is not an http(s) address renders as no locator: the publisher,
+    the title and the bar close already say what was read and when it became
+    knowable.
+
+    ``None`` rather than a raise, which is the whole fix. Canonicalising
+    unconditionally meant that any store-class evidence reaching the source list
+    threw inside the verification pass and cost the reader the entire answer,
+    chart and prose alike, for the sake of a link that never existed.
+    """
+    try:
+        return canonical_url(source)
+    except ValueError:
+        return None
+
+
+#: The sections the findings are grouped into, in the order a reader needs
+#: them: what stands, what rests on one feed, what the sources disagree about,
+#: what could not be placed in time, and what did not survive the check at all.
+_VERDICT_SECTIONS = {
+    VerificationVerdict.VERIFIED: "Kết luận theo bằng chứng",
+    VerificationVerdict.SINGLE_SOURCE: "Mới có một nguồn",
+    VerificationVerdict.CONFLICTING: "Nguồn mâu thuẫn",
+    VerificationVerdict.TEMPORALLY_INVALID: "Sai mốc thời gian",
+    VerificationVerdict.UNSUPPORTED: "Chưa kiểm chứng",
+}
+
+#: The outcome of the verification pass, in the language the answer is written
+#: in. The enum value is the harness's own name for the state and means nothing
+#: to the person reading the answer — and a reader who has to decode the first
+#: line of a memo reads the rest of it as machinery too.
+_OUTCOME_LABELS = {
+    VerifierOutcome.VERIFIED: "đã kiểm chứng",
+    VerifierOutcome.INSUFFICIENT_EVIDENCE: "chưa đủ bằng chứng",
+    VerifierOutcome.VERIFIER_FAILED: "không kiểm chứng được",
+    VerifierOutcome.BUDGET_EXHAUSTED: "dừng vì hết ngân sách",
+}
+
+
 def render_claim_ledger(ledger: ClaimLedger) -> str:
     """Render only checked ledger values; no model-authored URL is accepted."""
 
@@ -321,33 +386,32 @@ def render_claim_ledger(ledger: ClaimLedger) -> str:
             numbers_out.append(f"[{cited_ids.index(evidence_id) + 1}]")
         return "".join(numbers_out)
 
-    lines = [
-        f"**Trạng thái kiểm chứng:** `{ledger.verifier_outcome.value}`",
-        f"**As of:** {ledger.as_of.isoformat()}",
-        "",
-        "### Kết luận theo bằng chứng",
-    ]
+    # Grouped by how far each claim got, rather than labelled one line at a
+    # time. The label repeated at the head of every bullet was the same word
+    # twenty times over, and a reader scanning for what was actually found had
+    # to read past it on each line to get to the sentence.
+    lines: list[str] = []
     rendered = 0
-    for claim in ledger.claims:
-        if claim.verdict is VerificationVerdict.UNSUPPORTED:
+    for verdict, heading in _VERDICT_SECTIONS.items():
+        claims = [item for item in ledger.claims if item.verdict is verdict]
+        if not claims:
             continue
-        status = {
-            VerificationVerdict.VERIFIED: "Đã kiểm chứng",
-            VerificationVerdict.SINGLE_SOURCE: "Một nguồn",
-            VerificationVerdict.CONFLICTING: "Nguồn mâu thuẫn",
-            VerificationVerdict.TEMPORALLY_INVALID: "Sai mốc thời gian",
-            VerificationVerdict.UNSUPPORTED: "Chưa kiểm chứng",
-        }[claim.verdict]
-        references = claim.supporting_evidence_ids + claim.contradicting_evidence_ids
-        lines.append(f"- **{status}:** {_clean_text(claim.text)} {cite(references)}".rstrip())
-        rendered += 1
+        lines.extend(("", f"### {heading}"))
+        for claim in claims:
+            # A claim the check refused carries no citation. A reference number
+            # beside it would read as the evidence backing it, which is the one
+            # thing this section exists to deny.
+            references = (
+                ()
+                if verdict is VerificationVerdict.UNSUPPORTED
+                else claim.supporting_evidence_ids + claim.contradicting_evidence_ids
+            )
+            lines.append(f"- {_clean_text(claim.text)} {cite(references)}".rstrip())
+            rendered += 1
     if not rendered:
-        lines.append("- Chưa có tuyên bố nào đủ điều kiện để hiển thị là đã kiểm chứng.")
-
-    unsupported = [item for item in ledger.claims if item.verdict is VerificationVerdict.UNSUPPORTED]
-    if unsupported:
-        lines.extend(("", "### Chưa kiểm chứng"))
-        lines.extend(f"- {_clean_text(item.text)}" for item in unsupported)
+        lines.extend(
+            ("", "### Kết luận theo bằng chứng", "- Chưa có tuyên bố nào đủ điều kiện để hiển thị.")
+        )
 
     lines.extend(("", "### Điều gì có thể làm luận điểm sai"))
     invalidations = [
@@ -367,15 +431,36 @@ def render_claim_ledger(ledger: ClaimLedger) -> str:
         lines.extend(("", "### Khoảng trống bằng chứng"))
         lines.extend(f"- {_clean_text(item)}" for item in ledger.gaps)
 
+    # The state of the check itself, last. It is a fact about the answer rather
+    # than a finding, and standing at the top it was the first thing a reader
+    # met — in the harness's own vocabulary, before a single sentence of what
+    # was found.
+    lines.extend(
+        (
+            "",
+            f"**Kết quả kiểm chứng:** {_OUTCOME_LABELS[ledger.verifier_outcome]}"
+            f" · dữ liệu tính đến {ledger.as_of.strftime('%H:%M %d/%m/%Y')}",
+        )
+    )
+
     if cited_ids:
         lines.extend(("", "### Nguồn"))
         for index, evidence_id in enumerate(cited_ids, start=1):
             item = evidence_by_id[evidence_id]
-            target = canonical_url(item.canonical_url or item.source)
-            publisher = _clean_text(item.publisher or urlsplit(target).hostname or "Nguồn")
+            target = _public_locator(item.canonical_url or item.source)
+            publisher = _clean_text(
+                item.publisher
+                or (urlsplit(target).hostname if target else None)
+                or "Nguồn"
+            )
             title = _clean_text(item.title)
-            published = item.published_at.isoformat() if item.published_at else "không rõ ngày công bố"
-            lines.append(f"[{index}] {publisher} — {title} — {published} — <{target}>")
+            published = (
+                item.published_at.strftime("%H:%M %d/%m/%Y")
+                if item.published_at
+                else "không rõ ngày công bố"
+            )
+            row = f"[{index}] {publisher} — {title} — {published}"
+            lines.append(f"{row} — <{target}>" if target else row)
     return "\n".join(lines).strip()
 
 

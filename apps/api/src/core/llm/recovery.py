@@ -137,8 +137,8 @@ RECOVERIES: dict[type[LLMError], Recovery] = {
     ),
     MalformedArguments: Recovery(
         RouteAction.TERMINAL,
-        "the route violated its contract by returning arguments that are not "
-        "JSON, which is counted and logged loudly rather than worked around",
+        "arguments that are not JSON are counted and logged loudly and never "
+        "handed back as a call; the agent loop, not the route, asks once more",
     ),
     LLMError: Recovery(
         RouteAction.TERMINAL,

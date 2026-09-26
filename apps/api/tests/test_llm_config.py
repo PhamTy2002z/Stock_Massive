@@ -221,7 +221,7 @@ class TestNoModelIdIsCompiledIn:
         )
 
         assert defaults.llm_model_batch == "gpt-5.6-luna"
-        assert defaults.llm_model_session == "gpt-5.6-terra"
+        assert defaults.llm_model_session == "gpt-5.6-luna"
 
 
 class TestAnUnfilledKeyReachesBudgetValidation:

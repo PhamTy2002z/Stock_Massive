@@ -563,6 +563,9 @@ async def test_the_round_ceiling_is_the_constant_and_the_last_call_answers() -> 
     # another one.
     last = client.requests[-1]
     assert last.tool_choice == "none"
+    # Withheld as well: a route that ignores ``"none"`` answers with tool calls
+    # and the sentence introducing them, which would be published as the reply.
+    assert last.tools == ()
     assert any(
         message.content == ROUNDS_EXHAUSTED_NOTE for message in last.messages
     )
@@ -590,8 +593,8 @@ async def test_the_turn_cannot_outspend_what_it_was_admitted_against() -> None:
     await loop(client).run(turn_request())
 
     reserved = sum(spend.output_tokens for spend in client.spends)
-    assert reserved <= TURN_OUTPUT_TOKENS
-    assert (MAX_TOOL_ROUNDS + 1) * DEFAULT_MAX_OUTPUT_TOKENS <= TURN_OUTPUT_TOKENS
+    assert reserved <= LIGHT.owner_output_total
+    assert (MAX_TOOL_ROUNDS + 1) * DEFAULT_MAX_OUTPUT_TOKENS <= LIGHT.owner_output_total
 
 
 @pytest.mark.asyncio
@@ -1227,11 +1230,47 @@ def test_the_id_assertion_is_a_malformed_arguments_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_route_that_returns_unparseable_arguments_ends_the_turn_loudly() -> None:
-    client = FakeClient([MalformedArguments("the arguments are not JSON")])
+async def test_unparseable_arguments_are_asked_for_again_once() -> None:
+    """The model can write the call again; throwing the Turn away cannot help."""
+    client = FakeClient(
+        [MalformedArguments("the arguments are not JSON"), wants("web_search"), answer()]
+    )
 
-    with pytest.raises(MalformedArguments):
-        await loop(client).run(turn_request())
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.status is TurnStatus.COMPLETE
+    assert [call.name for call in outcome.tool_calls] == ["web_search"]
+    notes = [
+        message.content
+        for message in client.requests[1].messages
+        if message.role is Role.SYSTEM
+    ]
+    assert any("not a valid JSON object" in (note or "") for note in notes)
+    # Spent on the call that carried it.
+    assert not any(
+        "not a valid JSON object" in (message.content or "")
+        for message in client.requests[2].messages
+        if message.role is Role.SYSTEM
+    )
+
+
+@pytest.mark.asyncio
+async def test_unparseable_arguments_twice_settle_the_turn_with_what_it_has() -> None:
+    """Loud, named, and settled: the evidence of earlier rounds is kept."""
+    client = FakeClient(
+        [
+            wants("web_search"),
+            MalformedArguments("the arguments are not JSON"),
+            MalformedArguments("the arguments are not JSON"),
+        ]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.status is TurnStatus.INCOMPLETE
+    assert outcome.terminal_reason == "route_error"
+    assert [call.status for call in outcome.tool_calls] == [ToolCallStatus.OK]
+    assert len(client.requests) == 3
 
 
 # -- the external-tool budget ------------------------------------------------
@@ -1249,7 +1288,7 @@ async def test_a_turn_cannot_spend_more_than_its_external_call_budget() -> None:
     registry.register(entry("web_search", counted), override=True)
     client = FakeClient(
         [
-            wants("web_search", "web_search", prefix=f"r{index}", query=f"q{index}")
+            wants(*(["web_search"] * 3), prefix=f"r{index}", query=f"q{index}")
             for index in range(MAX_TOOL_ROUNDS)
         ]
     )
@@ -1260,11 +1299,109 @@ async def test_a_turn_cannot_spend_more_than_its_external_call_budget() -> None:
     refused = [
         call for call in outcome.tool_calls if call.error == "external_budget_exhausted"
     ]
-    assert len(refused) == MAX_TOOL_ROUNDS * 2 - MAX_EXTERNAL_TOOL_CALLS
+    assert len(refused) == MAX_TOOL_ROUNDS * 3 - MAX_EXTERNAL_TOOL_CALLS
     # A refused call is answered rather than dropped: a call with no result at
     # all is a transcript the model has to guess at.
     assert all(call.result_text == EXTERNAL_TOOL_EXHAUSTED_MESSAGE for call in refused)
     assert all(call.dispatched is False for call in refused)
+
+
+@pytest.mark.asyncio
+async def test_an_exact_repeat_of_a_web_read_is_served_from_the_turn() -> None:
+    """The first repeat used to cost one of the seven external calls: the ladder
+    only warns once a repeat has already come back with the same bytes."""
+    calls = 0
+
+    async def counted(_context, arguments):
+        nonlocal calls
+        calls += 1
+        return {"found": arguments.get("query")}
+
+    registry.register(entry("web_search", counted), override=True)
+    client = FakeClient(
+        [
+            wants("web_search", prefix="r0", query="lãi suất"),
+            wants("web_search", prefix="r1", query="lãi suất"),
+            answer(),
+        ]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.status is TurnStatus.COMPLETE
+    assert calls == 1
+    first, repeat = outcome.tool_calls
+    assert repeat.status is ToolCallStatus.OK
+    assert repeat.dispatched is False
+    assert repeat.result_text == first.result_text
+    # The reader's copy travels too, or a repeat draws as "no results".
+    assert repeat.results == first.results
+    assert repeat.scan == first.scan
+    # The model is told why nothing new arrived, outside the page it reads.
+    tool_messages = [
+        message
+        for message in client.requests[2].messages
+        if message.role is Role.TOOL
+    ]
+    assert "already ran in round 1" in (tool_messages[-1].content or "")
+
+
+@pytest.mark.asyncio
+async def test_a_repeat_with_different_arguments_is_a_new_read() -> None:
+    calls = 0
+
+    async def counted(_context, arguments):
+        nonlocal calls
+        calls += 1
+        return {"found": arguments.get("query")}
+
+    registry.register(entry("web_search", counted), override=True)
+    client = FakeClient(
+        [
+            wants("web_search", prefix="r0", query="lãi suất"),
+            wants("web_search", prefix="r1", query="lãi suất VCB"),
+            answer(),
+        ]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert calls == 2
+    assert all(call.dispatched for call in outcome.tool_calls)
+
+
+@pytest.mark.asyncio
+async def test_a_repeat_of_a_store_read_still_runs() -> None:
+    """A store read is free, and a note written earlier can change its answer."""
+    client = FakeClient(
+        [
+            wants("recall_facts", prefix="r0", query="khẩu vị"),
+            wants("recall_facts", prefix="r1", query="khẩu vị"),
+            answer(),
+        ]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert all(call.dispatched for call in outcome.tool_calls)
+
+
+@pytest.mark.asyncio
+async def test_a_repeat_of_a_failed_web_read_is_dispatched_again() -> None:
+    """Only a success is reused; a failure is the guardrail ladder's to judge."""
+    registry.register(entry("web_search", _boom), override=True)
+    client = FakeClient(
+        [
+            wants("web_search", prefix="r0", query="lãi suất"),
+            wants("web_search", prefix="r1", query="lãi suất"),
+            answer(),
+        ]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert all(call.dispatched for call in outcome.tool_calls)
+    assert all(call.status is ToolCallStatus.ERROR for call in outcome.tool_calls)
 
 
 @pytest.mark.asyncio
@@ -2234,9 +2371,9 @@ async def test_a_call_the_turn_refused_tells_the_surface_which_ceiling_refused_i
     the reader, because only one of them is worth trying again.
     """
     rounds = [
-        wants(*(["web_search"] * 3), prefix="a"),
-        wants(*(["web_search"] * 3), prefix="b"),
-        wants(*(["web_search"] * 2), prefix="c"),
+        wants(*(["web_search"] * 7), prefix="a", query="qa"),
+        wants(*(["web_search"] * 7), prefix="b", query="qb"),
+        wants(*(["web_search"] * 7), prefix="c", query="qc"),
         answer(),
     ]
     published: list[dict[str, Any]] = []
@@ -2253,8 +2390,8 @@ async def test_a_call_the_turn_refused_tells_the_surface_which_ceiling_refused_i
 
     outcome = await loop(FakeClient(rounds), publisher=Surface()).run(turn_request())
 
-    # Eight calls asked for, and the allowance is seven: the last one had
-    # nothing left to spend. Three a round is inside the per-round fan-out gate
+    # Twenty-one calls asked for, and the allowance is twenty: the last one had
+    # nothing left to spend. Seven a round is inside the per-round fan-out gate
     # of eight, so this is the Turn ceiling firing and not that one.
     refused = [call for call in outcome.tool_calls if not call.dispatched]
     assert [call.error for call in refused] == ["external_budget_exhausted"]

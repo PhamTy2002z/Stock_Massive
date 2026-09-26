@@ -80,8 +80,8 @@ def test_a_call_that_has_not_failed_is_never_blocked():
 
 def test_the_block_rung_is_reached_at_one_call_a_round():
     # The shape the loop actually produces: judge, dispatch, record, next round.
-    # No fan-out, and the rung still lands inside MAX_TOOL_ROUNDS — which is the
-    # whole point of the threshold being three rather than five.
+    # No fan-out, and the rung still lands inside MAX_TOOL_ROUNDS — the fourth
+    # round is blocked and every round after it stays blocked.
     guardrails = TurnGuardrails()
 
     verdicts = []
@@ -91,13 +91,15 @@ def test_the_block_rung_is_reached_at_one_call_a_round():
         if decision.verdict is Verdict.ALLOW:
             guardrails.after_call("web_search", ARGUMENTS, ok=False)
 
-    assert verdicts[-1] is Verdict.BLOCK
-    assert verdicts[:-1] == [Verdict.ALLOW] * (MAX_TOOL_ROUNDS - 1)
+    blocked_from = DEFAULT_THRESHOLDS.exact_failure_block_after
+    assert blocked_from < MAX_TOOL_ROUNDS
+    assert verdicts[:blocked_from] == [Verdict.ALLOW] * blocked_from
+    assert set(verdicts[blocked_from:]) == {Verdict.BLOCK}
 
 
 def test_the_halt_rung_is_reached_inside_the_external_call_budget():
     # Two searches a round is an ordinary fan-out, not a pathological one, and
-    # seven failures is the whole external allowance. Above the ceiling this
+    # twenty failures is the whole external allowance. Above the ceiling this
     # could not happen at all: the Turn would run out of calls first. The inner
     # loop stops on the halt because the executor does — a halted Turn
     # dispatches nothing more, so a test that kept going would be counting calls

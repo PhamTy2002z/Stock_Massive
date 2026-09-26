@@ -19,12 +19,14 @@ def prose(key: str) -> str:
 
 
 def test_prompt_version_and_section_order_are_explicit():
-    assert PROMPT_VERSION == "4.2.0"
+    assert PROMPT_VERSION == "5.1.0"
     assert tuple(item.key for item in SECTIONS) == (
         "mission",
         "invariants",
         "honesty",
         "tools",
+        "method",
+        "asking",
         "budget",
         "untrusted",
         "memory",
@@ -44,7 +46,32 @@ def test_prompt_offers_only_the_current_web_and_memory_tools():
         "recall_facts",
     ):
         assert name in tools
-    assert "năm công cụ" in tools
+    # The surface differs by mode, so the prompt names no count: a number
+    # written here was wrong the moment a desk offered one more tool.
+    assert "năm công cụ" not in tools
+    assert "đúng danh sách gửi kèm yêu cầu" in tools
+    assert "chỉ đọc" in tools
+
+
+def test_prompt_teaches_a_method_for_questions_with_several_parts():
+    body = prose("method")
+    assert "song song" in body
+    assert "theo thứ tự" in body
+    # Arguments are read, never invented.
+    assert "không tự nghĩ ra một url" in body
+    # A blocked branch does not block the answer.
+    assert "một ý bị chặn không chặn cả câu trả lời" in body
+    assert "mâu thuẫn" in body
+    # Progress is not completion.
+    assert "tiến độ, không phải câu trả lời" in body
+
+
+def test_prompt_separates_what_only_the_user_knows_from_what_can_be_looked_up():
+    body = prose("asking")
+    assert "không tra web để tìm" in body
+    assert "giá vốn" in body
+    assert "tra ít nhất một lần" in body
+    assert "nêu giả định" in body
 
 
 def test_prompt_is_honest_about_missing_local_analysis_runtime():
@@ -61,7 +88,7 @@ def test_prompt_requires_current_web_evidence_and_source_reading():
     assert "web_search" in tools and "fetch_url" in tools
     assert "đoạn trích tìm kiếm" in tools
     assert "nguồn sơ cấp" in tools
-    assert "tối đa bảy" in budget
+    assert "tối đa hai mươi" in budget
     assert "không phải chỉ tiêu" in budget
 
 

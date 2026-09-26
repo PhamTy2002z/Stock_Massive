@@ -12,7 +12,14 @@ from sqlalchemy import delete, select
 from src.agent import registry, toolsets
 from src.agent.events import EventType, TurnPublisher, snapshot_from_draft
 from src.agent.lanes import DEEP, DEFAULT_REASON, LIGHT, LaneProfile
-from src.agent.loop import SIGNAL_DESK_MODE, AgentLoop, ContextBudget, TurnDraft
+from src.agent.loop import (
+    SIGNAL_DESK_MODE,
+    AgentLoop,
+    ContextBudget,
+    TurnDraft,
+    TurnOutcome,
+    TurnStatus,
+)
 from src.agent.persistence import (
     TURN_COMPLETE,
     TURN_INCOMPLETE,
@@ -31,6 +38,8 @@ from src.agent.parts import (
 )
 from src.agent.turns import (
     MAX_USER_INPUT_BYTES,
+    draft_content,
+    frozen_message,
     Checkpointer,
     RunningTurn,
     TurnService,
@@ -288,8 +297,8 @@ async def test_the_signal_desk_mode_skips_the_router_and_widens_the_surface(owne
 
 
 @pytest.mark.asyncio
-async def test_a_chat_turn_cannot_reach_the_market_read(owner):
-    """The other half, and the one that matters for a capability this narrow."""
+async def test_a_chat_turn_reaches_the_market_read(owner):
+    """The other half: a conversation carries the market read too."""
     thread_id = await thread_for(owner)
     routed: list[tuple[str, ...]] = []
 
@@ -317,7 +326,7 @@ async def test_a_chat_turn_cannot_reach_the_market_read(owner):
     await turns.running(turn_id).task
 
     assert routed == [toolsets.CHAT_TOOLSETS]
-    assert "get_market_data" not in toolsets.resolve_toolset(routed[0])
+    assert "get_market_data" in toolsets.resolve_toolset(routed[0])
 
 
 @pytest.mark.asyncio
@@ -1629,3 +1638,90 @@ async def test_each_outcome_of_a_card_survives_into_a_reopened_thread(owner):
     for entry in outcomes.values():
         assert entry["prompt"] == "Bạn mua mới hay trung bình giá?"
         assert len(entry["options"]) == 2
+
+
+# -- the visual part on a settled Turn -------------------------------------
+
+CHART = {
+    "version": 1,
+    "renderer": "flint-echarts",
+    "flintVersion": "0.5.1",
+    "asOf": "2026-09-04T17:00:00+07:00",
+    "title": "FPT · 1D",
+    "assemblies": [
+        {
+            "data": {"values": [{"time": "2026-08-24T15:00:00+07:00", "close": 71_400}]},
+            "chart_spec": {
+                "chartType": "Line Chart",
+                "encodings": {"x": "time", "y": "close"},
+                "baseSize": {"width": 420, "height": 300},
+            },
+        }
+    ],
+    "evidenceIds": ["ev_abc"],
+    "sourceCallIds": ["call_1"],
+}
+
+
+def settled(**overrides) -> TurnOutcome:
+    fields = {
+        "status": TurnStatus.COMPLETE,
+        "terminal_reason": None,
+        "text": "FPT đóng cửa ở 71.400 đồng.",
+        "rounds_used": 1,
+        "rounds_exhausted": False,
+        "tool_calls": (),
+        "usage": Usage(),
+    }
+    fields.update(overrides)
+    return TurnOutcome(**fields)
+
+
+@pytest.mark.asyncio
+async def test_the_chart_settles_onto_the_message_and_into_the_checkpoint(owner):
+    """One terminal transaction writes both, so a reopened Thread has the chart."""
+    thread_id = await thread_for(owner)
+    turns = service(FakeClient([]))
+    running = await committed_turn(owner, thread_id)
+
+    record = await turns._finish(running, settled(visual=CHART))
+
+    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
+    assert assistant.content["visual"] == CHART
+    assert record.draft_content["visual"] == CHART
+
+
+@pytest.mark.asyncio
+async def test_a_turn_with_no_chart_writes_no_key_at_all(owner):
+    """Absent, not null: a client asks whether there is a chart of the key."""
+    thread_id = await thread_for(owner)
+    turns = service(FakeClient([]))
+    running = await committed_turn(owner, thread_id)
+
+    record = await turns._finish(running, settled())
+
+    assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
+    assert "visual" not in assistant.content
+    assert "visual" not in record.draft_content
+
+
+def test_a_restart_freezes_the_chart_the_checkpoint_already_held():
+    """The build that drew it is gone; the evidence it drew from is not."""
+    checkpoint = draft_content(
+        TurnDraft(text="FPT đóng cửa ở 71.400 đồng.", rounds_used=1, tool_calls=(), visual=CHART)
+    )
+
+    class Interrupted:
+        draft_content = checkpoint
+
+    assert frozen_message(Interrupted())["visual"] == CHART
+
+
+def test_a_checkpoint_written_before_charts_existed_still_freezes():
+    checkpoint = draft_content(TurnDraft(text="Không đủ bằng chứng.", rounds_used=0, tool_calls=()))
+
+    class Interrupted:
+        draft_content = checkpoint
+
+    assert "visual" not in checkpoint
+    assert "visual" not in frozen_message(Interrupted())

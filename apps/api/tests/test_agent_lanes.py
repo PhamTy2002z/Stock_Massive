@@ -93,8 +93,10 @@ def test_the_light_lane_is_the_ceilings_this_build_already_ran() -> None:
     # The service's own hard ``wait_for`` and the loop's between-round check are
     # the same wall clock seen from two sides, so they are one number.
     assert LIGHT.deadline_seconds == agent_turns.TURN_DEADLINE_SECONDS
-    assert LIGHT.owner_output_total == TURN_OUTPUT_TOTAL
-    assert LIGHT.owner_input_total == TURN_INPUT_TOTAL
+    # Above the admission defaults since 2026-09-26, and inside what the ledger
+    # will grant, so the lane's totals are honoured rather than clamped.
+    assert TURN_OUTPUT_TOTAL <= LIGHT.owner_output_total <= TURN_OUTPUT_TOTAL_MAX
+    assert TURN_INPUT_TOTAL <= LIGHT.owner_input_total <= TURN_INPUT_TOTAL_MAX
 
 
 def test_the_note_on_the_ceiling_names_the_lanes_own_rounds() -> None:
@@ -113,7 +115,7 @@ def test_the_deep_lane_stays_inside_what_the_ledger_will_grant() -> None:
     assert DEEP.owner_input_total <= TURN_INPUT_TOTAL_MAX
     # Deep buys rounds of evidence, not a longer reply.
     assert DEEP.max_output_tokens == LIGHT.max_output_tokens
-    assert DEEP.max_tool_rounds > LIGHT.max_tool_rounds
+    assert DEEP.max_tool_rounds >= LIGHT.max_tool_rounds
 
 
 # -- routing -----------------------------------------------------------------

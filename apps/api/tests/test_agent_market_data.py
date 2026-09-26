@@ -243,6 +243,37 @@ def test_a_range_the_provider_has_no_rows_for_says_so_once():
     assert raised.value.code == market_data.NO_DATA
 
 
+def test_the_provider_is_asked_for_one_day_past_the_range_it_was_given():
+    """The provider's ``end`` is exclusive, so the last session asked for is
+    only returned when the call reaches past it. Asking for a single day this
+    way is what the provider answers with an error rather than that day."""
+    tools = market_data.MarketDataTools(settings=settings())
+    tools._package = True
+    seen: dict[str, Any] = {}
+
+    class Quote:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def history(self, **kwargs: Any) -> Any:
+            seen.update(kwargs)
+            return daily(28)
+
+    monkey = market_data._import_vnstock
+    try:
+        market_data._import_vnstock = lambda: type(  # type: ignore[assignment]
+            "Module", (), {"Quote": Quote}
+        )
+        tools._history(
+            "FPT", date(2026, 8, 28), date(2026, 8, 28), "1D"
+        )
+    finally:
+        market_data._import_vnstock = monkey  # type: ignore[assignment]
+
+    assert seen["start"] == "2026-08-28"
+    assert seen["end"] == "2026-08-29"
+
+
 def test_a_provider_failure_becomes_this_tools_own_vocabulary():
     tools = market_data.MarketDataTools(settings=settings())
     tools._package = True
@@ -425,19 +456,16 @@ def test_a_number_no_bar_reports_is_refused_by_the_ledger():
     assert assessment.numeric_failures != ()
 
 
-def test_a_day_number_written_into_a_claim_sinks_it_and_that_is_not_new():
-    """A constraint on how a claim is worded, proven here so Phase 4 can act on it.
+def test_a_date_written_into_a_claim_no_longer_sinks_it():
+    """The numeric rule is about quantities, and a calendar date is not one.
 
     ``numbers.occurrences`` reads ``24/08/2026`` as the numbers 24, 8 and 2026,
     and ``contains`` accepts a value under three significant digits only where
-    the claim's unit is printed beside it. No excerpt prints "đồng" after a day
-    number, so a material claim that spells the date inside its own sentence is
-    ``UNSUPPORTED`` no matter what evidence it cites.
-
-    This is the shipped ledger and it is the same for a web page — nothing here
-    caused it and nothing here may loosen it. What it means is that the date
-    belongs in the evidence's own metadata and in the prose around the claim,
-    not inside the sentence the numeric check reads.
+    the claim's unit is printed beside it — no excerpt prints "đồng" after a day
+    number. Read that way every dated fact in an answer was refused, which is
+    how the concrete sentences ended up in the unverified list while only the
+    vague ones survived. The date is stripped before the figures are read; when
+    a date is wrong it is wrong about time, which the temporal gate decides.
     """
     result = read(tools_returning(daily(24, 25, 26)))
     evidence = evidence_from_calls([market_call(result)])
@@ -445,8 +473,21 @@ def test_a_day_number_written_into_a_claim_sinks_it_and_that_is_not_new():
     ledger = ledger_for(evidence, "FPT mở phiên 24/08/2026 ở 72.500 đồng.")
     assessment = validate_claim_ledger(ledger).claims[0]
 
+    assert assessment.accepted_verdict is VerificationVerdict.SINGLE_SOURCE
+    assert assessment.numeric_failures == ()
+
+
+def test_a_figure_the_excerpt_does_not_print_still_sinks_the_claim():
+    """The rule the date carve-out must not have loosened: a figure still has to
+    be printed in the evidence, digit for digit, and a rounded one is not."""
+    result = read(tools_returning(daily(24, 25, 26)))
+    evidence = evidence_from_calls([market_call(result)])
+
+    ledger = ledger_for(evidence, "FPT khớp 4,61 triệu cổ phiếu phiên 24/08/2026.")
+    assessment = validate_claim_ledger(ledger).claims[0]
+
     assert assessment.accepted_verdict is VerificationVerdict.UNSUPPORTED
-    assert set(assessment.numeric_failures) == {"24", "8"}
+    assert assessment.numeric_failures != ()
 
 
 def test_a_failed_market_call_produces_no_evidence():

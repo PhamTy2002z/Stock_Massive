@@ -80,7 +80,7 @@ class GuardrailThresholds:
     of 0 would fire before anything happened.
 
     The two upper rungs are arithmetic against the runtime that dispatches them,
-    not taste. A Turn gets four tool rounds (``loop.MAX_TOOL_ROUNDS``) and six
+    not taste. A Turn gets ten tool rounds (``loop.MAX_TOOL_ROUNDS``) and twenty
     calls to the tools that leave this deployment
     (``loop.MAX_EXTERNAL_TOOL_CALLS``), so a rung set above either of those is a
     rung nothing can ring: a warn-only ladder that reads strict.
@@ -92,15 +92,15 @@ class GuardrailThresholds:
     five it needed five byte-identical calls fanned out inside a single round,
     which is the one shape the ladder should not have to depend on.
 
-    ``same_tool_failure_halt_after=7``: the external-call ceiling itself. Seven
+    ``same_tool_failure_halt_after=20``: the external-call ceiling itself. Twenty
     failures of one tool is that whole allowance spent on nothing, so the two
     numbers are one fact and are written as one — change either and change
     both. It moved from six with the ceiling on 2026-08-29, and following it was
     the decision rather than the default: the rung means "one tool has failed as
     much as the whole allowance", and pinning it at six while the allowance grew
     would quietly turn it into "halt before the budget is spent", a different
-    rule nobody chose. Reached by a two-calls-a-round fan-out over four rounds,
-    or by three then two then two. Above the ceiling it would be unreachable by
+    rule nobody chose. It followed the ceiling again, to twenty, on 2026-09-26.
+    Above the ceiling it would be unreachable by
     construction for ``web_search`` and ``fetch_url``: the Turn would run out of
     calls before the tool ran out of failures.
 
@@ -112,7 +112,7 @@ class GuardrailThresholds:
     same_tool_failure_warn_after: int = 3
     no_progress_warn_after: int = 2
     exact_failure_block_after: int = 3
-    same_tool_failure_halt_after: int = 7
+    same_tool_failure_halt_after: int = 20
 
 
 DEFAULT_THRESHOLDS = GuardrailThresholds()

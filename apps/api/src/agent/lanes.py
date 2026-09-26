@@ -88,19 +88,21 @@ class LaneProfile:
             )
 
 
-#: Today's numbers, and the lane almost every Turn gets.
+#: The lane almost every Turn gets, and the plain agent loop's.
 #:
-#: The values are the ones ``loop.py`` and ``turns.py`` have always used, so a
-#: Turn on this lane behaves exactly as it did before lanes existed — that is the
-#: property the lane test pins by comparing the two.
+#: Raised to the deep lane's ceilings on 2026-09-26, when Chat became the whole
+#: product: four rounds and seven external calls ran out before a stock question
+#: had its evidence. What still separates the lanes is the deep pipeline, not
+#: the budget. ``loop.py`` and ``turns.py`` write the same numbers out, and the
+#: lane test pins them equal.
 LIGHT = LaneProfile(
     name="light",
-    max_tool_rounds=4,
-    deadline_seconds=600.0,
-    max_external_calls=7,
+    max_tool_rounds=10,
+    deadline_seconds=1_800.0,
+    max_external_calls=20,
     max_output_tokens=4_000,
-    owner_output_total=20_000,
-    owner_input_total=100_000,
+    owner_output_total=44_000,
+    owner_input_total=280_000,
 )
 
 #: The lane for a question that asks for verification rather than a fact.

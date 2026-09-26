@@ -119,7 +119,7 @@ MAX_USER_INPUT_BYTES = 8 * 1024
 # accepts one explicitly, and a number given here overrides every lane — which is
 # what an operator capping a deployment, or a test forcing an expiry, is asking
 # for.
-TURN_DEADLINE_SECONDS = 600.0
+TURN_DEADLINE_SECONDS = 1_800.0
 
 # How long active Turns get to reach a safe checkpoint. The container's stop
 # grace must exceed it, or the checkpoint this buys never lands.
@@ -263,7 +263,7 @@ def draft_content(draft: TurnDraft) -> dict[str, Any]:
     same reason: it is the timeline a reconnecting reader draws, and there is
     nothing in ``text`` to reconstruct it from.
     """
-    return {
+    content: dict[str, Any] = {
         "text": draft.text or "",
         "answer": draft.answer or "",
         "thoughts": [dict(thought) for thought in draft.thoughts],
@@ -271,6 +271,12 @@ def draft_content(draft: TurnDraft) -> dict[str, Any]:
         "progress": [dict(part) for part in draft.progress],
         "rounds_used": draft.rounds_used,
     }
+    # Absent rather than null, on the same rule the message follows: a
+    # checkpoint written before there was a chart stays byte-identical to one
+    # written now, and *is there a chart* is a question about the key.
+    if draft.visual is not None:
+        content["visual"] = dict(draft.visual)
+    return content
 
 
 def assistant_message(
@@ -282,6 +288,7 @@ def assistant_message(
     thoughts: Sequence[Mapping[str, Any]] = (),
     progress: Sequence[Mapping[str, Any]] = (),
     question: Mapping[str, Any] | None = None,
+    visual: Mapping[str, Any] | None = None,
     elapsed_ms: int = 0,
 ) -> dict[str, Any]:
     """The canonical assistant message, in the one place its shape is decided.
@@ -316,6 +323,11 @@ def assistant_message(
     stays byte-identical to one written now, and a client can ask *is there a
     card here* of the key itself instead of of its value.
 
+    ``visual`` is the chart the host assembled for this Turn, written under the
+    same absent-not-null rule and for the same reasons. It is a sibling part
+    rather than part of the answer: only the Signal Desk pane reads it, and it
+    never joins the transcript a later Turn hands the model.
+
     What the reader then did with the card is deliberately **not** here. This
     message is immutable and the outcome moves; the store merges the live state
     in when the transcript is read (``persistence.read_thread``).
@@ -331,6 +343,11 @@ def assistant_message(
     }
     if question is not None:
         content["question"] = dict(question)
+    # The same rule, for the same two reasons. ``visual`` is a sibling of the
+    # answer and not part of it: the chat column never draws it, the model never
+    # reads it back, and the right-hand pane asks whether the key is here.
+    if visual is not None:
+        content["visual"] = dict(visual)
     return content
 
 
@@ -367,6 +384,10 @@ def frozen_message(record: TurnRecord) -> Mapping[str, Any] | None:
         # trail, and this process knows nothing about the events in it beyond
         # that they stopped.
         progress=tuple(draft.get("progress") or ()),
+        # Written by the build that was answering, from calls it had already
+        # made. A restart cannot re-derive it and has no reason to: the chart
+        # is a picture of evidence that is still in the checkpoint.
+        visual=draft.get("visual") if isinstance(draft.get("visual"), Mapping) else None,
         status=TURN_INCOMPLETE,
     )
 
@@ -655,6 +676,7 @@ class TurnService:
                 progress=outcome.progress,
                 status=status,
                 question=question,
+                visual=outcome.visual,
                 elapsed_ms=outcome.elapsed_ms,
             )
             # Written whenever there is prose *or* a card: the card is the
@@ -675,6 +697,7 @@ class TurnService:
                     rounds_used=outcome.rounds_used,
                     tool_calls=outcome.tool_calls,
                     progress=outcome.progress,
+                    visual=outcome.visual,
                 )
             ),
             # Two events follow this commit when there is a card — the question,

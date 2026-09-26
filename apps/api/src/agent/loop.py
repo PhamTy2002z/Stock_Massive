@@ -149,6 +149,7 @@ from .executor import (
 from .executor import ToolCall as ExecutorToolCall
 from .executor import ToolResult as ExecutorToolResult
 from .evidence import ClaimLedger, render_claim_ledger, validate_claim_ledger
+from .visual import build_visual
 from .evidence.source_policy import as_of_from_text
 from .evidence.pipeline import (
     COUNTER_TOOL_ROUND_LIMIT,
@@ -172,7 +173,7 @@ from .evidence.pipeline import (
     unasked_assumption,
     verifier_messages,
 )
-from .guardrails import TurnGuardrails
+from .guardrails import TurnGuardrails, canonical_json
 from .lanes import DEEP, DEFAULT_REASON, LIGHT, LaneProfile
 from .parts import (
     ATTEMPT_CANCELLED,
@@ -243,7 +244,7 @@ logger = logging.getLogger(__name__)
 # the ceiling rather than enforce it — the guardrail rungs, the attachment token
 # arithmetic, the replay harness — are describing the lane nearly every Turn
 # gets, and a test compares the two so they cannot drift.
-MAX_TOOL_ROUNDS = 4
+MAX_TOOL_ROUNDS = 10
 
 # In-process is correct because uvicorn runs a single worker.
 #
@@ -367,7 +368,7 @@ TOOL_TIMEOUT_SECONDS = 30.0
 #
 # The light lane's figure. A Turn reads its own lane's deadline, and a caller may
 # still pass one explicitly — which is how a test forces the expiry it is about.
-TURN_DEADLINE_SECONDS = 600.0
+TURN_DEADLINE_SECONDS = 1_800.0
 
 # How many calls to tools that cost money or reach off this deployment one Turn
 # may make. A round cap alone does not bound this: one round may fan out to five
@@ -398,16 +399,16 @@ TURN_DEADLINE_SECONDS = 600.0
 # deployment has run 611 Turns in total, ever. The ceiling was never what money
 # was short of.
 #
-# Below eight on purpose. ``executor.MAX_EXTERNAL_CALLS_PER_ROUND`` is 8, and
-# while the Turn ceiling is under it the per-round gate has never fired in
-# production; raising this to 8 or beyond would light up a path nothing has
-# exercised, which is a different change with a different risk.
+# Raised from seven to twenty on 2026-09-26 with the light lane: a stock
+# question spent seven calls on searches and unreadable PDFs and was refused the
+# eighth. Above ``executor.MAX_EXTERNAL_CALLS_PER_ROUND`` now, so the per-round
+# gate is what bounds one round's fan-out and this bounds the Turn.
 #
 # It expires. The prices above are the route's prices on the day of the
 # measurement, so a route change is a reason to run the arithmetic again rather
 # than to trust this comment. A lane that raises it is making the same claim
 # about money and owes the same measurement.
-MAX_EXTERNAL_TOOL_CALLS = 7
+MAX_EXTERNAL_TOOL_CALLS = 20
 EXTERNAL_TOOL_EXHAUSTED_MESSAGE = (
     "This turn has reached its limit on external tool calls. Answer from what has "
     "already been gathered, and say what you could not look up."
@@ -531,11 +532,71 @@ EMPTY_AFTER_TOOLS_NOTE = (
     "question they did not settle."
 )
 
+# What the model is told when its tool calls came back as arguments that are not
+# a JSON object, and how many times a Turn may say it. The route parsed nothing,
+# so no call ran and there is no result to answer — but the model can simply
+# write the call again, which is the repair Hermes makes and the one the
+# executor already makes for an argument that parses and fails the schema. One,
+# for the same reason the empty nudge is one: a second malformed reply says the
+# route cannot do this, and the Turn then settles with what it already has
+# rather than leaving through an exception that throws its evidence away.
+MAX_ARGUMENT_REPAIRS = 1
+MALFORMED_ARGUMENTS_NOTE = (
+    "Your last tool call could not be run: its arguments were not a valid JSON "
+    "object. Nothing was dispatched. Send the call again with arguments that "
+    "match the tool's schema exactly, or answer from what you already have."
+)
+
 # How long one round's tools may take, all of them together. The calls of a
 # round run concurrently, so this is a per-call ceiling for the ordinary batch
 # and a total for the rare sequential one. Its own reason because its remedy is
 # its own: a tool that never returns is a tool to fix, not a route to retry.
 TOOL_TIMEOUT = "tool_timeout"
+
+
+def repeated_read_guidance(round_index: int) -> str:
+    """What the model is told when it asks again for a read it already has."""
+    return (
+        f"This exact call already ran in round {round_index + 1} of this turn, so "
+        "its result is repeated here without a new request and without spending "
+        "the external-call allowance. Do not ask for it again: change the query, "
+        "read a different source, or answer from what you have."
+    )
+
+
+def earlier_identical_read(
+    calls: Sequence[TurnToolCall], call: TurnToolCall
+) -> TurnToolCall | None:
+    """The successful earlier call of this Turn that ``call`` exactly repeats.
+
+    Only an idempotent read that leaves this deployment qualifies. Those are the
+    calls that spend the external allowance and money, and asking one again
+    inside the same Turn cannot learn anything the first answer did not say. A
+    read of the store is left to run: it is free, and a ``remember_fact``
+    earlier in the Turn can change what it returns.
+
+    The guardrail ladder only warns *after* a repeat returned the same bytes, so
+    without this the first repeat of a search still cost one of the Turn's seven
+    external calls.
+    """
+    tool = call.resolved_tool
+    if (
+        tool is None
+        or tool.access is not registry.ToolAccess.NETWORK
+        or tool.effect is not registry.ToolEffect.READ
+        or tool.idempotency is not registry.ToolIdempotency.IDEMPOTENT
+    ):
+        return None
+    wanted = canonical_json(call.arguments)
+    for earlier in calls:
+        if (
+            earlier.name == call.name
+            and earlier.status is ToolCallStatus.OK
+            and earlier.result_text
+            and canonical_json(earlier.arguments) == wanted
+        ):
+            return earlier
+    return None
 
 
 def trace_status(*, ok: bool, error: str | None) -> str:
@@ -833,6 +894,10 @@ class TurnDraft:
     #: what a reader rebuilding from here draws the timeline from, and it cannot
     #: be recomputed from the answer.
     progress: tuple[Mapping[str, Any], ...] = ()
+    #: The assembled chart, once there is one. Checkpointed with everything
+    #: else because a restart freezes the transcript from here: a Turn that
+    #: reached its chart and then lost its process should still show it.
+    visual: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -869,6 +934,12 @@ class TurnOutcome:
     #: every Turn that answered. A Turn that asks is ``complete`` like any
     #: other: the card is the content, and the reply is the next Turn.
     question: Mapping[str, Any] | None = None
+    #: The host-assembled chart input for the right-hand pane, or ``None`` on
+    #: every Turn that has no chart to show. It rides here and onto the message
+    #: like the question does, and it never enters the transcript the model
+    #: reads: the model contributed nothing to it and has nothing to learn from
+    #: seeing it restated.
+    visual: Mapping[str, Any] | None = None
 
 
 class TurnPublisher(Protocol):
@@ -1056,6 +1127,9 @@ class _TurnState:
     # without a reply once has been asked again already, and rediscovering that in
     # a later round costs another call.
     empty_nudges: int = 0
+    # Per-Turn for the same reason: a route that could not write a call's
+    # arguments twice will not learn to on the third asking.
+    argument_repairs: int = 0
     # The note waiting for the next call to carry it, and cleared by the call
     # that sent it: a Turn told twice about one observation has been charged
     # twice for it.
@@ -1131,6 +1205,11 @@ class _TurnState:
     #: everything the Turn already produced — its calls, its trail, its prose —
     #: settles with it.
     question_part: QuestionPart | None = None
+    #: The chart this Turn earned, in wire form, or ``None`` — which is what
+    #: every Turn that read no market data has, and what a Turn whose figures
+    #: the ledger refused has too. Assembled by the host from the calls, so a
+    #: model that never sent a number cannot have put one here.
+    visual: Mapping[str, Any] | None = None
 
     def add_usage(self, usage: Usage | None) -> None:
         # ``None`` usage is not zero usage: a provider that supplied no evidence
@@ -1182,6 +1261,7 @@ class _TurnState:
             rounds_used=self.tool_rounds,
             tool_calls=tuple(self.calls),
             progress=wire_parts(self.progress),
+            visual=self.visual,
             boundary=boundary,
         )
 
@@ -1420,7 +1500,17 @@ class AgentLoop:
             call_tools = tools
             tool_choice: str | None = None
             if deep_pipeline and state.pipeline_stage is PipelineStage.PLANNING:
-                call_tools = tuple(tool for tool in tools if tool.name == "web_search")
+                # The planning round is narrowed to what the planning note asks
+                # for, and the note is not the same on both surfaces. With the
+                # market read offered, the note asks for three searches *and*
+                # one ``get_market_data`` — so a filter that kept only
+                # ``web_search`` would take away the tool the model is being
+                # told to call, and every Signal Desk Turn would be refused by
+                # the gate below for obeying an instruction it had no way to
+                # follow. The narrowing itself stays: planning is for looking,
+                # and a fetch or a memory write in this round is not planning.
+                planning_tools = {"web_search", MARKET_TOOL} if market else {"web_search"}
+                call_tools = tuple(tool for tool in tools if tool.name in planning_tools)
                 tool_choice = "required"
             elif deep_pipeline and state.pipeline_stage is PipelineStage.RESEARCH:
                 phase_final = state.tool_rounds - 1 >= RESEARCH_TOOL_ROUND_LIMIT
@@ -1455,11 +1545,6 @@ class AgentLoop:
                     exhausted,
                     tool_choice=tool_choice,
                 )
-            except MalformedArguments:
-                # Counted and logged at the boundary, and never absorbed: the
-                # route violated its contract, and an answer built on top of
-                # that is an answer nobody can trust. Nothing is disabled here.
-                raise
             except TurnCancelled:
                 # The reader stopped the Turn while this call was in flight, and
                 # the call has already been torn down. Whatever earlier rounds
@@ -1610,12 +1695,28 @@ class AgentLoop:
             if (
                 deep_pipeline
                 and state.pipeline_stage is PipelineStage.PLANNING
-                and not self._valid_planner_calls(completion.tool_calls)
+                and not self._valid_planner_calls(
+                    completion.tool_calls, market=market
+                )
             ):
+                # What the model actually asked for, in the log. The terminal
+                # reason has to stay short and stable — it is a 48-character
+                # column and a gate's vocabulary — so without this line a
+                # refused planning batch leaves nothing behind at all: the calls
+                # are rejected before dispatch, so no tool row is ever written,
+                # and the Turn settles saying only that the batch was wrong.
+                logger.warning(
+                    "Turn %s planning batch refused (market surface: %s); the "
+                    "model asked for %d call(s): %s",
+                    request.request_message_id,
+                    market,
+                    len(completion.tool_calls),
+                    ", ".join(call.name for call in completion.tool_calls) or "none",
+                )
                 return await self._fail_deep_pipeline(
                     request,
                     state,
-                    "planner_did_not_produce_four_independent_searches",
+                    "planner_did_not_produce_the_batch_the_note_asked_for",
                 )
             assert_distinct_ids(completion.tool_calls)
             failed = await self._round(
@@ -1669,16 +1770,37 @@ class AgentLoop:
     # -- the deep evidence pipeline -------------------------------------
 
     @staticmethod
-    def _valid_planner_calls(calls: Sequence[ToolCall]) -> bool:
-        if len(calls) != 4 or any(call.name != "web_search" for call in calls):
+    def _valid_planner_calls(calls: Sequence[ToolCall], *, market: bool) -> bool:
+        """Whether the planning batch is the one the note actually asked for.
+
+        Four calls either way, and the *shape* of the four is what the surface
+        decides. Without the market read the four are searches. With it, the
+        note asks for three searches and one ``get_market_data`` — so a batch
+        that complied would be rejected by a gate counting four searches, and
+        every Signal Desk Turn would fail its first round for obeying its own
+        instructions.
+
+        The distinctness rule stays on the searches, because that is what it was
+        for: four queries that are one query asked four ways is a planning pass
+        that learned nothing. The market read is not a query and has nothing to
+        be distinct from.
+        """
+        if len(calls) != 4:
+            return False
+        searches = [call for call in calls if call.name == "web_search"]
+        reads = [call for call in calls if call.name == MARKET_TOOL]
+        wanted_searches = 3 if market else 4
+        if len(searches) != wanted_searches:
+            return False
+        if len(reads) != (1 if market else 0):
             return False
         queries = [
             str(call.arguments.get("query") or "").strip().casefold()
             if isinstance(call.arguments, Mapping)
             else ""
-            for call in calls
+            for call in searches
         ]
-        return all(queries) and len(set(queries)) == 4
+        return all(queries) and len(set(queries)) == wanted_searches
 
     async def _advance_deep_pipeline(
         self,
@@ -1978,6 +2100,13 @@ class AgentLoop:
                 request, state, "verification_schema_invalid"
             )
         state.claim_ledger = report.ledger
+        # After the ledger and only after it: the chart is a picture of figures
+        # the answer was allowed to state, so the gate that decided that is the
+        # gate the chart inherits. A Turn that read no market data gets ``None``
+        # here and never mentions a chart again.
+        state.visual = build_visual(
+            calls=state.calls, ledger=report.ledger, as_of=state.as_of
+        )
         state.pipeline_stage = PipelineStage.COMPLETE
         self._progress(
             state,
@@ -2256,10 +2385,13 @@ class AgentLoop:
                 # request body that nothing behind it honours.
                 metadata={"cache_identity": state.cache_identity},
                 messages=tuple(messages),
-                tools=tuple(tools),
                 # On the ceiling the model answers from what it has: another
                 # round of tools it cannot spend would come back as a call
-                # nobody runs.
+                # nobody runs. The tools are withheld, not only refused by
+                # ``tool_choice``: a route that ignores ``"none"`` returns tool
+                # calls anyway, and the sentence introducing them is published
+                # as the answer.
+                tools=() if final else tuple(tools),
                 tool_choice=tool_choice or ("none" if final else "auto"),
                 parallel_tool_calls=True,
                 max_output_tokens=output_tokens,
@@ -2372,6 +2504,8 @@ class AgentLoop:
                 if action is RouteAction.LOWER_OUTPUT_CAP:
                     self._lower_output_cap(request, state, error, started)
                     continue
+                if self._repair_arguments(request, state, error, started):
+                    continue
                 raise
 
             # The one place a real count and the estimate of the very messages
@@ -2387,6 +2521,44 @@ class AgentLoop:
             # with tool calls does not carry it into a third attempt.
             state.note = None
             return completion
+
+    def _repair_arguments(
+        self,
+        request: TurnRequest,
+        state: _TurnState,
+        error: LLMError,
+        started: float,
+    ) -> bool:
+        """Ask once more after tool calls whose arguments did not parse.
+
+        Only the client's parse failure reaches here. A route that cannot pair
+        ids with calls is refused by :func:`assert_distinct_ids` after the call
+        returns, and still fails the Turn: a result filed under the wrong call is
+        worse than no result.
+        """
+        if not isinstance(error, MalformedArguments):
+            return False
+        if state.argument_repairs >= MAX_ARGUMENT_REPAIRS:
+            return False
+        if self._round_spent(started) or self._expired(state):
+            return False
+        state.argument_repairs += 1
+        # The malformed reply was still generated and billed.
+        state.add_usage(error.usage)
+        # Added to a note already waiting rather than replacing it: on the deep
+        # lane that note is the stage's own instruction, and a retry sent without
+        # it fails the stage for a reason that is not the one that happened.
+        state.note = (
+            f"{state.note}\n\n{MALFORMED_ARGUMENTS_NOTE}"
+            if state.note
+            else MALFORMED_ARGUMENTS_NOTE
+        )
+        logger.warning(
+            "Turn %s received tool arguments that are not JSON; asking once more: %s",
+            request.request_message_id,
+            redact(str(error)),
+        )
+        return True
 
     def _pruned(
         self,
@@ -2649,6 +2821,24 @@ class AgentLoop:
                 round=state.tool_rounds,
                 resolved_tool=resolved,
             )
+            repeat = earlier_identical_read(state.calls, record)
+            if repeat is not None:
+                record = replace(
+                    record,
+                    status=ToolCallStatus.OK,
+                    result_text=repeat.result_text,
+                    context_text=repeat.context_text,
+                    # What the reader is shown, and the advisory verdict on it,
+                    # travel with the result: a repeat drawn as "no results" or
+                    # without the original's warning would misstate what the
+                    # model is reading.
+                    results=repeat.results,
+                    scan=repeat.scan,
+                    guidance=repeated_read_guidance(repeat.round),
+                    dispatched=False,
+                )
+                planned.append(record)
+                continue
             if record.reads_external:
                 if state.external_calls >= self._lane.max_external_calls:
                     record = replace(
@@ -3144,6 +3334,7 @@ class AgentLoop:
             question=(
                 None if state.question_part is None else state.question_part.as_wire()
             ),
+            visual=state.visual,
         )
 
     # -- clocks -----------------------------------------------------------

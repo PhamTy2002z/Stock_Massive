@@ -177,7 +177,46 @@ async def test_a_page_read_returns_visible_text_and_the_configured_byte_cap():
     assert "The rate was unchanged." in result["content"]
     assert "alert(1)" not in result["content"]
     assert result["source"] == "news.example"
-    assert seen[0][1] == 2_048
+    # The wire allows a PDF's size, since the type is known only on arrival.
+    assert seen[0][1] == settings().web_fetch_pdf_max_bytes
+
+
+@pytest.mark.asyncio
+async def test_an_html_page_over_its_own_cap_is_refused_under_the_pdf_one():
+    tools = web.WebTools(
+        settings=settings(),
+        lane=DirectLane(),
+        download=download_returning(
+            200, {"content-type": "text/html"}, b"<p>" + b"x" * 4_096, seen=[]
+        ),
+        resolver=resolver_for("93.184.216.34"),
+    )
+
+    with pytest.raises(Exception, match="WEB_FETCH_MAX_BYTES"):
+        await tools.fetch_url(CONTEXT, {"url": "https://news.example/rates"})
+
+
+@pytest.mark.asyncio
+async def test_a_pdf_is_read_as_its_pages_text():
+    from tests.test_agent_document_evidence import _pdf_bytes
+
+    tools = web.WebTools(
+        settings=settings(),
+        lane=DirectLane(),
+        download=download_returning(
+            200,
+            {"content-type": "application/pdf"},
+            _pdf_bytes("STB net profit rose 12 percent"),
+            seen=[],
+        ),
+        resolver=resolver_for("93.184.216.34"),
+    )
+
+    result = await tools.fetch_url(CONTEXT, {"url": "https://ir.example/stb-q2.pdf"})
+
+    assert "[trang 1]" in result["content"]
+    assert "STB net profit rose 12 percent" in result["content"]
+    assert result["title"] == "stb-q2.pdf"
 
 
 @pytest.mark.asyncio

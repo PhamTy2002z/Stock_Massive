@@ -51,6 +51,30 @@ def test_all_shipped_tools_declare_a_complete_behavior_contract():
             assert 0 < entry.timeout_seconds < loop.TOOL_TIMEOUT_SECONDS
 
 
+def test_every_shipped_description_says_when_to_use_it_and_where_arguments_come_from():
+    """A description is the model's only manual for a tool.
+
+    Each one has to say when the tool is the right one, and the tools whose
+    arguments are easy to invent have to say where those arguments come from.
+    """
+    provenance = {
+        "fetch_url": "never build or guess a URL",
+        "get_market_data": "find its ticker first",
+        "web_search": "only helps you choose a page",
+    }
+    with isolated_registry():
+        tools.register_all()
+        for entry in registry.entries():
+            assert "Use it" in entry.description, entry.name
+            if entry.name in provenance:
+                assert provenance[entry.name] in entry.description
+        market = registry.get("get_market_data").description
+        from src.agent.tools import market_data
+
+        assert f"{market_data.MAX_ROWS} bars" in market
+        assert f"{market_data.MAX_SPAN_DAYS['1D']} days" in market
+
+
 def test_shipped_schema_order_and_display_contract_are_locked():
     expected_runtime = {
         "web_search": ("Tìm trên web", True, 8_000, "query", False),
@@ -80,14 +104,16 @@ def test_every_offered_schema_survives_json_encoding():
                 pytest.fail(f"{name} cannot go on the wire: {unwritable}")
 
 
-def test_chat_selection_is_web_and_memory_only():
+def test_chat_selection_is_web_memory_and_the_market_read():
     from src.agent.domain import active_pack
 
     assert toolsets.CORE_TOOLSETS == ("web", "memory")
-    assert active_pack().toolsets == ()
-    assert toolsets.CHAT_TOOLSETS == toolsets.CORE_TOOLSETS
-    assert toolsets.resolve_toolset(toolsets.CHAT_TOOLSETS) == CHAT_CATALOG
-    assert "get_market_data" not in CHAT_CATALOG
+    assert active_pack().toolsets == ("market_data",)
+    assert toolsets.CHAT_TOOLSETS == (*toolsets.CORE_TOOLSETS, "market_data")
+    assert toolsets.resolve_toolset(toolsets.CHAT_TOOLSETS) == (
+        *CHAT_CATALOG,
+        "get_market_data",
+    )
 
 
 @pytest.mark.asyncio

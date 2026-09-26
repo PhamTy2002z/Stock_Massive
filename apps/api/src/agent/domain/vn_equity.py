@@ -105,6 +105,10 @@ PACK = DomainPack(
     name="vn-equity",
     version=VERSION,
     prompt_sections=(WEB_FIRST_RESEARCH,),
+    # The price and volume read is this domain's own tool, and every
+    # conversation reaches for it since Chat became the whole product
+    # (2026-09-26). It still switches itself off outside ``personal_internal``.
+    toolsets=("market_data",),
     symbol_shape=SYMBOL_SHAPE,
     topic_markers=TOPIC_MARKERS,
     off_topic_markers=OFF_TOPIC_MARKERS,

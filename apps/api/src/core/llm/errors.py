@@ -6,7 +6,7 @@ The taxonomy is fixed here and, more importantly, so is what each class
 | Class | Behaviour |
 | --- | --- |
 | ``ToolError`` | structured error returned to the model, which may try another approach; at most 2 attempts on the same tool |
-| ``MalformedArguments`` | raise immediately; the caller fails saying the route violated its contract |
+| ``MalformedArguments`` | raised immediately and counted; the agent loop asks the model once more, then settles the Turn ``route_error`` with what it already has |
 | ``GatewayTimeout`` | 2 attempts with jittered backoff, the transport rebuilt between them, then fail |
 | ``DeadlineExpired`` | a ``GatewayTimeout`` whose deadline was *ours* rather than the route's |
 | ``RouteRateLimited`` | **never** retried; the route answered, and its answer was "not now" |
@@ -74,11 +74,17 @@ class ToolError(LLMError):
 class MalformedArguments(LLMError):
     """A tool call whose ``arguments`` are not JSON.
 
-    Raised immediately and never handed back. A measured gateway keyed streamed
-    tool calls on a local counter instead of the upstream index and concatenated
-    two calls' arguments into invalid JSON under the wrong id, while returning
-    200 — so garbage here is not a model mistake to be re-prompted around, it is
-    the route violating its contract.
+    Raised immediately and never handed back as a call. A measured gateway keyed
+    streamed tool calls on a local counter instead of the upstream index and
+    concatenated two calls' arguments into invalid JSON under the wrong id, while
+    returning 200 — so garbage here may be the route violating its contract
+    rather than a model mistake, and it is counted loudly either way.
+
+    What the transport does not decide is the Turn's fate. The agent loop asks
+    once more (``loop.MAX_ARGUMENT_REPAIRS``): a model that fumbled one call
+    writes it again, and a route that garbles every call fails the second asking
+    too, which then settles the Turn under ``route_error`` with the evidence of
+    its earlier rounds intact instead of throwing them away.
     """
 
 

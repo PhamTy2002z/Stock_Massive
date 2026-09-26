@@ -64,7 +64,7 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL_BATCH: ${LLM_MODEL_BATCH:-gpt-5.6-luna}
-      LLM_MODEL_SESSION: ${LLM_MODEL_SESSION:-gpt-5.6-terra}
+      LLM_MODEL_SESSION: ${LLM_MODEL_SESSION:-gpt-5.6-luna}
       LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-120}
       # A route that streams tool calls without the upstream index can only
       # be called whole. Forwarded like the other switches: a flag that only
@@ -81,6 +81,19 @@ services:
       # startup warning can say the configured model is not the measured one.
       LLM_VISION_ENABLED: ${LLM_VISION_ENABLED:-false}
       LLM_VISION_MEASURED_MODEL: ${LLM_VISION_MEASURED_MODEL:-}
+      # The market read's two gates, forwarded for exactly the reason the block
+      # above states: a switch that only exists in the settings class is one a
+      # container never sees — and unforwarded, both of these fail in the
+      # quietest possible way, because the tool simply never appears on any
+      # surface and no log line says why.
+      #
+      # Both defaults are the refusing ones and stay that way. The provider's
+      # community licence is personal and non-commercial, so a host reads market
+      # data only when it has declared itself the internal one out loud; a
+      # deployment that forgets to set these gets no market data rather than an
+      # accidental licence breach.
+      DEPLOYMENT_PROFILE: ${DEPLOYMENT_PROFILE:-production}
+      MARKET_DATA_ENABLED: ${MARKET_DATA_ENABLED:-false}
       # The startup Capability Probe spends real provider tokens and refuses to
       # boot the whole API when the route cannot answer it. Forwarded so an
       # operator on a constrained route (expired plan, drained credits) can

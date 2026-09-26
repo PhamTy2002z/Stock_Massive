@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
 from typing import Any, Mapping, Sequence
@@ -142,10 +142,10 @@ checked at all:
 
 1. Prices are in whole dong, as get_market_data returns them. Never restate a
    figure in the provider's thousands.
-2. Do not write a calendar date inside the sentence of a material claim. The
-   numeric check reads 24/08/2026 as the numbers 24, 8 and 2026 and refuses the
-   claim because no source prints a currency beside a day number. Put the period
-   in the surrounding prose instead: "phiên gần nhất", "trong tuần khảo sát".
+2. State a figure exactly as it was returned, digit for digit. A rounded or
+   rescaled figure — 10,16 triệu for 10.196.800 — is not printed in any source,
+   so the numeric check refuses the claim and the reader loses the sentence.
+   Round in the prose around the claim, never inside it.
 3. A material claim supported only by get_market_data is single_source, never
    verified. The figures come from a securities company's feed rather than from
    the exchange, and labelling one verified invalidates the whole ledger.
@@ -393,6 +393,20 @@ def _datetime(value: Any) -> datetime | None:
     return parsed if parsed.utcoffset() is not None else None
 
 
+def _market_title(payload: Mapping[str, Any], symbol: str, actual: Mapping[str, Any]) -> str:
+    label = str(payload.get("interval_label") or payload.get("interval") or "").strip()
+    start = _datetime(actual.get("start"))
+    end = _datetime(actual.get("end"))
+    period = ""
+    if start is not None and end is not None:
+        period = (
+            start.strftime("%d/%m/%Y")
+            if start.date() == end.date()
+            else f"{start.strftime('%d/%m/%Y')}–{end.strftime('%d/%m/%Y')}"
+        )
+    return " · ".join(part for part in (symbol, label, period) if part)
+
+
 def _market_evidence(result_text: str | None) -> Any | None:
     """One market read as one evidence row, or nothing if it cannot be trusted.
 
@@ -423,10 +437,14 @@ def _market_evidence(result_text: str | None) -> Any | None:
         return build_evidence_ref(
             kind=EvidenceKind.STORE_FIGURE,
             source_class=SourceClass.STORE,
-            title=f"{symbol} {interval} {actual.get('start')} → {actual.get('end')}",
+            # The citation a reader is shown, written the way the rest of the
+            # answer is written. The machine spelling of the same fact — the
+            # interval code and two ISO instants — said nothing a reader could
+            # use and everything the model could copy back into a sentence.
+            title=_market_title(payload, symbol, actual),
             # No URL: there is no page. The locator is the request that produced
             # the rows, which is what a reader would have to repeat to see them.
-            source=f"{payload.get('provider')}:{payload.get('source')}/{symbol}/{interval}",
+            source=f"{payload.get('source')}/{symbol}/{interval}",
             publisher=str(payload.get("publisher") or payload.get("source") or "market"),
             excerpt=excerpt,
             content_sha256=content_sha256,
@@ -631,6 +649,25 @@ def draft_recovery_messages(*, question: str, stage: str, text: str):
 
 
 
+#: How the two drafts are told apart once their claims share one list. Both
+#: passes are independent calls that number their own claims from ``c1``, so
+#: every counter claim collides with a research claim of the same name: the
+#: verifier is shown two different sentences under one ID, and whichever entry
+#: it returns resolves back to the research draft. That is how the same claim
+#: reaches the reader twice while the counter claim behind the second one is
+#: never seen. The prefix is applied at both ends of the same round trip — the
+#: prompt and the merge — so the ID the verifier answers with is the ID that
+#: names the claim it was actually judging.
+RESEARCH_PREFIX = "r:"
+COUNTER_PREFIX = "c:"
+
+
+def _namespaced(draft: ResearchDraft, prefix: str) -> tuple[DraftClaim, ...]:
+    return tuple(
+        replace(item, claim_id=f"{prefix}{item.claim_id}") for item in draft.claims
+    )
+
+
 def verifier_messages(
     *,
     question: str,
@@ -644,8 +681,12 @@ def verifier_messages(
     payload = {
         "question": question,
         "as_of": as_of.isoformat(),
-        "research_claims": [item.to_payload() for item in research.claims],
-        "counter_claims": [item.to_payload() for item in counter.claims],
+        "research_claims": [
+            item.to_payload() for item in _namespaced(research, RESEARCH_PREFIX)
+        ],
+        "counter_claims": [
+            item.to_payload() for item in _namespaced(counter, COUNTER_PREFIX)
+        ],
         "counter_invalidations": list(counter.invalidations),
         "evidence": [item.to_payload() for item in evidence],
     }
@@ -676,18 +717,28 @@ def candidate_ledger(
     evidence: Sequence[Any],
 ) -> ClaimLedger:
     payload = _object_text(text)
-    claims_by_id = {item.claim_id: item for item in (*research.claims, *counter.claims)}
+    claims_by_id = {
+        item.claim_id: item
+        for item in (
+            *_namespaced(research, RESEARCH_PREFIX),
+            *_namespaced(counter, COUNTER_PREFIX),
+        )
+    }
     raw_claims = payload.get("claims")
     if not isinstance(raw_claims, Sequence) or isinstance(raw_claims, (str, bytes)):
         raise ValueError("verifier claims must be a list")
     claims: list[VerifiedClaim] = []
+    # One verdict per claim. A second entry under an ID already judged is a
+    # repeat, and a ledger holding it renders the same sentence twice.
+    judged: set[str] = set()
     for raw in raw_claims[:40]:
         if not isinstance(raw, Mapping):
             continue
         claim_id = str(raw.get("claim_id") or "")
         draft = claims_by_id.get(claim_id)
-        if draft is None:
+        if draft is None or claim_id in judged:
             continue
+        judged.add(claim_id)
         claims.append(
             VerifiedClaim(
                 claim_id=claim_id,
