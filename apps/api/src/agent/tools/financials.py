@@ -302,6 +302,11 @@ class VciFinancials:
     source = "vci"
     not_carried: tuple[str, ...] = ()
 
+    def __init__(self, *, max_wait: float = vnstock_provider.MAX_WAIT_SECONDS) -> None:
+        # How long a read may wait for the provider's quota. The screener passes
+        # 0: it fills what room allows and names the tickers it left out.
+        self._max_wait = max_wait
+
     def ratios(self, symbol: str, *, quarterly: bool, periods: int) -> Statement:
         import_vnstock()
 
@@ -314,7 +319,7 @@ class VciFinancials:
             return frame.to_dict(orient="records")
 
         # Two requests: Vietcap opens a session before it answers.
-        records = vnstock_provider.call(read, symbol=symbol, weight=2)
+        records = vnstock_provider.call(read, symbol=symbol, weight=2, max_wait=self._max_wait)
         paired, dropped = pair_vci(records, quarterly=quarterly)
         encoded = json.dumps(records, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
         return Statement(
@@ -518,6 +523,18 @@ class FinancialsTools:
             "unavailable_providers": failed,
             "not_carried": missing,
             "excerpt": excerpt,
+            # One source per publisher for the figure check, so a citation names
+            # the feed the figure actually came from.
+            "parts": [
+                {
+                    "excerpt": render(Statement(**{**statement.__dict__, "not_carried": ()})),
+                    "publisher": statement.publisher,
+                    "source": statement.source,
+                    "title": f"{symbol} · chỉ số tài chính · {statement.periods[0].label}",
+                    "content_sha256": statement.raw_sha256,
+                }
+                for statement in statements
+            ],
         }
 
 

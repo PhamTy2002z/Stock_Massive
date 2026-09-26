@@ -124,13 +124,20 @@ class RequestGate:
 GATE = RequestGate()
 
 
-def call(operation: Callable[[], T], *, symbol: str, weight: int = 1) -> T:
+def call(
+    operation: Callable[[], T],
+    *,
+    symbol: str,
+    weight: int = 1,
+    max_wait: float = MAX_WAIT_SECONDS,
+) -> T:
     """Run one provider operation under the gate, with its failures classified.
 
     ``weight`` is how many requests the operation makes: a Vietcap read opens a
-    session and then asks, which is two.
+    session and then asks, which is two. ``max_wait=0`` takes room only if it is
+    there now — how a caller filling a cache stops before the quota does.
     """
-    GATE.acquire(weight)
+    GATE.acquire(weight, max_wait=max_wait)
     try:
         return operation()
     except MarketDataError:

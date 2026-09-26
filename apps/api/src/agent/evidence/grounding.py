@@ -83,6 +83,9 @@ LEDGER_VERSION = "grounding-1"
 #: already replaced.
 WEB_FRESH_DAYS = 120
 
+#: How old a news item may be before a figure resting on it is called stale.
+NEWS_FRESH_DAYS = 30
+
 #: How old the latest session read may be before "hiện tại" can no longer rest
 #: on it. A week covers Tết and the long holidays; past it, "now" is not a word
 #: the data supports.
@@ -249,8 +252,20 @@ class _Line:
 #: How each structured source dates a figure beside it, and how long its latest
 #: line may stand for "now". A session is stale after a week; a quarter's ratios
 #: stand until the next quarter's are due (a quarter plus the filing window).
-_ROLE_PREFIX = {"market": "phiên", "statement": "kỳ đến", "calculation": "tính từ số liệu đến"}
-_ROLE_FRESH_DAYS = {"market": CURRENT_SESSION_DAYS, "statement": 150, "calculation": 150}
+_ROLE_PREFIX = {
+    "market": "phiên",
+    "statement": "kỳ đến",
+    "calculation": "tính từ số liệu đến",
+    "events": "ngày",
+    "news": "tin ngày",
+}
+_ROLE_FRESH_DAYS = {
+    "market": CURRENT_SESSION_DAYS,
+    "statement": 150,
+    "calculation": 150,
+    "events": 150,
+    "news": NEWS_FRESH_DAYS,
+}
 
 
 @dataclass
@@ -412,7 +427,7 @@ def _structured(call: TurnToolCall, payload: Mapping[str, Any]) -> _Source | Non
             if line.strip()
         )
         inputs = ()
-        role = "market" if payload.get("interval") else "statement"
+        role = str(payload.get("evidence_role") or ("market" if payload.get("interval") else "statement"))
     dated = [line.when for line in lines if line.when is not None]
     retrieved = _aware(payload.get("retrieved_at"))
     actual = payload.get("actual") if isinstance(payload.get("actual"), Mapping) else {}
@@ -463,7 +478,11 @@ def _structured(call: TurnToolCall, payload: Mapping[str, Any]) -> _Source | Non
         role=role,
         inputs=inputs,
         symbols=(
-            frozenset(_TICKER.findall(excerpt)) if calculation else frozenset({symbol} if symbol else ())
+            frozenset(_TICKER.findall(excerpt))
+            if calculation
+            else frozenset(
+                str(item).upper() for item in (payload.get("symbols") or ([symbol] if symbol else ()))
+            )
         ),
     )
 
@@ -580,6 +599,15 @@ def collect_sources(calls: Sequence[TurnToolCall], *, user_text: str = "") -> So
             for item in payload.get("results") or ():
                 if isinstance(item, Mapping):
                     add(_web(item, str(item.get("snippet") or "").strip(), snippet=True))
+        elif isinstance(payload.get("parts"), list):
+            # One call, several sources: a result that joins two publishers or
+            # two kinds of date (a session and a quarter) declares each part,
+            # and each is cited and dated on its own terms.
+            for part in payload["parts"]:
+                if isinstance(part, Mapping):
+                    # The whole result's hash is not a part's: without its own
+                    # digest every part would share one evidence id.
+                    add(_structured(call, {**payload, "content_sha256": None, **part}))
         else:
             add(_structured(call, payload))
     _resolve_calculations(items)
@@ -882,6 +910,12 @@ def _decide(
             # digits fall.
             continue
         for line in source.lines:
+            if named_symbols and len(source.symbols) > 1:
+                # A source about several tickers (a screen) answers for a ticker
+                # only on that ticker's own line.
+                own = frozenset(_TICKER.findall(line.text)) & source.symbols
+                if own and not (own & named_symbols):
+                    continue
             if not any(_same(figure, value) for value in line.values):
                 continue
             matched_somewhere = True
@@ -904,10 +938,16 @@ def _decide(
                         and when == newest
                         and (today - when).days <= _ROLE_FRESH_DAYS.get(source.role, CURRENT_SESSION_DAYS)
                     )
+                elif named and source.role == "news":
+                    # News is published after the period it reports on, like a page.
+                    ok = any(when >= period.start for period in named)
                 elif named:
                     ok = any(period.start <= when <= period.end for period in named)
                 else:
                     ok = True
+                    # A headline dates the news, not the figure; an old one is
+                    # an old source, the same as an old page.
+                    stale = source.role == "news" and (today - when).days > NEWS_FRESH_DAYS
             else:
                 if named:
                     ok = when is None or any(when >= period.start for period in named)
@@ -1054,8 +1094,8 @@ def annotate(report: GroundingReport, *, cite: bool = True) -> str:
         )
     if report.stale and cite:
         footer.append(
-            f"Số có nhãn {STALE_LABEL} lấy từ nguồn đăng hơn {WEB_FRESH_DAYS} ngày "
-            "trước hôm nay."
+            f"Số có nhãn {STALE_LABEL} lấy từ nguồn đã cũ: trang web đăng hơn "
+            f"{WEB_FRESH_DAYS} ngày, hoặc tin hơn {NEWS_FRESH_DAYS} ngày trước hôm nay."
         )
     if not footer:
         return annotated

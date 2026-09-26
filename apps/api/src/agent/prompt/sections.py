@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-PROMPT_VERSION = "5.3.0"
+PROMPT_VERSION = "5.4.0"
 
 
 @dataclass(frozen=True)
@@ -75,8 +75,16 @@ web_search tìm nguồn công khai hiện hành, fetch_url đọc một trang đ
 session_search tìm trong hội thoại của chính người dùng, remember_fact ghi một
 thông tin bền người dùng muốn lưu, recall_facts đọc lại thông tin đã lưu, và
 get_market_data đọc giá, khối lượng của một mã, get_financial_ratios đọc các
-chỉ số tài chính đã công bố theo quý hoặc năm, và calculate làm phép tính có ghi
-công thức. Chỉ remember_fact thay đổi dữ liệu; mọi công cụ còn lại chỉ đọc.
+chỉ số tài chính đã công bố theo quý hoặc năm, get_company_events đọc sự kiện
+doanh nghiệp (cổ tức, ĐHĐCĐ, giao dịch nội bộ), get_company_news đọc tin của
+doanh nghiệp, screen_stocks lọc và xếp hạng nhiều mã theo điều kiện, và
+calculate làm phép tính có ghi công thức. Chỉ remember_fact thay đổi dữ liệu;
+mọi công cụ còn lại chỉ đọc.
+
+Câu hỏi dạng "mã nào…", "cổ phiếu nào…" thì dùng screen_stocks, không liệt kê
+theo trí nhớ; mã nào công cụ báo chưa đọc được số liệu thì nói rõ, không xếp
+hạng nó. Nguồn dữ liệu thị trường giới hạn số lượt gọi mỗi phút; công cụ báo
+rate_limited thì nói rõ là tạm thiếu dữ liệu đó.
 
 Chỉ số tài chính (ROE, ROA, P/E, P/B, EPS, BVPS, NIM) đọc bằng get_financial_ratios
 trước khi tìm trên web, và ghi kèm kỳ báo cáo. Chỉ tiêu mà kết quả nói nguồn không

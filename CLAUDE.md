@@ -104,8 +104,12 @@ Vietnamese). The big picture:
 - Tool catalog: `web_search`, `fetch_url`, `session_search`, `remember_fact`,
   `recall_facts`, plus the vn-equity pack's `get_market_data`,
   `get_financial_ratios` (both refuse outside the `personal_internal` profile;
-  statements go through the `FinancialsProvider` adapter, KBS for dev only) and
-  `calculate` (fixed operations, formula printed).
+  statements go through the `FinancialsProvider` adapter — KBS + Vietcap for
+  dev only), `get_company_events`, `get_company_news`, `screen_stocks` and
+  `calculate` (fixed operations, formula printed). Every vnstock call goes
+  through `agent/tools/vnstock_provider.py`: guest quota is 20 req/min and
+  `vnai` calls `sys.exit` on breach, so the gate stops at 16 and turns a
+  `SystemExit` into a `rate_limited` refusal.
 - Every answer's figures are checked by `agent/evidence/grounding.py` against
   that Turn's tool data, dated and labelled in place (`chưa kiểm chứng`,
   `nguồn cũ`), with one repair round; each answered Turn writes a claim ledger. Adding a
