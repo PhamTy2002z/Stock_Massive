@@ -78,7 +78,7 @@ class LaneProfile:
                 raise ValueError(f"{self.name}: {field_name} must be a positive int")
         if self.deadline_seconds <= 0:
             raise ValueError(f"{self.name}: deadline_seconds must be positive")
-        calls = self.max_tool_rounds + 1
+        calls = self.max_tool_rounds + 1 + RECOVERY_CALLS
         expected = calls * self.max_output_tokens
         if self.owner_output_total != expected:
             raise ValueError(
@@ -87,6 +87,13 @@ class LaneProfile:
                 f"{self.owner_output_total}"
             )
 
+
+#: Calls a Turn may make beyond one per round plus the answer: the one nudge an
+#: empty reply earns and the one repair a draft with unsupported figures earns.
+#: Funded in every lane's aggregate rather than left to the ledger to refuse,
+#: because a Turn that is refused its repair keeps the labelled draft, and one
+#: refused its nudge ends with no answer at all.
+RECOVERY_CALLS = 2
 
 #: The lane almost every Turn gets, and the plain agent loop's.
 #:
@@ -101,8 +108,8 @@ LIGHT = LaneProfile(
     deadline_seconds=1_800.0,
     max_external_calls=20,
     max_output_tokens=4_000,
-    owner_output_total=44_000,
-    owner_input_total=280_000,
+    owner_output_total=52_000,
+    owner_input_total=300_000,
 )
 
 #: The lane for a question that asks for verification rather than a fact.
@@ -123,8 +130,8 @@ DEEP = LaneProfile(
     deadline_seconds=1_800.0,
     max_external_calls=20,
     max_output_tokens=4_000,
-    owner_output_total=44_000,
-    owner_input_total=280_000,
+    owner_output_total=52_000,
+    owner_input_total=300_000,
 )
 
 #: The words that make a question a verification request rather than a lookup.

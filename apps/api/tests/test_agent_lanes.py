@@ -17,6 +17,8 @@ mystery.
 
 from __future__ import annotations
 
+from src.agent import lanes
+
 from dataclasses import replace
 
 import pytest
@@ -51,7 +53,9 @@ def test_a_lanes_output_total_funds_exactly_the_calls_it_allows(
     # The one piece of arithmetic: a Turn makes at most one call per round plus
     # the answering one, each at the per-call ceiling, and is admitted against
     # the total.
-    assert lane.owner_output_total == (lane.max_tool_rounds + 1) * lane.max_output_tokens
+    assert lane.owner_output_total == (
+        lane.max_tool_rounds + 1 + lanes.RECOVERY_CALLS
+    ) * lane.max_output_tokens
 
 
 def test_a_profile_whose_total_does_not_fund_its_rounds_cannot_be_built() -> None:

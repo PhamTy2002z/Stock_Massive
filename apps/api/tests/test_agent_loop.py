@@ -90,7 +90,7 @@ from src.agent.loop import (
     terminal_reason_for,
     trace_status,
 )
-from src.agent.lanes import DEEP, LIGHT
+from src.agent.lanes import DEEP, LIGHT, RECOVERY_CALLS
 from src.agent.parts import RECOVERY_ACTIONS, ProgressKind
 from src.agent.messages import (
     COLLAPSED_RESULT_URLS,
@@ -542,6 +542,24 @@ async def test_a_reply_that_arrives_without_narration_is_not_nudged() -> None:
 
 
 @pytest.mark.asyncio
+async def test_calls_returned_on_the_answering_call_are_an_empty_reply_and_are_nudged() -> None:
+    """The route answered its last round with tool calls it had been denied."""
+    client = FakeClient(
+        [wants("web_search", query=f"q{index}") for index in range(MAX_TOOL_ROUNDS)]
+        + [wants("web_search", query="one more"), answer("Xong rồi.")]
+    )
+
+    outcome = await loop(client).run(turn_request())
+
+    assert outcome.status is TurnStatus.COMPLETE
+    assert outcome.answer == "Xong rồi."
+    assert len(client.requests) == MAX_TOOL_ROUNDS + 2
+    assert any(
+        message.content == EMPTY_AFTER_TOOLS_NOTE for message in client.requests[-1].messages
+    )
+
+
+@pytest.mark.asyncio
 async def test_the_round_ceiling_is_the_constant_and_the_last_call_answers() -> None:
     # The last item answers, because the subject here is the ceiling and not the
     # empty reply: a script that never speaks would end the Turn under
@@ -594,7 +612,7 @@ async def test_the_turn_cannot_outspend_what_it_was_admitted_against() -> None:
 
     reserved = sum(spend.output_tokens for spend in client.spends)
     assert reserved <= LIGHT.owner_output_total
-    assert (MAX_TOOL_ROUNDS + 1) * DEFAULT_MAX_OUTPUT_TOKENS <= LIGHT.owner_output_total
+    assert (MAX_TOOL_ROUNDS + 1 + 2) * DEFAULT_MAX_OUTPUT_TOKENS <= LIGHT.owner_output_total
 
 
 @pytest.mark.asyncio
@@ -617,7 +635,7 @@ async def test_the_round_ceiling_is_the_turns_lane_and_not_the_builds() -> None:
         LIGHT,
         name="tight",
         max_tool_rounds=1,
-        owner_output_total=2 * LIGHT.max_output_tokens,
+        owner_output_total=(2 + RECOVERY_CALLS) * LIGHT.max_output_tokens,
     )
     client = FakeClient(
         [wants("web_search"), answer("Xong rồi."), answer("không bao giờ dùng")]
@@ -655,7 +673,7 @@ async def test_the_external_call_ceiling_is_the_turns_lane_too() -> None:
         name="tight",
         max_tool_rounds=2,
         max_external_calls=3,
-        owner_output_total=3 * LIGHT.max_output_tokens,
+        owner_output_total=(3 + RECOVERY_CALLS) * LIGHT.max_output_tokens,
     )
     client = FakeClient(
         [
@@ -1825,7 +1843,7 @@ async def test_the_ceiling_is_reported_once_with_the_lane_that_set_it() -> None:
         LIGHT,
         name="tight",
         max_tool_rounds=1,
-        owner_output_total=2 * LIGHT.max_output_tokens,
+        owner_output_total=(2 + RECOVERY_CALLS) * LIGHT.max_output_tokens,
     )
     publisher = RecordingPublisher()
     client = FakeClient([wants("web_search"), answer("Xong rồi.")])

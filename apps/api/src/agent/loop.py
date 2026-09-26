@@ -2545,7 +2545,7 @@ class AgentLoop:
             # and still says what this context costs it.
             state.observe_input(completion.usage, composition.total)
 
-            if self._nudge_empty(request, state, completion, started):
+            if self._nudge_empty(request, state, completion, started, final=final):
                 continue
 
             # Spent on the call that carried it, so a model that answers a note
@@ -2752,6 +2752,8 @@ class AgentLoop:
         state: _TurnState,
         completion: Completion,
         started: float,
+        *,
+        final: bool = False,
     ) -> bool:
         """Ask once more for the answer a round of tools never produced.
 
@@ -2779,7 +2781,12 @@ class AgentLoop:
         # call, before :meth:`_append_text` has filed anything, so the state still
         # describes the rounds *before* this one. A completion that brought prose
         # of its own is about to become the reply.
-        if completion.tool_calls or completion.text or state.answer:
+        # On the answering call the tools were withheld, so calls that come back
+        # anyway are calls nobody will run — measured on 2026-09-26, a route
+        # answered its tenth round with four of them and no prose, and the Turn
+        # settled ``empty_answer`` with twenty reads behind it. That is the same
+        # missing reply, and it gets the same one nudge.
+        if (completion.tool_calls and not final) or completion.text or state.answer:
             return False
         if state.tool_rounds == 0 or state.empty_nudges >= MAX_EMPTY_NUDGES:
             return False
