@@ -246,15 +246,27 @@ class _Line:
     values: tuple[_Value, ...]
 
 
+#: How each structured source dates a figure beside it, and how long its latest
+#: line may stand for "now". A session is stale after a week; a quarter's ratios
+#: stand until the next quarter's are due (a quarter plus the filing window).
+_ROLE_PREFIX = {"market": "phiên", "statement": "kỳ đến", "calculation": "tính từ số liệu đến"}
+_ROLE_FRESH_DAYS = {"market": CURRENT_SESSION_DAYS, "statement": 150, "calculation": 150}
+
+
 @dataclass
 class _Source:
     kind: SourceKind
     evidence: EvidenceRef
     lines: tuple[_Line, ...]
     published: date | None = None
-    #: Market sources only: the latest session a row names.
+    #: Structured sources only: the latest date a line names.
     latest: date | None = None
     label: str = ""
+    #: ``market``, ``statement``, ``calculation``, ``page`` or ``snippet``.
+    role: str = "page"
+    #: A calculation's inputs, and whether every one was found in another source.
+    inputs: tuple[_Value, ...] = ()
+    valid: bool = True
 
 
 def _values_of(text: str) -> tuple[_Value, ...]:
@@ -381,11 +393,23 @@ def _structured(call: TurnToolCall, payload: Mapping[str, Any]) -> _Source | Non
     excerpt = str(payload.get("excerpt") or "").strip()
     if not excerpt:
         return None
-    lines = tuple(
-        _Line(text=line, when=_line_date(line), values=_values_of(line))
-        for line in excerpt.splitlines()
-        if line.strip()
-    )
+    calculation = str(payload.get("evidence_kind") or "") == EvidenceKind.CALCULATION.value
+    if calculation:
+        # Only the result is offered for matching. The inputs are printed in the
+        # excerpt too, and a figure that matched them here would be grounded by
+        # the calculator instead of by the source the input came from.
+        result = str(payload.get("result_text") or "")
+        lines = (_Line(text=excerpt, when=None, values=_values_of(result)),)
+        inputs = tuple(_input_value(item) for item in payload.get("inputs") or () if isinstance(item, Mapping))
+        role = "calculation"
+    else:
+        lines = tuple(
+            _Line(text=line, when=_line_date(line), values=_values_of(line))
+            for line in excerpt.splitlines()
+            if line.strip()
+        )
+        inputs = ()
+        role = "market" if payload.get("interval") else "statement"
     dated = [line.when for line in lines if line.when is not None]
     retrieved = _aware(payload.get("retrieved_at"))
     actual = payload.get("actual") if isinstance(payload.get("actual"), Mapping) else {}
@@ -433,7 +457,58 @@ def _structured(call: TurnToolCall, payload: Mapping[str, Any]) -> _Source | Non
         published=_day(published),
         latest=max(dated) if dated else None,
         label=f"{publisher} — {title}",
+        role=role,
+        inputs=inputs,
     )
+
+
+def _input_value(item: Mapping[str, Any]) -> _Value:
+    """One calculator input as a figure the answer might have written."""
+    written = Decimal(str(item.get("value") or "0"))
+    unit = str(item.get("unit") or "").strip().lower() or None
+    factor = _SCALE.get(unit or "", Decimal(1))
+    exponent = written.as_tuple().exponent
+    return _Value(
+        written=written,
+        base=written * factor,
+        quantum=(Decimal(10) ** int(exponent)) * factor if isinstance(exponent, int) else Decimal(1),
+        unit=unit,
+        percent=unit in ("%", "phần trăm"),
+    )
+
+
+def _resolve_calculations(items: Sequence[_Source]) -> None:
+    """Admit a calculation only when every input is printed in another source.
+
+    Its date is its most recent input's: "P/B 2,30" from today's close over last
+    quarter's book value describes today, and "tăng 52,7% từ đầu năm" describes
+    the session it ends on.
+    """
+    others = [item for item in items if item.role != "calculation"]
+    for source in items:
+        if source.role != "calculation":
+            continue
+        dates: list[date] = []
+        for value in source.inputs:
+            probe = _Figure(text="", start=0, end=0, value=value, line="", before="")
+            found = [
+                line
+                for other in others
+                for line in other.lines
+                if any(_same(probe, candidate) for candidate in line.values)
+            ]
+            if not found:
+                source.valid = False
+                break
+            dated = [line.when for line in found if line.when is not None]
+            if dated:
+                dates.append(max(dated))
+        if source.valid and dates:
+            when = max(dates)
+            source.lines = tuple(
+                _Line(text=line.text, when=when, values=line.values) for line in source.lines
+            )
+            source.latest = when
 
 
 def _web(item: Mapping[str, Any], excerpt: str, *, snippet: bool) -> _Source | None:
@@ -449,6 +524,7 @@ def _web(item: Mapping[str, Any], excerpt: str, *, snippet: bool) -> _Source | N
         lines=(_Line(text=excerpt, when=published, values=_values_of(excerpt)),),
         published=published,
         label=f"{evidence.publisher} — {evidence.title}",
+        role="snippet" if snippet else "page",
     )
 
 
@@ -461,7 +537,7 @@ class Sources:
 
     @property
     def latest_session(self) -> date | None:
-        dates = [item.latest for item in self.items if item.latest is not None]
+        dates = [item.latest for item in self.items if item.role == "market" and item.latest is not None]
         return max(dates) if dates else None
 
     @property
@@ -497,6 +573,7 @@ def collect_sources(calls: Sequence[TurnToolCall], *, user_text: str = "") -> So
                     add(_web(item, str(item.get("snippet") or "").strip(), snippet=True))
         else:
             add(_structured(call, payload))
+    _resolve_calculations(items)
     return Sources(items=tuple(items), exempt=tuple(exempt))
 
 
@@ -517,6 +594,8 @@ class FigureCheck:
     source_date: date | None = None
     reason: str | None = None
     kind: SourceKind | None = None
+    #: How the source dates a figure: "phiên", "kỳ đến", or none for a page.
+    date_prefix: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -778,11 +857,15 @@ def _decide(
     named, current = periods(figure.line, today)
     candidates: list[tuple[tuple[int, int, int], _Source, date | None, bool]] = []
     matched_somewhere = False
+    invalid_calculation = False
     for source in sources.items:
         for line in source.lines:
             if not any(_same(figure, value) for value in line.values):
                 continue
             matched_somewhere = True
+            if not source.valid:
+                invalid_calculation = True
+                continue
             when = line.when
             stale = False
             if source.kind is SourceKind.STRUCTURED:
@@ -793,10 +876,11 @@ def _decide(
                     # excuse it: "giá hiện tại 56.500 (26/09/2025)" names a real
                     # session, a year before today, and calls it now — the exact
                     # sentence a model working in its remembered year writes.
+                    newest = latest_session if source.role == "market" else source.latest
                     ok = (
-                        latest_session is not None
-                        and when == latest_session
-                        and (today - when).days <= CURRENT_SESSION_DAYS
+                        newest is not None
+                        and when == newest
+                        and (today - when).days <= _ROLE_FRESH_DAYS.get(source.role, CURRENT_SESSION_DAYS)
                     )
                 elif named:
                     ok = any(period.start <= when <= period.end for period in named)
@@ -825,11 +909,12 @@ def _decide(
         "line": figure.line,
     }
     if not candidates:
-        return FigureCheck(
-            **base,
-            status=FigureStatus.UNVERIFIED,
-            reason="wrong_period" if matched_somewhere else "not_in_sources",
+        reason = (
+            "calculation_inputs_unsupported"
+            if invalid_calculation
+            else ("wrong_period" if matched_somewhere else "not_in_sources")
         )
+        return FigureCheck(**base, status=FigureStatus.UNVERIFIED, reason=reason)
     _, source, when, stale = min(candidates, key=lambda item: item[0])
     if source.kind is not SourceKind.STRUCTURED and named and _contradicts_market(
         figure, named, sources
@@ -843,6 +928,7 @@ def _decide(
         evidence_id=source.evidence.evidence_id,
         source_date=when,
         kind=source.kind,
+        date_prefix=_ROLE_PREFIX.get(source.role),
     )
 
 
@@ -958,8 +1044,8 @@ def _label(
     index = order.index(address) + 1
     if figure.source_date is None:
         when = UNDATED_LABEL
-    elif figure.kind is SourceKind.STRUCTURED:
-        when = f"phiên {figure.source_date.strftime('%d/%m/%Y')}"
+    elif figure.date_prefix:
+        when = f"{figure.date_prefix} {figure.source_date.strftime('%d/%m/%Y')}"
     else:
         when = figure.source_date.strftime("%d/%m/%Y")
     stale = f" · {STALE_LABEL}" if figure.status is FigureStatus.STALE else ""
@@ -1008,8 +1094,9 @@ def repair_note(report: GroundingReport) -> str:
         + "\n\nViết lại TOÀN BỘ câu trả lời cho người dùng. Chỉ dùng con số có nguyên "
         "văn trong kết quả công cụ, kèm ngày của số liệu. Giá hiện tại lấy từ phiên "
         "gần nhất và ghi rõ ngày phiên. Số nào không có trong dữ liệu thì bỏ, hoặc "
-        "nói rõ là chưa có dữ liệu — không ước lượng, không tự tính tỷ lệ hay tăng "
-        "trưởng. Không nhắc tới bản nháp hay việc kiểm số.\n\nBẢN NHÁP:\n<<<\n"
+        "nói rõ là chưa có dữ liệu — không ước lượng. Tỷ lệ, tăng trưởng hay chênh "
+        "lệch tự tính thì bỏ, trừ khi đã có kết quả của công cụ calculate cho đúng "
+        "phép tính đó. Không nhắc tới bản nháp hay việc kiểm số.\n\nBẢN NHÁP:\n<<<\n"
         + report.answer
         + "\n>>>"
     )

@@ -21,6 +21,8 @@ EXPECTED_CATALOG = {
     "remember_fact": ("memory", registry.ToolEffect.WRITE, registry.ToolIdempotency.UNKNOWN, registry.ToolAccess.STORE, registry.ContentTrust.TRUSTED_STRUCTURED, registry.ToolConcurrency.SERIALIZED, registry.ToolPermission.ALLOW, 10.0),
     "recall_facts": ("memory", registry.ToolEffect.READ, registry.ToolIdempotency.IDEMPOTENT, registry.ToolAccess.STORE, registry.ContentTrust.TRUSTED_STRUCTURED, registry.ToolConcurrency.PARALLEL_SAFE, registry.ToolPermission.ALLOW, 10.0),
     "get_market_data": ("market_data", registry.ToolEffect.READ, registry.ToolIdempotency.IDEMPOTENT, registry.ToolAccess.NETWORK, registry.ContentTrust.UNTRUSTED, registry.ToolConcurrency.PARALLEL_SAFE, registry.ToolPermission.ALLOW, 20.0),
+    "get_financial_ratios": ("market_data", registry.ToolEffect.READ, registry.ToolIdempotency.IDEMPOTENT, registry.ToolAccess.NETWORK, registry.ContentTrust.UNTRUSTED, registry.ToolConcurrency.PARALLEL_SAFE, registry.ToolPermission.ALLOW, 20.0),
+    "calculate": ("market_data", registry.ToolEffect.READ, registry.ToolIdempotency.IDEMPOTENT, registry.ToolAccess.STORE, registry.ContentTrust.TRUSTED_STRUCTURED, registry.ToolConcurrency.PARALLEL_SAFE, registry.ToolPermission.ALLOW, 5.0),
 }
 
 #: What a *conversation* is offered, which is no longer everything registered.
@@ -60,6 +62,8 @@ def test_every_shipped_description_says_when_to_use_it_and_where_arguments_come_
     provenance = {
         "fetch_url": "never build or guess a URL",
         "get_market_data": "find its ticker first",
+        "get_financial_ratios": "before searching the web",
+        "calculate": "read from a tool",
         "web_search": "only helps you choose a page",
     }
     with isolated_registry():
@@ -85,6 +89,8 @@ def test_shipped_schema_order_and_display_contract_are_locked():
         # Blocking, because the provider client is synchronous, and it composes
         # its own rail row because no single argument says what was read.
         "get_market_data": ("Đọc dữ liệu giá", False, 24_000, None, True),
+        "get_financial_ratios": ("Đọc chỉ số tài chính", False, 24_000, None, True),
+        "calculate": ("Tính toán", False, 4_000, None, True),
     }
     with isolated_registry():
         tools.register_all()
@@ -113,6 +119,8 @@ def test_chat_selection_is_web_memory_and_the_market_read():
     assert toolsets.resolve_toolset(toolsets.CHAT_TOOLSETS) == (
         *CHAT_CATALOG,
         "get_market_data",
+        "get_financial_ratios",
+        "calculate",
     )
 
 

@@ -102,8 +102,13 @@ Vietnamese). The big picture:
 ## Capability boundary
 
 - Tool catalog: `web_search`, `fetch_url`, `session_search`, `remember_fact`,
-  `recall_facts` for `mode=chat`; plus `get_market_data` only in
-  `mode=signal_desk` on the `personal_internal` deployment profile. Adding a
+  `recall_facts`, plus the vn-equity pack's `get_market_data`,
+  `get_financial_ratios` (both refuse outside the `personal_internal` profile;
+  statements go through the `FinancialsProvider` adapter, KBS for dev only) and
+  `calculate` (fixed operations, formula printed).
+- Every answer's figures are checked by `agent/evidence/grounding.py` against
+  that Turn's tool data, dated and labelled in place (`chưa kiểm chứng`,
+  `nguồn cũ`), with one repair round; each answered Turn writes a claim ledger. Adding a
   tool, MCP, multi-agent, code execution or side-effect tool is a scope decision
   for the product owner, not an implementation detail.
 - Signal Desk is a composer mode (`Chat | Signal Desk` pill), a right-hand pane

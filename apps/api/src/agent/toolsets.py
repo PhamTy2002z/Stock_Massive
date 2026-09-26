@@ -59,9 +59,10 @@ TOOLSETS: dict[str, Toolset] = {
     # itself still refuses outside the ``personal_internal`` profile.
     "market_data": {
         "description": (
-            "Read one listed symbol's price and volume history for a date range."
+            "Read one listed symbol's prices and reported ratios, and compute "
+            "derived figures with their formula."
         ),
-        "tools": ("get_market_data",),
+        "tools": ("get_market_data", "get_financial_ratios", "calculate"),
     },
 }
 

@@ -11,6 +11,8 @@ Idempotent, because a reload path and a startup path both legitimately call it.
 from __future__ import annotations
 
 from ..registry import ToolEntry
+from .calculator import register_calculator_tools
+from .financials import register_financials_tools
 from .market_data import register_market_data_tools
 from .memory import register_memory_tools
 from .web import register_web_tools
@@ -27,11 +29,15 @@ def register_all() -> tuple[ToolEntry, ...]:
         *register_web_tools(),
         *register_memory_tools(),
         *register_market_data_tools(),
+        *register_financials_tools(),
+        *register_calculator_tools(),
     )
 
 
 __all__ = [
     "register_all",
+    "register_calculator_tools",
+    "register_financials_tools",
     "register_market_data_tools",
     "register_memory_tools",
     "register_web_tools",

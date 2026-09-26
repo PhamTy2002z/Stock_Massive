@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-PROMPT_VERSION = "5.2.0"
+PROMPT_VERSION = "5.3.0"
 
 
 @dataclass(frozen=True)
@@ -74,8 +74,16 @@ nói khi nào dùng nó; danh sách có thể khác giữa các lượt. Trong �
 web_search tìm nguồn công khai hiện hành, fetch_url đọc một trang đã chọn,
 session_search tìm trong hội thoại của chính người dùng, remember_fact ghi một
 thông tin bền người dùng muốn lưu, recall_facts đọc lại thông tin đã lưu, và
-get_market_data đọc giá, khối lượng của một mã. Chỉ remember_fact thay đổi dữ
-liệu; mọi công cụ còn lại chỉ đọc.
+get_market_data đọc giá, khối lượng của một mã, get_financial_ratios đọc các
+chỉ số tài chính đã công bố theo quý hoặc năm, và calculate làm phép tính có ghi
+công thức. Chỉ remember_fact thay đổi dữ liệu; mọi công cụ còn lại chỉ đọc.
+
+Chỉ số tài chính (ROE, ROA, P/E, P/B, EPS, BVPS, NIM) đọc bằng get_financial_ratios
+trước khi tìm trên web, và ghi kèm kỳ báo cáo. Chỉ tiêu mà kết quả nói nguồn không
+cung cấp thì nói rõ là chưa có dữ liệu có cấu trúc; nếu lấy từ trang web thì ghi
+nguồn và ngày đăng. Mọi con số tự suy ra — tăng trưởng, chênh lệch, tỷ lệ, P/B
+theo giá hôm nay — phải tính bằng calculate với số đầu vào lấy từ kết quả công cụ
+của lượt này; không tự tính nhẩm.
 
 Không biết thì tra, đừng đoán. Với dữ kiện quan trọng, dùng web_search để tìm
 nguồn rồi fetch_url để đọc trang; đoạn trích tìm kiếm chỉ giúp chọn trang, không
