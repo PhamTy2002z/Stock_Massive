@@ -41,10 +41,7 @@ unavailable outside the internal profile no matter what credentials a host has.
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
-import importlib
-import io
 import json
 import logging
 import re
@@ -69,6 +66,18 @@ from ..registry import (
     register,
 )
 from ..symbols import normalize_symbol
+from . import vnstock_provider
+from .vnstock_provider import (
+    AMBIGUOUS_TIME,
+    INVALID_REQUEST,
+    NO_DATA,
+    PROVIDER,
+    PROVIDER_UNAVAILABLE,
+    RATE_LIMITED,
+    SCHEMA_DRIFT,
+    MarketDataError,
+)
+from .vnstock_provider import import_vnstock as _import_vnstock
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +97,6 @@ ICT = ZoneInfo("Asia/Ho_Chi_Minh")
 #: The connector package, named here and nowhere the model can read: it is how
 #: the host reached the feed, not a source a reader could go and check, and a
 #: package name inside the result came back out of the answer as if it were one.
-PROVIDER = "vnstock"
 SOURCE = "kbs"
 PUBLISHER = "KB Securities"
 
@@ -165,29 +173,10 @@ FETCH_TIMEOUT_SECONDS = 20.0
 
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-#: Stable failure vocabulary. The provider's own message is never passed through
-#: as if it were trustworthy prose — it is third-party text, and a model reading
-#: "rate limited, upgrade your plan" as an instruction is exactly the boundary
-#: ``untrusted.py`` exists to hold.
-INVALID_REQUEST = "invalid_request"
-NO_DATA = "no_data"
-PROVIDER_UNAVAILABLE = "provider_unavailable"
-RATE_LIMITED = "rate_limited"
-SCHEMA_DRIFT = "schema_drift"
-AMBIGUOUS_TIME = "ambiguous_time"
-
 #: The columns the provider contract promises. A payload missing one of them is
 #: a contract change, and coercing around it would put a wrong number in an
 #: answer rather than a refusal in a trace.
 REQUIRED_COLUMNS = ("time", "open", "high", "low", "close", "volume")
-
-
-class MarketDataError(ValueError):
-    """A refusal with a code the loop can act on and a reason a reader can read."""
-
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(f"{code}: {message}")
-        self.code = code
 
 
 def _iso_date(value: Any, field: str) -> date:
@@ -321,23 +310,6 @@ def _latest_line(latest: Mapping[str, Any], *, index: bool = False) -> str:
         line += f" so với phiên {previous.strftime('%d/%m/%Y')}"
     line += f" · khối lượng {_grouped(int(latest['volume']))} cổ phiếu"
     return line
-
-
-def _import_vnstock() -> Any:
-    """Import the provider package, catching what its start-up prints.
-
-    The package announces a sponsorship programme when it loads. This catches
-    the part of it written through ``sys.stdout``; the banner itself is drawn by
-    the package's own console, which holds the real stream, so a line or two
-    still reaches the log the first time a process makes a market call.
-
-    Left at that rather than redirected at the file descriptor: swapping fd 1
-    under a running server races every other thread writing a log line, which is
-    a much worse failure than one banner per process.
-    """
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
-        return importlib.import_module(PROVIDER)
 
 
 class MarketDataTools:
@@ -547,7 +519,8 @@ class MarketDataTools:
                 "market data is not enabled on this deployment",
             )
         module = _import_vnstock()
-        try:
+
+        def read() -> Any:
             quote = module.Quote(source=SOURCE, symbol=symbol)
             # The provider reads ``end`` as exclusive: asking for a range that
             # finishes on the last session returns everything before it, and a
@@ -559,8 +532,8 @@ class MarketDataTools:
                 end=(end + timedelta(days=1)).isoformat(),
                 interval=interval,
             )
-        except Exception as exc:  # noqa: BLE001 - provider failures are classified
-            raise _classify(exc, symbol) from exc
+
+        return vnstock_provider.call(read, symbol=symbol)
 
 
 def _validate(
@@ -654,28 +627,6 @@ def _date_note(end: date, today: date) -> str | None:
         f"Hôm nay là {today.strftime('%d/%m/%Y')}; khoảng dữ liệu bạn xin kết thúc "
         f"{end.strftime('%d/%m/%Y')}. Số liệu dưới đây không phải giá hiện tại. Nếu "
         "câu hỏi hỏi về hiện tại, gọi lại mà không truyền start và end."
-    )
-
-
-def _classify(exc: Exception, symbol: str) -> MarketDataError:
-    """A provider exception as one of this tool's own codes.
-
-    The provider wraps a weekend, a bad ticker and an outage in whichever
-    exception its retry decorator happened to raise, so the text is read for a
-    signal and everything unrecognised becomes ``provider_unavailable`` — the
-    answer that is true when nothing more specific is known.
-    """
-    text = str(exc).casefold()
-    if "429" in text or "rate" in text and "limit" in text:
-        return MarketDataError(RATE_LIMITED, "the provider is rate limiting this host")
-    if "not found" in text or "invalid symbol" in text or "symbol" in text:
-        return MarketDataError(
-            INVALID_REQUEST, f"the provider does not recognise {symbol}"
-        )
-    if "no data" in text or "empty" in text:
-        return MarketDataError(NO_DATA, f"the provider returned no rows for {symbol}")
-    return MarketDataError(
-        PROVIDER_UNAVAILABLE, "the market data provider did not answer this call"
     )
 
 

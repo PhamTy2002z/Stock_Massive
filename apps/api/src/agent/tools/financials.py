@@ -52,14 +52,9 @@ from ..registry import (
     register,
 )
 from ..symbols import normalize_symbol
-from .market_data import (
-    FETCH_TIMEOUT_SECONDS,
-    ICT,
-    INTERNAL_PROFILE,
-    MarketDataError,
-    _import_vnstock,
-    is_index,
-)
+from . import vnstock_provider
+from .market_data import FETCH_TIMEOUT_SECONDS, ICT, INTERNAL_PROFILE, is_index
+from .vnstock_provider import MarketDataError, import_vnstock
 
 logger = logging.getLogger(__name__)
 
@@ -196,13 +191,12 @@ class KbsFinancials:
     not_carried = NOT_IN_KBS
 
     def ratios(self, symbol: str, *, quarterly: bool, periods: int) -> Statement:
-        _import_vnstock()
-        try:
+        import_vnstock()
+
+        def read() -> Any:
             kbs = importlib.import_module("vnstock.explorer.kbs.financial")
-            finance = kbs.Finance(
-                symbol=symbol, period="quarter" if quarterly else "year"
-            )
-            raw = finance._fetch_financial_data(
+            finance = kbs.Finance(symbol=symbol, period="quarter" if quarterly else "year")
+            return finance._fetch_financial_data(
                 report_type="CSTC",
                 period_type=2 if quarterly else 1,
                 page=1,
@@ -213,10 +207,8 @@ class KbsFinancials:
                 # quarter end. The page is trimmed to ``periods`` afterwards.
                 page_size=KBS_PAGE_SIZE,
             )
-        except Exception as exc:  # noqa: BLE001 - provider failures become a stable code
-            raise MarketDataError(
-                "provider_unavailable", "the statements provider did not answer this call"
-            ) from exc
+
+        raw = vnstock_provider.call(read, symbol=symbol)
         if not isinstance(raw, Mapping):
             raise MarketDataError("no_data", f"the provider returned no statements for {symbol}")
         paired, dropped = pair_periods(raw, quarterly=quarterly)
@@ -311,18 +303,18 @@ class VciFinancials:
     not_carried: tuple[str, ...] = ()
 
     def ratios(self, symbol: str, *, quarterly: bool, periods: int) -> Statement:
-        _import_vnstock()
-        try:
+        import_vnstock()
+
+        def read() -> list[dict[str, Any]]:
             vci = importlib.import_module("vnstock.explorer.vci.financial")
             finance = vci.Finance(symbol=symbol, period="quarter" if quarterly else "year")
             frame = finance._get_report(
                 "ratio", mode="raw", limit=10_000, period="quarter" if quarterly else "year"
             )
-            records = frame.to_dict(orient="records")
-        except Exception as exc:  # noqa: BLE001 - provider failures become a stable code
-            raise MarketDataError(
-                "provider_unavailable", "the statements provider did not answer this call"
-            ) from exc
+            return frame.to_dict(orient="records")
+
+        # Two requests: Vietcap opens a session before it answers.
+        records = vnstock_provider.call(read, symbol=symbol, weight=2)
         paired, dropped = pair_vci(records, quarterly=quarterly)
         encoded = json.dumps(records, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
         return Statement(
