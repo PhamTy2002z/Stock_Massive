@@ -51,7 +51,8 @@ export function SourceIcon({
       )}
     >
       {status !== "loaded" && initials(domain)}
-      {domain !== "" && status !== "failed" && (
+      {/* A publisher's name ("KB Securities") has no favicon to ask for. */}
+      {HOSTNAME.test(domain) && status !== "failed" && (
         <img
           src={`/api/alpha-desk/assets/favicon?domain=${encodeURIComponent(domain)}`}
           alt=""
@@ -67,6 +68,8 @@ export function SourceIcon({
     </span>
   )
 }
+
+const HOSTNAME = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i
 
 /**
  * Two upper-case letters from a hostname's own label.

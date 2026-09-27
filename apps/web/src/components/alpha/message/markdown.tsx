@@ -1,10 +1,15 @@
 "use client"
 
-import { useMemo, useRef, type ComponentPropsWithoutRef } from "react"
+import { memo, useMemo, useRef, type ComponentPropsWithoutRef } from "react"
 import ReactMarkdown, { type Options } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
-import { readSources, rehypeFigureMarkers } from "@/lib/alpha-desk/figure-markers"
+import {
+  readSources,
+  rehypeFigureMarkers,
+  splitSources,
+  withoutUnverifiedNote,
+} from "@/lib/alpha-desk/figure-markers"
 import { rehypeWordCadence } from "@/lib/alpha-desk/word-cadence"
 import { cn } from "@/lib/utils"
 
@@ -40,12 +45,16 @@ import { MarkdownCopyButton } from "./markdown-copy-button"
  * and a fade on a re-render would animate a paragraph the reader is part-way
  * through.
  *
+ * **The source lists and bare `[n]` citations are not drawn**: every source is
+ * in the sources pill under the answer (owner decision, 2026-09-27).
+ *
  * **The host's figure labels become chips** (`figure-markers`): a cited figure
- * shows its source number and date, a stale one says so, and one nothing backs
- * is marked in the caution tone — never the market's up/down red, which a reader
- * can invert in settings and which means direction, not doubt.
+ * draws nothing (its source is in the sources pill), and neither does one nothing
+ * backs (owner decision, 2026-09-27); a stale one says so in the caution tone —
+ * never the market's up/down red, which a reader can invert in settings and
+ * which means direction, not doubt.
  */
-export function Markdown({
+export const Markdown = memo(function Markdown({
   text,
   animate = false,
   className,
@@ -56,6 +65,7 @@ export function Markdown({
   className?: string
 }) {
   const sources = useMemo(() => readSources(text), [text])
+  const body = useMemo(() => splitSources(withoutUnverifiedNote(text)).body, [text])
   // Labels first, so a chip is one element before the cadence splits words.
   const rehypePlugins: Options["rehypePlugins"] = [
     [rehypeFigureMarkers, { sources }],
@@ -64,11 +74,11 @@ export function Markdown({
   return (
     <div
       className={cn(
-        "text-[0.9375rem] leading-[1.62] [&>*+*]:mt-3",
+        "text-[0.9rem] leading-[1.62] [&>*+*]:mt-3",
         // Headings inside an answer are section labels, not page titles: one
         // step of weight and none of size, so a bolded line cannot start
         // competing with the question above it.
-        "[&_h1]:text-balance [&_h1]:text-[1.05rem] [&_h1]:font-semibold [&_h2]:text-balance [&_h2]:font-semibold",
+        "[&_h1]:text-balance [&_h1]:text-[1rem] [&_h1]:font-semibold [&_h2]:text-balance [&_h2]:font-semibold",
         "[&_h3]:font-semibold [&_h4]:font-semibold",
         "[&_p]:text-pretty",
         "[&_strong]:font-semibold [&_strong]:text-ink-display",
@@ -95,11 +105,11 @@ export function Markdown({
           td: TableCell,
         }}
       >
-        {text}
+        {body}
       </ReactMarkdown>
     </div>
   )
-}
+})
 
 /**
  * The hast node react-markdown hands a component alongside the element's own

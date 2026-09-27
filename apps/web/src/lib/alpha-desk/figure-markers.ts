@@ -25,6 +25,14 @@ export const MARKER = /\[(?:(\d{1,3}) · ([^\]\n]{1,80})|(chưa kiểm chứng))
 export const STALE_LABEL = "nguồn cũ"
 export const UNVERIFIED_LABEL = "chưa kiểm chứng"
 
+/** The note the host appends to explain the unverified label, which is no longer drawn. */
+const UNVERIFIED_NOTE = /\n*Số có nhãn \[chưa kiểm chứng\][^\n]*/g
+
+/** The answer as the surface draws it: without the note about a label it does not show. */
+export function withoutUnverifiedNote(text: string): string {
+  return text.replace(UNVERIFIED_NOTE, "")
+}
+
 /** The heading the host writes above the dated source list. */
 export const SOURCES_HEADING = "**Nguồn số liệu**"
 
@@ -67,6 +75,67 @@ export function readSources(text: string): Map<number, string> {
   }
   return sources
 }
+
+/** One source an answer lists at its end, as the sources pill shows it. */
+export interface CitedSource {
+  label: string
+  /** The page, when the line carried one. */
+  url: string | null
+}
+
+/** A heading above a source list: the host's `**Nguồn số liệu**` or the model's own `Nguồn:`. */
+const SOURCES_LINE = /^(?:#{1,4} *)?(?:\*\*)?Nguồn(?: số liệu| tham khảo)?:?(?:\*\*)?:? *$/i
+const SOURCE_ENTRY = /^(?:[-*] )?\[(\d{1,3})\] (.+)$/
+/** The host's notes about its labels, which sit among the closing lists. */
+const LABEL_NOTE = /^Số có nhãn /
+
+/**
+ * The answer without the source lists it ends with, and those lists' lines.
+ *
+ * Every source belongs in the sources pill beside the answer, not in a numbered
+ * list under it (owner decision, 2026-09-27). Only a tail that is nothing but
+ * headings, `[n]` lines, rules and the host's label notes is cut, so a `Nguồn:`
+ * that starts a paragraph of prose stays prose. The host's list and one the
+ * model wrote itself say the same sources twice, so the host's wins.
+ */
+export function splitSources(text: string): { body: string; sources: CitedSource[] } {
+  const lines = text.split("\n")
+  let cut = lines.length
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const line = lines[index].trim()
+    if (SOURCES_LINE.test(line)) cut = index
+    else if (line !== "" && line !== "---" && !SOURCE_ENTRY.test(line) && !LABEL_NOTE.test(line)) break
+  }
+  if (cut === lines.length) return { body: text, sources: [] }
+
+  // The host's list is built from the evidence itself; one the model wrote says
+  // the same sources in other words, so it is read only when the host wrote none.
+  let tail = lines.slice(cut)
+  const host = tail.findIndex((line) => line.trim() === SOURCES_HEADING)
+  if (host !== -1) tail = tail.slice(host)
+
+  const seen = new Set<string>()
+  const sources: CitedSource[] = []
+  for (const line of tail) {
+    const match = SOURCE_ENTRY.exec(line.trim())
+    if (!match) continue
+    const link = /\s*—\s*<([^>]+)>\s*$/.exec(match[2])
+    const label = (link ? match[2].slice(0, link.index) : match[2]).trim()
+    if (seen.has(label)) continue
+    seen.add(label)
+    sources.push({ label, url: link ? link[1] : null })
+  }
+  const body = lines.slice(0, cut).join("\n").replace(/(?:\s*\n---)?\s*$/, "")
+  return { body, sources }
+}
+
+/**
+ * A bare citation the model wrote itself: `[1]`, `[2, 3]`, `[1–4]`.
+ *
+ * Its list is in the sources pill, so the number points at nothing on screen.
+ * Not a link (`[1](…)` is an anchor by the time the tree is walked).
+ */
+const BARE_CITATION = / ?\[\d{1,3}(?: *[,;–-] *\d{1,3})*\]/g
 
 /** The classes the chips carry. Declared here so the renderer and tests agree. */
 export const MARKER_CLASS: Record<FigureKind, string> = {
@@ -116,7 +185,7 @@ function walk(node: Node, sources: Map<number, string>): void {
   const next: Node[] = []
   for (const child of children) {
     if (isText(child)) {
-      next.push(...splitMarkers(child.value, sources))
+      next.push(...splitMarkers(child.value.replace(BARE_CITATION, ""), sources))
       continue
     }
     if (!isElement(child) || !VERBATIM.has(child.tagName)) walk(child, sources)
@@ -126,7 +195,7 @@ function walk(node: Node, sources: Map<number, string>): void {
 }
 
 /**
- * One text node as prose and chips, in order, with every character kept.
+ * One text node as prose and chips, in order, with every prose character kept.
  *
  * Exported for its own test: a dropped character here is invisible on screen.
  */
@@ -137,8 +206,16 @@ export function splitMarkers(value: string, sources: Map<number, string> = new M
     const start = match.index ?? 0
     const marker = readMarker(match[0])
     if (!marker) continue
-    if (start > cursor) nodes.push({ type: "text", value: value.slice(cursor, start) })
-    nodes.push(chip(marker, sources))
+    // A cited figure is the normal case and draws nothing, not even the space the
+    // host wrote before its label: its source and date are in the closing list.
+    // An unverified one draws nothing either (owner decision, 2026-09-27: the
+    // words cost the reader more than they told). The label stays in the text and
+    // in the claim ledger; a figure with no source is simply absent from the list.
+    const silent = marker.kind !== "stale"
+    const before = value.slice(cursor, start)
+    const prose = silent ? before.replace(/ $/, "") : before
+    if (prose) nodes.push({ type: "text", value: prose })
+    if (!silent) nodes.push(chip(marker, sources))
     cursor = start + match[0].length
   }
   if (cursor < value.length) nodes.push({ type: "text", value: value.slice(cursor) })
@@ -147,13 +224,10 @@ export function splitMarkers(value: string, sources: Map<number, string> = new M
 
 function chip(marker: FigureMarker, sources: Map<number, string>): ElementNode {
   const source = marker.source === null ? undefined : sources.get(marker.source)
-  const title =
-    marker.kind === "unverified"
-      ? "Số này không có trong dữ liệu công cụ của lượt này, hoặc không khớp mốc thời gian câu đó nói tới."
-      : [source ? `[${marker.source}] ${source}` : `Nguồn [${marker.source}]`, marker.label]
-          .filter(Boolean)
-          .join(" · ")
-  const text = marker.source === null ? marker.label : `${marker.source} · ${marker.label}`
+  const title = [source ? `[${marker.source}] ${source}` : `Nguồn [${marker.source}]`, marker.label]
+    .filter(Boolean)
+    .join(" · ")
+  const text = STALE_LABEL
   return {
     type: "element",
     tagName: "span",

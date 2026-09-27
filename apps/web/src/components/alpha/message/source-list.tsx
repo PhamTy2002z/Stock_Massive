@@ -69,7 +69,7 @@ function SourceRow({ result }: { result: ToolResult }) {
 }
 
 /** `null` for anything that is not `http:`/`https:`, including a malformed URL. */
-function safeHref(url: string): string | null {
+export function safeHref(url: string): string | null {
   try {
     const parsed = new URL(url)
     return parsed.protocol === "http:" || parsed.protocol === "https:" ? url : null
