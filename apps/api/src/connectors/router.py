@@ -34,7 +34,7 @@ _REFUSAL_STATUS = {
 
 def _refused(error: ConnectorRefused) -> HTTPException:
     return HTTPException(
-        status_code=_REFUSAL_STATUS.get(error.code, status.HTTP_422_UNPROCESSABLE_ENTITY),
+        status_code=_REFUSAL_STATUS.get(error.code, status.HTTP_422_UNPROCESSABLE_CONTENT),
         detail={"reason": error.code, "message": str(error)},
     )
 

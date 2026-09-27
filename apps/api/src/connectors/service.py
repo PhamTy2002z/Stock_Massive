@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from urllib.parse import urlsplit, urlunsplit
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -91,6 +92,7 @@ class ActiveConnector:
     catalog_effects: Mapping[str, str] | None
     tools: tuple[Mapping[str, Any], ...]
     policies: Mapping[str, str]
+    snapshot_at: datetime | None = None
 
 
 class ConnectorService:
@@ -108,9 +110,6 @@ class ConnectorService:
         self._settings = settings
         self._lister = lister or (lambda target: mcp_client.list_tools(target))
         self._clock = clock
-        # Set by ``oauth.py`` when it is imported, so a Turn can refresh an
-        # expiring token without this module importing the OAuth flow.
-        self.token_refresher: Callable[[uuid.UUID], Awaitable[None]] | None = None
 
     @property
     def settings(self) -> Settings:
@@ -203,7 +202,10 @@ class ConnectorService:
         now = self._clock()
         active: list[ActiveConnector] = []
         for row, catalog in await self.mine(user_id):
-            if not row.enabled or row.status not in ("connected", "needs_reconsent"):
+            # ``error`` is the breaker's state: closed to Turns while it is open,
+            # and offered again once it lapses — the next call is the trial that
+            # either closes it (``record_success``) or opens it for longer.
+            if not row.enabled or row.status not in ("connected", "needs_reconsent", "error"):
                 continue
             if row.breaker_until is not None and row.breaker_until > now:
                 continue
@@ -224,6 +226,7 @@ class ConnectorService:
                     catalog_effects=(dict(catalog.tool_effects or {}) if catalog is not None else None),
                     tools=tools,
                     policies=dict(row.policies or {}),
+                    snapshot_at=row.snapshot_at,
                 )
             )
         return active
@@ -274,12 +277,18 @@ class ConnectorService:
         except netguard.ConnectorURLRefused as exc:
             raise ConnectorRefused("url_refused", str(exc)) from exc
         credentials: dict[str, Any] = {}
+        # A query string is where many servers take their key (``?api_key=…``),
+        # so it is stored with the credentials, encrypted, and never in ``url``.
+        parts = urlsplit(url)
+        if parts.query:
+            credentials["query"] = parts.query
+            url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
         auth_type = "oauth" if oauth else "none"
         if header_value:
             header_name = (header_name or "Authorization").strip()
             if not _HEADER_NAME.match(header_name) or header_name.lower() in _FORBIDDEN_HEADERS:
                 raise ConnectorRefused("header_refused", "that header name cannot carry a credential")
-            credentials = {"header": {"name": header_name, "value": header_value}}
+            credentials["header"] = {"name": header_name, "value": header_value}
             auth_type = "header"
         return await self._create(
             user_id,
@@ -335,8 +344,12 @@ class ConnectorService:
 
     async def target(self, user_id: int, connector_id: uuid.UUID) -> mcp_client.Target:
         row, _ = await self.get(user_id, connector_id)
-        if row.auth_type == "oauth" and self.token_refresher is not None:
-            await self.token_refresher(connector_id)
+        if row.auth_type == "oauth":
+            # Imported here: the OAuth flow depends on this module, not the
+            # other way round.
+            from .oauth import ensure_fresh
+
+            await ensure_fresh(self, connector_id)
             row, _ = await self.get(user_id, connector_id)
         return self._target(row)
 
@@ -347,8 +360,9 @@ class ConnectorService:
             headers[secret["header"]["name"]] = secret["header"]["value"]
         elif row.auth_type == "oauth" and secret.get("tokens", {}).get("access_token"):
             headers["Authorization"] = f"Bearer {secret['tokens']['access_token']}"
+        url = f"{row.url}?{secret['query']}" if secret.get("query") else row.url
         return mcp_client.Target(
-            url=row.url, headers=headers, timeout=self.settings.connectors_call_timeout_seconds
+            url=url, headers=headers, timeout=self.settings.connectors_call_timeout_seconds
         )
 
     async def refresh(self, user_id: int, connector_id: uuid.UUID) -> UserConnector:

@@ -24,6 +24,7 @@ loading a tool mid-Turn changes nothing before the newest message.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -31,7 +32,7 @@ import re
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.agent import registry
@@ -48,6 +49,11 @@ SEARCH_TOOL = "search_connector_tools"
 CALL_TOOL = "call_connector_tool"
 META_TOOLS = frozenset({SEARCH_TOOL, CALL_TOOL})
 MAX_SEARCH_RESULTS = 8
+#: How old a tool snapshot may be before a Turn asks the server again, in the
+#: background. The Turn itself runs on the accepted snapshot; what a changed
+#: server offers reaches the *user* first, as a change to accept.
+SNAPSHOT_MAX_AGE = timedelta(hours=1)
+_BACKGROUND: set[asyncio.Task[Any]] = set()
 #: What a connector result becomes in the transcript. The executor's own cut
 #: still applies on top; this one says *why* in the result itself.
 CUT_NOTE = "[… đã cắt {extra} ký tự vượt giới hạn kết quả của kết nối]"
@@ -161,6 +167,7 @@ def _resolved(
     timeout: float,
     max_chars: int,
     summary_arg: str | None = None,
+    summarise: Any = None,
     strict: bool = False,
 ) -> registry.ResolvedTool:
     permission = {
@@ -175,6 +182,7 @@ def _resolved(
         description=description or display_name,
         display_name=display_name,
         summary_detail_arg=summary_arg,
+        summarise=summarise,
         effect=effect,
         idempotency=registry.ToolIdempotency.UNKNOWN,
         access=registry.ToolAccess.NETWORK,
@@ -312,6 +320,12 @@ def meta_tools(hidden: Sequence[registry.ResolvedTool], info: Mapping[str, Conne
         summary_arg="query",
         strict=True,
     )
+    labels = {tool.name: tool.display_name for tool in hidden}
+
+    def rail(arguments: Mapping[str, Any]) -> str:
+        # The reader sees which connector and tool, never the wire name.
+        return labels.get(str(arguments.get("tool") or ""), "Chạy công cụ kết nối")
+
     call = _resolved(
         name=CALL_TOOL,
         description=(
@@ -328,16 +342,33 @@ def meta_tools(hidden: Sequence[registry.ResolvedTool], info: Mapping[str, Conne
         ),
         handler=_unreachable,
         display_name="Chạy công cụ kết nối",
+        summarise=rail,
         # Declared as a write so the planner never runs it in a parallel
         # segment before the executor has resolved which tool it really is.
         effect=registry.ToolEffect.UNKNOWN,
         action=policy.ALLOW,
         timeout=timeout,
         max_chars=30_000,
-        summary_arg="tool",
         strict=True,
     )
     return search, call
+
+
+def _refresh_stale(service: ConnectorService, user_id: int, active: Sequence[ActiveConnector]) -> None:
+    now = _now()
+    for connector in active:
+        if connector.snapshot_at is not None and now - connector.snapshot_at < SNAPSHOT_MAX_AGE:
+            continue
+
+        async def refresh(connector_id: uuid.UUID = connector.id) -> None:
+            try:
+                await service.refresh(user_id, connector_id)
+            except Exception as exc:  # noqa: BLE001 - a background check must not surface
+                logger.info("Background refresh of connector %s failed: %s", connector_id, exc)
+
+        task = asyncio.create_task(refresh())
+        _BACKGROUND.add(task)
+        task.add_done_callback(_BACKGROUND.discard)
 
 
 async def build_overlay(
@@ -356,6 +387,7 @@ async def build_overlay(
     except Exception as exc:  # noqa: BLE001 - a broken connector table must not stop a Turn
         logger.warning("Connector overlay for user %s unavailable: %s", user_id, exc)
         return EMPTY
+    _refresh_stale(service, user_id, active)
     tools, info = _connector_tools(service, active)
     if not tools:
         return replace(EMPTY, approvals_supported=approvals_supported)

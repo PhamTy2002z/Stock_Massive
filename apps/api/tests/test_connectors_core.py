@@ -145,14 +145,18 @@ async def test_no_plaintext_secret_in_the_database(world):
     secret = f"Bearer tok-{uuid.uuid4().hex}"
     world.server.token = secret.removeprefix("Bearer ")
     try:
-        row = await service.add_custom(world.alice, name="Két sắt", url=world.server.url, header_value=secret)
+        row = await service.add_custom(
+            world.alice, name="Két sắt", url=f"{world.server.url}?api_key=q-{secret[-8:]}", header_value=secret
+        )
         assert row.status == "connected"
+        assert "?" not in row.url
         with world.sync_session() as session:
             dump = "\n".join(
                 str(value)
                 for value in session.execute(text("SELECT t::text FROM user_connector t")).scalars()
             )
         assert row.credentials and secret not in dump and secret.removeprefix("Bearer ") not in dump
+        assert f"q-{secret[-8:]}" not in dump
         await service.delete(world.alice, row.id)
         with world.sync_session() as session:
             left = session.execute(text("SELECT count(*) FROM user_connector WHERE id = :id"), {"id": row.id}).scalar()
@@ -215,3 +219,49 @@ async def test_a_private_url_is_refused_when_attaching_outside_tests(world, monk
     with pytest.raises(ConnectorRefused) as refused:
         await service.add_custom(world.alice, name="Nội bộ", url="https://10.0.0.8/mcp")
     assert refused.value.code == "url_refused"
+
+
+def huge_page(size: int) -> str:
+    """Một trang rất dài."""
+    return "số liệu " * size
+
+
+def picture() -> list:
+    """Một ảnh kèm chú thích."""
+    import mcp_types
+
+    return [
+        mcp_types.ImageContent(type="image", data="aGVsbG8=", mime_type="image/png"),
+        mcp_types.TextContent(type="text", text="biểu đồ doanh thu"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_or_non_text_result_is_cut_and_says_why(world):
+    world.server.add(huge_page, description="Trả về một trang rất dài.", read_only=True)
+    world.server.add(picture, description="Trả về một ảnh.", read_only=True)
+    try:
+        service = world.service(connectors_max_result_chars=500)
+        row = await _attach(service, world.alice, world, name="Kết quả lớn")
+        for name in ("huge_page", "picture"):
+            await service.set_policy(world.alice, row.id, name, "allow")
+        await service.set_tool_access(world.alice, "preloaded")
+        overlay = await build_overlay(world.alice, service=service)
+        surface = with_overlay(ResolvedToolSurface(tools=(), registry_generation=0, expanded_names=(), expires_at=math.inf), overlay.offered)
+        executor = ToolExecutor(context=registry.ToolContext(user_id=world.alice), surface=surface)
+        big, image = (
+            await executor.run(
+                [
+                    ToolCall(id="big", name=_wire(row, "huge_page"), arguments={"size": 5000}),
+                    ToolCall(id="img", name=_wire(row, "picture"), arguments={}),
+                ]
+            )
+        ).results
+        big_body = json.loads(big.text)
+        assert len(big_body["content"]) == 500 and "đã cắt" in big_body["note"]
+        image_body = json.loads(image.text)
+        assert image_body["content"] == "biểu đồ doanh thu" and "image" in image_body["note"]
+        await service.delete(world.alice, row.id)
+    finally:
+        world.server.remove("huge_page")
+        world.server.remove("picture")
