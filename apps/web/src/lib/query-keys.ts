@@ -21,4 +21,7 @@ export const queryKeys = {
 
   // What this account asked the assistant to remember, paged by offset.
   memoryFacts: ["memory", "facts"] as const,
+  // This account's connectors, the catalog and the tool access mode: one
+  // resource, because every write answers with the connector it changed.
+  connectors: ["connectors"] as const,
 }

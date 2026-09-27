@@ -13,13 +13,14 @@
  */
 
 /**
- * The nine event types of the current contract.
+ * The eleven event types of the current contract.
  *
  * `part.progress` and `part.question` were added to the seven rather than in
  * place of any of them, which is why {@link TURN_EVENT_VERSION} did not move:
  * the envelope is unchanged and the other seven are byte-identical. A client
  * only ever sees a named event it subscribed to (`use-live-turn`), so the
- * addition costs an older build nothing.
+ * addition costs an older build nothing. The two `approval.*` events were added
+ * the same way, and only reach a client that declared `approvals`.
  */
 export type TurnEventType =
   | "turn.snapshot"
@@ -27,6 +28,8 @@ export type TurnEventType =
   | "tool.call"
   | "part.progress"
   | "part.question"
+  | "approval.requested"
+  | "approval.resolved"
   | "turn.completed"
   | "turn.incomplete"
   | "turn.failed"
@@ -353,6 +356,30 @@ export interface ResolvedQuestion {
   resolved_at: string | null
 }
 
+/**
+ * One connector call waiting for the reader, as `approval.requested` carries it.
+ *
+ * Every string is the backend's: `arguments_preview` is the model's arguments,
+ * redacted and cut upstream, and is shown as plain monospace text only.
+ */
+export interface ApprovalRequest {
+  call_id: string
+  /** The connector's display name. */
+  connector: string
+  tool: string
+  /** The tool as the reader is shown it. */
+  display: string
+  effect: "read" | "write"
+  arguments_preview: string
+  /** Whether "Always allow" may be offered; never for a write. */
+  can_always: boolean
+  /** ISO time the wait ends and the call is denied. */
+  expires_at: string | null
+}
+
+/** What the reader can answer a card with. */
+export type ApprovalDecision = "allow_once" | "always" | "deny"
+
 export interface SnapshotData {
   through_seq: number
   status: TurnStatus
@@ -380,6 +407,8 @@ export interface SnapshotData {
    * the Turn ended, and that is read from the transcript.
    */
   question?: QuestionPart | null
+  /** Approval cards still waiting, so a reconnect redraws them. */
+  approvals?: ApprovalRequest[]
   /** The canonical assistant message, once a terminal transaction wrote one. */
   message_id: number | null
   /**

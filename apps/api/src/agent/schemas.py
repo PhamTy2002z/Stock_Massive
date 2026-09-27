@@ -266,6 +266,13 @@ class CreateTurnRequest(BaseModel):
     attachments: list[uuid.UUID] = Field(
         default_factory=list, max_length=MAX_IMAGES_PER_TURN
     )
+    # What the client can draw beyond the v2 events. ``approvals`` says it shows
+    # ``approval.requested`` cards; without it a connector call that needs a
+    # person is refused at once instead of waiting on a card nobody sees. Not
+    # part of the idempotency payload: it describes the app, not the question.
+    client_capabilities: list[Literal["approvals"]] = Field(
+        default_factory=list, max_length=4
+    )
 
     @field_validator("attachments")
     @classmethod

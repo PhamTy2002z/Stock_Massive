@@ -55,6 +55,12 @@ class ResolvedToolSurface:
     expanded_names: tuple[str, ...]
     expires_at: float
     missing: tuple[tuple[str, registry.AvailabilityReason], ...] = ()
+    #: Dispatchable, never offered: connector tools behind the on-demand pair.
+    #: Outside the identity too, because nothing about them reaches the prefix.
+    hidden: tuple[registry.ResolvedTool, ...] = ()
+    #: Names that came from a per-user overlay rather than the registry. The
+    #: registry's live availability check does not speak for them.
+    overlay_names: frozenset[str] = frozenset()
     offered_schemas: tuple[ToolSchema, ...] = field(init=False)
     by_name: Mapping[str, registry.ResolvedTool] = field(init=False, compare=False)
     unavailable_reasons: Mapping[str, registry.AvailabilityReason] = field(
@@ -62,7 +68,7 @@ class ResolvedToolSurface:
     )
 
     def __post_init__(self) -> None:
-        lookup = {tool.name: tool for tool in self.tools}
+        lookup = {tool.name: tool for tool in (*self.tools, *self.hidden)}
         unavailable = {
             tool.name: (
                 tool.unavailable_reason or registry.AvailabilityReason.CHECK_REFUSED
@@ -78,13 +84,24 @@ class ResolvedToolSurface:
                 tool.schema
                 for tool in self.tools
                 if tool.available
-                and PermissionPolicy(tool.permission_rules).may_allow(tool.name)
+                and (
+                    PermissionPolicy(tool.permission_rules).may_allow(tool.name)
+                    # A connector tool is in the overlay only if its policy is
+                    # allow or ask — deny is left out when the overlay is built —
+                    # and an ``ask`` one is useful to offer, because this Turn
+                    # has somewhere to ask.
+                    or tool.name in self.overlay_names
+                )
             ),
         )
         object.__setattr__(self, "by_name", MappingProxyType(lookup))
         object.__setattr__(
             self, "unavailable_reasons", MappingProxyType(unavailable)
         )
+
+    @property
+    def hidden_names(self) -> frozenset[str]:
+        return frozenset(tool.name for tool in self.hidden)
 
     def identity_payload(self) -> dict[str, Any]:
         """Deterministic policy identity with no callables, secrets, or expiry."""
@@ -193,6 +210,34 @@ def resolve_tool_surface(
     raise RuntimeError("tool registry changed repeatedly while resolving a surface")
 
 
+def with_overlay(
+    surface: ResolvedToolSurface,
+    offered: Sequence[registry.ResolvedTool] = (),
+    hidden: Sequence[registry.ResolvedTool] = (),
+) -> ResolvedToolSurface:
+    """``surface`` with one user's connector tools after the base tools.
+
+    After, so the base part of the prefix is the same with or without them. An
+    overlay name that collides with a base tool is dropped rather than allowed
+    to shadow it; overlay names are ``mcp__``-prefixed, so this does not happen
+    by accident.
+    """
+    if not offered and not hidden:
+        return surface
+    taken = {tool.name for tool in surface.tools}
+    offered = tuple(tool for tool in offered if tool.name not in taken)
+    hidden = tuple(tool for tool in hidden if tool.name not in taken)
+    return ResolvedToolSurface(
+        tools=(*surface.tools, *offered),
+        registry_generation=surface.registry_generation,
+        expanded_names=surface.expanded_names,
+        expires_at=surface.expires_at,
+        missing=surface.missing,
+        hidden=hidden,
+        overlay_names=frozenset(tool.name for tool in (*offered, *hidden)),
+    )
+
+
 def get_tool_definitions(
     toolsets: Sequence[str] | str | None = None, *, now: float | None = None
 ) -> tuple[ToolSchema, ...]:
@@ -246,4 +291,5 @@ __all__ = [
     "clear_cache",
     "get_tool_definitions",
     "resolve_tool_surface",
+    "with_overlay",
 ]

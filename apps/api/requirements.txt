@@ -18,6 +18,12 @@ email-validator>=2.0.0
 
 # Utils
 httpx>=0.25.0
+
+# User connectors (src/connectors/). The MCP SDK brings httpx2, which the
+# connector client pins to validated addresses; cryptography encrypts every
+# connector credential at rest (MultiFernet, so keys rotate).
+mcp==2.0.0
+cryptography>=44.0.0,<51.0.0
 python-multipart>=0.0.6
 # Document evidence extraction. Both are imported directly by the agent layer.
 pypdf>=6.0.0,<7.0.0

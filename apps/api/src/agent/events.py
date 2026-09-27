@@ -104,6 +104,11 @@ class EventType(str, Enum):
     #: The question that is ending this Turn, published just before the terminal
     #: so a reader watching live is handed the card without refetching.
     PART_QUESTION = "part.question"
+    #: A connector call is waiting for the reader's yes or no, and then got one.
+    #: Additive like the two parts above: a client that does not listen for them
+    #: never declared ``approvals`` either, and its Turns are refused the wait.
+    APPROVAL_REQUESTED = "approval.requested"
+    APPROVAL_RESOLVED = "approval.resolved"
     COMPLETED = "turn.completed"
     INCOMPLETE = "turn.incomplete"
     FAILED = "turn.failed"
@@ -165,6 +170,21 @@ TOOL_CALL_FIELDS = (
     # (``messages.TurnToolCall.as_wire``), so what this adds is that the live row
     # and the stored row finally say the same thing.
     "error",
+)
+
+
+#: The keys an approval card carries. An allowlist for the reason
+#: ``TOOL_CALL_FIELDS`` is: the arguments preview is the model's own text,
+#: redacted and cut before it gets here, and nothing a server wrote rides along.
+APPROVAL_FIELDS = (
+    "call_id",
+    "connector",
+    "tool",
+    "display",
+    "effect",
+    "arguments_preview",
+    "can_always",
+    "expires_at",
 )
 
 
@@ -293,6 +313,9 @@ class TurnPublisher:
         # a question is a terminal, so a Turn asks at most once, and ``None`` is
         # what every Turn that answered instead carries.
         self._question: dict[str, Any] | None = None
+        # Approval cards still waiting, by call id. Restated on the snapshot so
+        # a reader who reloads while a call waits is shown the card again.
+        self._approvals: dict[str, dict[str, Any]] = {}
         self._status = TURN_RUNNING
         self._terminal_reason: str | None = None
         # The canonical assistant message, once the terminal transaction has
@@ -453,6 +476,16 @@ class TurnPublisher:
         data["selected_option_ids"] = None
         return self.publish(EventType.PART_QUESTION, data)
 
+    def approval_requested(self, card: Mapping[str, Any]) -> TurnEvent:
+        return self.publish(
+            EventType.APPROVAL_REQUESTED, {key: card.get(key) for key in APPROVAL_FIELDS}
+        )
+
+    def approval_resolved(self, call_id: str, decision: str) -> TurnEvent:
+        return self.publish(
+            EventType.APPROVAL_RESOLVED, {"call_id": call_id, "decision": decision}
+        )
+
     def terminal(
         self,
         event_type: EventType,
@@ -509,6 +542,7 @@ class TurnPublisher:
                 # between the question and the terminal would otherwise be the
                 # one reader who never sees it.
                 "question": None if self._question is None else dict(self._question),
+                "approvals": [dict(card) for card in self._approvals.values()],
                 "message_id": self._message_id,
                 "elapsed_ms": self.elapsed_ms,
             },
@@ -541,6 +575,10 @@ class TurnPublisher:
             self._progress.append(dict(event.data))
         elif event.type is EventType.PART_QUESTION:
             self._question = dict(event.data)
+        elif event.type is EventType.APPROVAL_REQUESTED:
+            self._approvals[str(event.data.get("call_id"))] = dict(event.data)
+        elif event.type is EventType.APPROVAL_RESOLVED:
+            self._approvals.pop(str(event.data.get("call_id")), None)
 
     def _fan_out(self, event: TurnEvent) -> None:
         surviving: list[Subscriber] = []
@@ -622,6 +660,9 @@ def snapshot_from_draft(
             # merges the live state in. A snapshot rebuilt from a draft would be
             # the one view able to show a state the reader has already left.
             "question": None,
+            # Nothing waits on a Turn no process holds: its approvals ended
+            # with the process that asked.
+            "approvals": [],
             "message_id": message_id,
             "elapsed_ms": elapsed_ms,
         },
@@ -630,6 +671,7 @@ def snapshot_from_draft(
 
 __all__ = [
     "ANSWER",
+    "APPROVAL_FIELDS",
     "ENVELOPE_VERSION",
     "SUBSCRIBER_QUEUE_SIZE",
     "TERMINAL_EVENTS",

@@ -20,6 +20,7 @@ import {
   readToolCalls,
 } from "./read-content"
 import type {
+  ApprovalRequest,
   Attachment,
   FlagReason,
   QuestionPart,
@@ -145,6 +146,13 @@ export interface DraftEntry {
    * card in the same breath as the terminal, before anyone can have pressed it.
    */
   question: QuestionPart | null
+  /**
+   * Connector calls waiting for the reader, and the Turn they belong to — what
+   * an approval card answers against. Optional so a draft built elsewhere
+   * (tests, older callers) still type-checks; absent means none wait.
+   */
+  approvals?: ApprovalRequest[]
+  turnId?: string | null
   elapsedMs: number
   phase: LivePhase
   terminalReason: string | null
@@ -229,6 +237,8 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
       toolCalls: input.live.toolCalls,
       thoughts: input.live.thoughts,
       question: input.live.question,
+      approvals: input.live.approvals,
+      turnId: input.live.turnId,
       elapsedMs: input.live.elapsedMs,
       phase: input.live.phase,
       terminalReason: input.live.terminalReason,

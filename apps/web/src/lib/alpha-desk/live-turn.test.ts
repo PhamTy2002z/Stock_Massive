@@ -719,3 +719,76 @@ describe("what asking again means", () => {
     expect(resendPlan(completed, true)).toBe("submit")
   })
 })
+
+describe("approval cards", () => {
+  const card = (callId: string, extra: Record<string, unknown> = {}) => ({
+    call_id: callId,
+    connector: "Kho nội bộ",
+    tool: "create_note",
+    display: "Tạo ghi chú",
+    effect: "write",
+    arguments_preview: '{"title":"VCB"}',
+    can_always: false,
+    expires_at: "2026-09-27T07:05:00+00:00",
+    ...extra,
+  })
+
+  it("adds a card on approval.requested and drops it on approval.resolved", () => {
+    const asked = apply(
+      started(),
+      event("approval.requested", 1, card("c-1")),
+      event("approval.requested", 2, card("c-2", { effect: "read", can_always: true })),
+    )
+    expect(asked.approvals.map((one) => one.call_id)).toEqual(["c-1", "c-2"])
+    expect(asked.approvals[1]).toMatchObject({ effect: "read", can_always: true })
+
+    const answered = apply(asked, event("approval.resolved", 3, { call_id: "c-1", decision: "deny" }))
+    expect(answered.approvals.map((one) => one.call_id)).toEqual(["c-2"])
+    expect(answered.seq).toBe(3)
+  })
+
+  it("draws a card with an unknown effect as a write, and skips one with no call id", () => {
+    const state = apply(
+      started(),
+      event("approval.requested", 1, card("c-1", { effect: "mystery" })),
+      event("approval.requested", 2, { display: "không có id" }),
+    )
+    expect(state.approvals).toHaveLength(1)
+    expect(state.approvals[0].effect).toBe("write")
+    expect(state.seq).toBe(2)
+  })
+
+  it("restores the waiting cards from a snapshot, replacing what was held", () => {
+    const held = apply(started(), event("approval.requested", 1, card("stale")))
+    const state = apply(
+      held,
+      event("turn.snapshot", 0, {
+        through_seq: 5,
+        status: "running",
+        terminal_reason: null,
+        text: "",
+        thoughts: [],
+        tool_calls: [],
+        message_id: null,
+        elapsed_ms: 1000,
+        approvals: [card("c-9")],
+      }),
+    )
+    expect(state.approvals.map((one) => one.call_id)).toEqual(["c-9"])
+    expect(state.seq).toBe(5)
+  })
+
+  it("empties them when the Turn ends, by event or by the Turn row", () => {
+    const asked = apply(started(), event("approval.requested", 1, card("c-1")))
+    expect(apply(asked, event("turn.cancelled", 2)).approvals).toEqual([])
+    expect(
+      liveTurnReducer(asked, {
+        type: "settled",
+        turnId: asked.turnId as string,
+        status: "incomplete",
+        terminalReason: "timeout",
+        messageId: null,
+      }).approvals,
+    ).toEqual([])
+  })
+})

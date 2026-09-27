@@ -5,6 +5,8 @@ import { AlertCircle, Check, Copy, Pencil, RotateCcw, X } from "lucide-react"
 
 import { AssistantMessage } from "@/components/alpha/message/assistant-message"
 import { AttachmentChip } from "@/components/shell/attachment-chip"
+import { ApprovalCards } from "@/components/connectors/approval-card"
+import { useConnectorReturn } from "@/components/connectors/use-connector-return"
 import { DraftMessage } from "@/components/alpha/message/draft-message"
 import { FollowUps } from "@/components/alpha/message/follow-ups"
 import { VisgniteMark } from "@/components/shared/visgnite-logo"
@@ -159,6 +161,8 @@ export function ChatView() {
   const desk = useDesk()
   const { entries } = useDeskTranscript()
   const { dispatch } = useShell()
+  // Mounted once for the life of the shell, so the OAuth sign-in's return lands here.
+  useConnectorReturn()
   const container = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
   const hasTranscript = desk.threadId !== null || entries.length > 0
@@ -471,13 +475,18 @@ export function ChatView() {
             }
 
             return (
-              <DraftMessage
-                key={entry.key}
-                entry={entry}
-                onRetry={desk.retry}
-                onAnswerQuestion={desk.answerQuestion}
-                onSkipQuestion={desk.skipQuestion}
-              />
+              <div key={entry.key} className="space-y-3">
+                <DraftMessage
+                  entry={entry}
+                  onRetry={desk.retry}
+                  onAnswerQuestion={desk.answerQuestion}
+                  onSkipQuestion={desk.skipQuestion}
+                />
+                {/* What the running Turn is holding for the reader's answer. */}
+                {entry.turnId && entry.approvals && (
+                  <ApprovalCards turnId={entry.turnId} approvals={entry.approvals} />
+                )}
+              </div>
             )
           })}
         </div>

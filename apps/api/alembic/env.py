@@ -12,6 +12,12 @@ from src.core.database import Base, asyncpg_connect_args, to_asyncpg_url
 
 # Import current ORM owners so Alembic can compare against Base.metadata.
 from src.auth.models import RefreshToken, User  # noqa: E402,F401
+from src.connectors.models import (  # noqa: E402,F401
+    ConnectorCatalog,
+    ConnectorOAuthState,
+    UserConnector,
+    UserConnectorPreference,
+)
 from src.alpha.models import (  # noqa: E402,F401
     AgentAttachment,
     AgentMessage,

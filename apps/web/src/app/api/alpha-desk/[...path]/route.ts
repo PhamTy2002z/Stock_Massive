@@ -82,6 +82,14 @@ import { UPSTREAM_UNREACHABLE } from "@/lib/connection-status"
 // `GET/DELETE /memory/facts` and `DELETE /memory/facts/{id}`, and every one reads
 // the owner from the resolved session, so no request shape reaches another
 // account's notes.
+// `connectors` is this reader's own remote MCP servers and their tool policy.
+// Upstream resolves every `/connectors/{id}` through the signed-in user — an id
+// that belongs to somebody else is a 404, exactly like one that does not exist
+// — and no route under it returns a credential, so a wider grant here reaches
+// only this account's rows. The OAuth callback is the one route there that
+// takes no session; the provider redirects the browser to it at the API's own
+// address (`CONNECTORS_OAUTH_REDIRECT_URL`), not through this proxy. `PUT` is
+// exported below for its tool-policy and preferences writes.
 const FORWARDED_RESOURCES = new Set([
   "threads",
   "turns",
@@ -92,6 +100,7 @@ const FORWARDED_RESOURCES = new Set([
   "usage",
   "capabilities",
   "memory",
+  "connectors",
 ])
 
 function isForwardedPath(path: string[]): boolean {
@@ -490,6 +499,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
+  return forward(request, (await context.params).path)
+}
+
+export async function PUT(request: NextRequest, context: RouteContext) {
   return forward(request, (await context.params).path)
 }
 

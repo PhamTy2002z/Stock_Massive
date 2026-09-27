@@ -1,8 +1,9 @@
 "use client"
 
 import { useState, type ReactNode } from "react"
-import { Brain, ChartNoAxesColumn, CircleUserRound, Search, Settings, ShieldCheck, X } from "lucide-react"
+import { Brain, ChartNoAxesColumn, CircleUserRound, Plug, Search, Settings, ShieldCheck, X } from "lucide-react"
 
+import { ConnectorsPane } from "@/components/connectors/connectors-pane"
 import { AppearanceSection } from "@/components/settings/appearance-section"
 import { ConversationSection } from "@/components/settings/conversation-section"
 import { DataSection } from "@/components/settings/data-section"
@@ -11,6 +12,7 @@ import { NotificationsSection } from "@/components/settings/notifications-sectio
 import { ProfileSection } from "@/components/settings/profile-section"
 import { SecuritySection } from "@/components/settings/security-section"
 import { UsageSection } from "@/components/settings/usage-section"
+import { peekConnectorsPane } from "@/lib/connectors/open-pane"
 import { cn } from "@/lib/utils"
 
 import { IconButton } from "./primitives"
@@ -40,7 +42,7 @@ import { useShell } from "./shell-state"
  * both fit.
  */
 
-type PaneId = "general" | "account" | "memory" | "privacy" | "usage"
+type PaneId = "general" | "account" | "connectors" | "memory" | "privacy" | "usage"
 
 interface Pane {
   id: PaneId
@@ -80,6 +82,13 @@ const PANES: Pane[] = [
     ),
   },
   {
+    id: "connectors",
+    label: "Connectors",
+    icon: Plug,
+    keywords: "connectors mcp server tools oauth sign in approval",
+    render: () => <ConnectorsPane />,
+  },
+  {
     id: "memory",
     label: "Memory",
     icon: Brain,
@@ -104,7 +113,10 @@ const PANES: Pane[] = [
 
 export function SettingsDialog() {
   const { dispatch } = useShell()
-  const [selected, setSelected] = useState<PaneId>("general")
+  // The composer and the OAuth return open Settings straight on connectors.
+  const [selected, setSelected] = useState<PaneId>(() =>
+    peekConnectorsPane() ? "connectors" : "general",
+  )
   const [term, setTerm] = useState("")
 
   const query = term.trim().toLowerCase()

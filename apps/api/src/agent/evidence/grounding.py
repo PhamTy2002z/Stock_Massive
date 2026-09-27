@@ -105,6 +105,14 @@ EXEMPT_TOOLS = frozenset({"session_search", "recall_facts"})
 MARKET_TOOL = "get_market_data"
 PAGE_TOOL = "fetch_url"
 SEARCH_TOOL = "web_search"
+#: A user connector's tools (``src/connectors/``): named ``mcp__…`` when
+#: preloaded, or reached through the on-demand envelope.
+CONNECTOR_PREFIX = "mcp__"
+CONNECTOR_CALL_TOOL = "call_connector_tool"
+#: Why a figure that *matches* a connector result is still not verified: the
+#: owner's rule is that only a catalog connector marked ``trusted_data`` is
+#: evidence, and every other one is somebody's own text.
+UNTRUSTED_CONNECTOR = "untrusted_connector"
 
 
 class FigureStatus(str, Enum):
@@ -118,11 +126,20 @@ class SourceKind(str, Enum):
     STRUCTURED = "structured"
     PAGE = "page"
     SNIPPET = "snippet"
+    #: A connector result whose catalog entry is not marked ``trusted_data``.
+    #: Recorded and cited, never verifying.
+    CONNECTOR = "connector"
 
 
 #: Which kind of source wins when a figure appears in several. Structured tool
-#: data first, then a page the model opened, then a snippet it only glimpsed.
-_KIND_RANK = {SourceKind.STRUCTURED: 0, SourceKind.PAGE: 1, SourceKind.SNIPPET: 2}
+#: data first, then a page the model opened, then a snippet it only glimpsed,
+#: and an untrusted connector last, so any source that can verify a figure does.
+_KIND_RANK = {
+    SourceKind.STRUCTURED: 0,
+    SourceKind.PAGE: 1,
+    SourceKind.SNIPPET: 2,
+    SourceKind.CONNECTOR: 3,
+}
 
 #: The units a figure may carry, as a sentence here writes them. Longest first,
 #: so ``tỷ đồng`` is read whole rather than as ``tỷ`` followed by a word.
@@ -613,6 +630,65 @@ def _web(item: Mapping[str, Any], excerpt: str, *, snippet: bool) -> _Source | N
     )
 
 
+def _connector(call: TurnToolCall, payload: Mapping[str, Any]) -> _Source | None:
+    """One connector result, as evidence when trusted and as a record otherwise.
+
+    The envelope (``connector``, ``tool``, ``trusted_data``, ``retrieved_at``,
+    ``content``) is written by the host's handler around the server's text, so
+    the server cannot set ``trusted_data`` itself: its words are inside
+    ``content``, never beside it.
+    """
+    if payload.get("is_error"):
+        return None
+    content = str(payload.get("content") or "").strip()
+    if not content:
+        return None
+    trusted = payload.get("trusted_data") is True
+    connector = str(payload.get("connector") or "connector")
+    name = str(payload.get("connector_name") or connector)
+    tool = str(payload.get("tool") or call.name)
+    retrieved = _aware(payload.get("retrieved_at"))
+    lines = tuple(
+        _Line(text=line, when=_line_date(line), values=_values_of(line))
+        for line in content.splitlines()
+        if line.strip()
+    )
+    try:
+        evidence = build_evidence_ref(
+            kind=EvidenceKind.STORE_FIGURE if trusted else EvidenceKind.DOCUMENT_SECTION,
+            source_class=SourceClass.STORE if trusted else SourceClass.UNKNOWN,
+            title=f"{name} · {tool}",
+            source=f"connector:{connector}/{tool}",
+            publisher=name,
+            excerpt=content[:2000],
+            content_sha256=_digest(None, content),
+            observed_at=retrieved,
+            publication_method=PublicationMethod.PROVIDER,
+            publication_confidence=PublicationConfidence.HIGH if trusted else PublicationConfidence.UNKNOWN,
+            tos_risk=TosRisk.MEDIUM,
+        )
+    except ValueError:
+        return None
+    dated = [line.when for line in lines if line.when is not None]
+    return _Source(
+        kind=SourceKind.STRUCTURED if trusted else SourceKind.CONNECTOR,
+        evidence=evidence,
+        lines=lines,
+        published=_day(retrieved),
+        latest=max(dated) if dated else None,
+        label=f"{name} — {tool}",
+        role="connector",
+    )
+
+
+def _is_connector(call: TurnToolCall, payload: Mapping[str, Any]) -> bool:
+    return (
+        (call.name.startswith(CONNECTOR_PREFIX) or call.name == CONNECTOR_CALL_TOOL)
+        and "connector" in payload
+        and "content" in payload
+    )
+
+
 @dataclass(frozen=True)
 class Sources:
     """What this Turn read, as the figure check reads it."""
@@ -691,7 +767,9 @@ def collect_sources(calls: Sequence[TurnToolCall], *, user_text: str = "") -> So
         payload = _payload(call)
         if payload is None:
             continue
-        if call.name == PAGE_TOOL:
+        if _is_connector(call, payload):
+            add(_connector(call, payload))
+        elif call.name == PAGE_TOOL:
             add(_web(payload, str(payload.get("content") or "").strip(), snippet=False))
         elif call.name == SEARCH_TOOL:
             for item in payload.get("results") or ():
@@ -1248,6 +1326,16 @@ class GroundingReport:
         return tuple(item for item in self.figures if item.status is FigureStatus.UNVERIFIED)
 
     @property
+    def repairable(self) -> tuple[FigureCheck, ...]:
+        """Unverified figures a rewrite could fix.
+
+        A figure found in an untrusted connector is not one of them: the
+        reader's own tool said it, and the honest outcome is the label, not a
+        rewrite that drops it.
+        """
+        return tuple(item for item in self.unverified if item.reason != UNTRUSTED_CONNECTOR)
+
+    @property
     def stale(self) -> tuple[FigureCheck, ...]:
         return tuple(item for item in self.figures if item.status is FigureStatus.STALE)
 
@@ -1335,7 +1423,9 @@ def _decide(
             continue
         when = line.when
         stale = False
-        if source.kind is SourceKind.STRUCTURED:
+        # A connector's text is dated like a page's, trusted or not: its
+        # lines are prose a service wrote, not rows stamped with a session.
+        if source.kind is SourceKind.STRUCTURED and source.role != "connector":
             if when is None:
                 ok = not named and not current
             elif source.role == "statement" and _PRICED_NOW.search(folded_line):
@@ -1408,6 +1498,17 @@ def _decide(
         )
         return FigureCheck(**base, status=FigureStatus.UNVERIFIED, reason=reason)
     _, source, when, stale = min(candidates, key=lambda item: item[0])
+    if source.kind is SourceKind.CONNECTOR:
+        # Found, and not vouched for: labelled, and the evidence it rests on is
+        # kept so the ledger can say where the number came from.
+        return FigureCheck(
+            **base,
+            status=FigureStatus.UNVERIFIED,
+            reason=UNTRUSTED_CONNECTOR,
+            evidence_id=source.evidence.evidence_id,
+            source_date=when,
+            kind=source.kind,
+        )
     if source.kind is not SourceKind.STRUCTURED and named and _contradicts_market(
         figure, named, sources
     ):
@@ -1498,6 +1599,14 @@ _UNVERIFIED_NOTE = {
     "en": "Figures labelled [{label}] are not in this turn's tool data, or "
     "don't match the time the sentence refers to.",
 }
+#: The note beside a figure found only in a connector the reader attached: the
+#: number is labelled, not repaired, and the note says whose data it is.
+_CONNECTOR_NOTE = {
+    "vi": "Số có nhãn [{label}] lấy từ kết nối {names}: dữ liệu do dịch vụ đó "
+    "trả về, hệ thống chưa kiểm chứng.",
+    "en": "Figures labelled [{label}] come from the connector {names}: data that "
+    "service returned, which the system has not verified.",
+}
 _STALE_NOTE = {
     "vi": "Số có nhãn {label} lấy từ nguồn đã cũ: trang web đăng hơn {web_days} "
     "ngày, hoặc tin hơn {news_days} ngày trước hôm nay.",
@@ -1531,7 +1640,7 @@ def annotate(report: GroundingReport, *, cite: bool = True) -> str:
     order: list[str] = []
     shown: dict[str, str] = {}
     for figure in report.figures:
-        if not cite or not figure.evidence_id:
+        if not cite or not figure.evidence_id or figure.status is FigureStatus.UNVERIFIED:
             continue
         address = key[figure.evidence_id]
         if address not in order:
@@ -1565,8 +1674,22 @@ def annotate(report: GroundingReport, *, cite: bool = True) -> str:
                 for index, address in enumerate(order, start=1)
             )
         )
-    if report.unverified:
+    if report.repairable:
         footer.append(_UNVERIFIED_NOTE[lang].format(label=UNVERIFIED_LABEL[lang]))
+    from_connectors = sorted(
+        {
+            by_id[figure.evidence_id].evidence.publisher or ""
+            for figure in report.unverified
+            if figure.reason == UNTRUSTED_CONNECTOR and figure.evidence_id in by_id
+        }
+    )
+    if from_connectors:
+        footer.append(
+            _CONNECTOR_NOTE[lang].format(
+                label=UNVERIFIED_LABEL[lang],
+                names=", ".join(name for name in from_connectors if name),
+            )
+        )
     if report.stale and cite:
         footer.append(
             _STALE_NOTE[lang].format(
@@ -1690,7 +1813,7 @@ def repair_note(report: GroundingReport) -> str:
     why_map = _REPAIR_WHY[lang]
     strings = _REPAIR_STRINGS[lang]
     items = []
-    for figure in report.unverified[:MAX_REPAIR_ITEMS]:
+    for figure in report.repairable[:MAX_REPAIR_ITEMS]:
         reason = figure.reason or ""
         if reason.startswith("wrong_weekday:"):
             vi_name = reason.split(":", 1)[1]
@@ -1700,7 +1823,7 @@ def repair_note(report: GroundingReport) -> str:
             why = why_map.get(reason, why_map["default"])
         in_sentence = strings["in_sentence"].format(line=figure.line.strip()[:200])
         items.append(f'- "{figure.text}" ({why}) — {in_sentence}')
-    more = len(report.unverified) - MAX_REPAIR_ITEMS
+    more = len(report.repairable) - MAX_REPAIR_ITEMS
     if more > 0:
         items.append(strings["more_items"].format(more=more))
     latest = [
@@ -1746,10 +1869,24 @@ def to_ledger(report: GroundingReport, *, as_of: datetime) -> ClaimLedger:
                     if figure.evidence_id and verdict is not VerificationVerdict.UNSUPPORTED
                     else ()
                 ),
+                # Unsupported, and still traceable: the connector result the
+                # figure was read from, which is not the same as backing it.
+                invalidation_text=(
+                    f"{UNTRUSTED_CONNECTOR}:{figure.evidence_id}"
+                    if figure.reason == UNTRUSTED_CONNECTOR and figure.evidence_id
+                    else None
+                ),
                 unit=figure.unit,
             )
         )
     cited = {claim.supporting_evidence_ids[0] for claim in claims if claim.supporting_evidence_ids}
+    # Every connector result this Turn read is recorded, cited or not: which
+    # connector, which tool and when it answered are in the evidence itself.
+    cited |= {
+        item.evidence.evidence_id
+        for item in report.sources.items
+        if item.role == "connector"
+    }
     return ClaimLedger(
         version=LEDGER_VERSION,
         policy_version=POLICY_VERSION,

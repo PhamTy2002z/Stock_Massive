@@ -43,7 +43,9 @@ import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from typing import Annotated
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict
 
 from fastapi import (
     APIRouter,
@@ -606,6 +608,7 @@ async def create_turn(
             summarised_turns=0 if summary is None else summary.summarised_turns,
             retry_of_turn_id=payload.retry_of_turn_id,
             attachments=attachments,
+            client_capabilities=payload.client_capabilities,
         )
     except TurnPayloadConflict as conflict:
         raise HTTPException(
@@ -983,6 +986,45 @@ async def cancel_turn(
     if record is None:
         raise HTTPException(status_code=404, detail="Turn not found")
     return TurnResponse(**_turn(record))
+
+
+class ApprovalDecision(BaseModel):
+    """The reader's answer to one ``approval.requested`` card."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["allow_once", "always", "deny"]
+
+
+@router.post("/turns/{turn_id}/approvals/{call_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def answer_approval(
+    turn_id: uuid.UUID,
+    call_id: str,
+    payload: ApprovalDecision,
+    current_user: CurrentUser,
+) -> Response:
+    """Answer one waiting connector call. 404 when nothing of this user's waits.
+
+    One call only: two cards in one round are answered one by one. ``always`` is
+    refused (409) for a tool that can only be approved once at a time — a write.
+    """
+    from src.connectors.approvals import hub
+
+    try:
+        answered = hub.resolve(
+            user_id=current_user.id,
+            turn_id=turn_id,
+            call_id=call_id,
+            decision=payload.decision,
+        )
+    except PermissionError as refused:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"reason": "approve_once_only", "message": str(refused)},
+        ) from refused
+    if not answered:
+        raise HTTPException(status_code=404, detail="Nothing is waiting for that approval")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 __all__ = ["router", "desk", "history_of", "streaming_user_id"]

@@ -38,6 +38,7 @@ import {
   readToolCalls,
 } from "./read-content"
 import type {
+  ApprovalRequest,
   ProgressPart,
   QuestionPart,
   SnapshotData,
@@ -114,6 +115,14 @@ export interface LiveTurn {
    */
   question: QuestionPart | null
   /**
+   * Connector calls waiting for the reader's answer, oldest first.
+   *
+   * Added by `approval.requested`, removed by `approval.resolved`, replaced
+   * wholesale by a snapshot (which restates what still waits) and emptied when
+   * the Turn ends — a settled Turn has nothing left to wait on.
+   */
+  approvals: ApprovalRequest[]
+  /**
    * How long the Turn has been running, as the backend last reported it.
    *
    * The backend's number rather than a timer this tab started, so a reader who
@@ -155,6 +164,7 @@ export const IDLE: LiveTurn = {
   thoughts: [],
   progress: [],
   question: null,
+  approvals: [],
   elapsedMs: 0,
   terminalReason: null,
   messageId: null,
@@ -242,6 +252,7 @@ export function liveTurnReducer(state: LiveTurn, action: LiveTurnAction): LiveTu
         : {
             ...state,
             phase: phaseForStatus(action.status, state.text.length > 0),
+            approvals: [],
             terminalReason: action.terminalReason,
             messageId: action.messageId,
             needsResync: false,
@@ -312,6 +323,23 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
       return question === null ? advanced : { ...advanced, question }
     }
 
+    case "approval.requested": {
+      const card = readApproval(event.data)
+      if (card === null) return advanced
+      return {
+        ...advanced,
+        approvals: [...state.approvals.filter((one) => one.call_id !== card.call_id), card],
+      }
+    }
+
+    case "approval.resolved": {
+      const callId = event.data.call_id
+      return {
+        ...advanced,
+        approvals: state.approvals.filter((one) => one.call_id !== callId),
+      }
+    }
+
     default: {
       const phase = TERMINAL_PHASE[event.type]
       return phase === undefined
@@ -319,6 +347,7 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
         : {
             ...advanced,
             phase,
+            approvals: [],
             terminalReason: (event.data.terminal_reason as string | null) ?? null,
             messageId: (event.data.message_id as number | null) ?? null,
             // The final figure, so the line stops counting at what the Turn
@@ -330,6 +359,34 @@ function applyEvent(state: LiveTurn, event: TurnEvent): LiveTurn {
           }
     }
   }
+}
+
+/**
+ * One approval card off the wire, or null when it cannot be drawn.
+ *
+ * Defensive the way `read-content` is: no call id means nothing to answer, and
+ * an effect this client does not know is drawn as a write — the stricter card.
+ */
+export function readApproval(raw: unknown): ApprovalRequest | null {
+  if (raw === null || typeof raw !== "object") return null
+  const data = raw as Record<string, unknown>
+  if (typeof data.call_id !== "string" || data.call_id === "") return null
+  const text = (value: unknown) => (typeof value === "string" ? value : "")
+  return {
+    call_id: data.call_id,
+    connector: text(data.connector),
+    tool: text(data.tool),
+    display: text(data.display) || text(data.tool),
+    effect: data.effect === "read" ? "read" : "write",
+    arguments_preview: text(data.arguments_preview),
+    can_always: data.can_always === true,
+    expires_at: typeof data.expires_at === "string" ? data.expires_at : null,
+  }
+}
+
+function readApprovals(raw: unknown): ApprovalRequest[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map(readApproval).filter((card): card is ApprovalRequest => card !== null)
 }
 
 /** The trail in the order it happened, which is the parts' own order. */
@@ -372,6 +429,9 @@ function fromSnapshot(state: LiveTurn, event: TurnEvent): LiveTurn {
     // read out of a draft — and a reader holding a card must not lose it to a
     // reconnect.
     question: readQuestion(data.question, "pending") ?? state.question,
+    // Replaced, not merged: the snapshot is what still waits. A terminal one
+    // waits on nothing whatever it says.
+    approvals: terminal ? [] : readApprovals(data.approvals),
     elapsedMs: typeof data.elapsed_ms === "number" ? data.elapsed_ms : state.elapsedMs,
     terminalReason: data.terminal_reason ?? null,
     // A terminal snapshot names the message that replaces this draft, exactly

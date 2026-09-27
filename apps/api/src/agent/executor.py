@@ -79,7 +79,7 @@ import inspect
 import json
 import logging
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -173,6 +173,24 @@ MAX_EXTERNAL_CALLS_PER_ROUND = 16
 #: both of those hold however cheap the individual read is.
 MAX_STORE_CALLS_PER_ROUND = 32
 
+#: The on-demand connector pair routes a call through this one name. Named here
+#: rather than imported: the executor does not depend on the connectors package,
+#: it only refuses to treat the envelope as the tool.
+CONNECTOR_CALL_TOOL = "call_connector_tool"
+
+#: What an approver may answer. Only the first two let the call run.
+APPROVED = frozenset({"allow_once", "always"})
+_APPROVAL_TEXT = {
+    "deny": "The person declined this call, so it was not run. Do not ask again in this answer.",
+    "timeout": "No one approved this call within five minutes, so it was not run.",
+    "unsupported": (
+        "The reader's app cannot show approval requests, so this call was not run. "
+        "Say what you would have looked up and let them approve it in the app."
+    ),
+    "connector_off": "The connector was switched off or removed while this call waited.",
+    "cancelled": "The reader stopped this turn while this call waited for approval.",
+}
+
 Mode = Literal["parallel", "sequential"]
 Segment = tuple[Mode, tuple["ToolCall", ...]]
 TraceWriter = Callable[[dict[str, Any]], Any]
@@ -229,6 +247,11 @@ class ExecutionOutcome:
 
 ToolDeclaration = registry.ToolEntry | registry.ResolvedTool
 ToolLookup = Callable[[str], ToolDeclaration | None]
+#: Asks a person about one call whose policy is ``ask``, and returns what they
+#: decided — or why nobody could (``timeout``, ``unsupported`` …).
+Approver = Callable[
+    ["ToolCall", ToolDeclaration, Mapping[str, Any]], Awaitable[str]
+]
 
 
 def plan_segments(
@@ -282,6 +305,95 @@ class ToolExecutor:
     #: same call issued again runs: the model has been told today's date and
     #: still wants that year, and only the question could have said it was wrong.
     _year_refused: set[str] = field(default_factory=set)
+    #: Present when this Turn has somewhere to ask a person. Absent, an ``ask``
+    #: policy refuses exactly as it always has.
+    approver: Approver | None = None
+    #: What the approver answered, by call id, for this executor's batches.
+    approvals: dict[str, str] = field(default_factory=dict)
+
+    def _unwrap(self, call: ToolCall) -> ToolCall | ToolResult:
+        """The connector tool a ``call_connector_tool`` envelope names.
+
+        Every check downstream — schema, permission, approval, the escalation
+        rule — then applies to the inner tool, which is the one that runs. Only a
+        tool this Turn's surface holds as hidden may be named: the envelope is a
+        way to reach a connector tool, not a second door to every tool.
+        """
+        if call.name != CONNECTOR_CALL_TOOL:
+            return call
+        try:
+            outer = _parse_arguments(call.arguments)
+        except ValueError as exc:
+            return self._refused(call, INVALID_ARGUMENTS, str(exc))
+        inner = str(outer.get("tool") or "").strip()
+        hidden = self.surface.hidden_names if self.surface is not None else frozenset()
+        if inner not in hidden:
+            return self._refused(
+                call,
+                UNKNOWN_TOOL,
+                f"No connector tool named {inner or '(blank)'} exists; search for one first.",
+            )
+        raw = outer.get("arguments")
+        arguments = raw if isinstance(raw, (str, Mapping)) or raw is None else json.dumps(raw)
+        return ToolCall(id=call.id, name=inner, arguments=arguments)
+
+    @staticmethod
+    def _refused(call: ToolCall, error: str, text: str) -> ToolResult:
+        return ToolResult(
+            call_id=call.id,
+            tool_name=call.name,
+            ok=False,
+            error=error,
+            text=text,
+            dispatched=False,
+        )
+
+    async def approve(self, calls: Sequence[ToolCall]) -> None:
+        """Ask about every ``ask`` call of a batch, all at once, before it runs.
+
+        Separate from :meth:`run` so the caller can keep the wait for a person
+        outside the round's own timeout and outside the Turn's wall clock. Each
+        call is asked about on its own and answered on its own. A write that the
+        escalation rule would refuse anyway is not put to the person: approving
+        it would change nothing.
+        """
+        if self.approver is None:
+            return
+        asks: list[tuple[str, ToolCall, ToolDeclaration, Mapping[str, Any]]] = []
+        for original in calls:
+            call = self._unwrap(original)
+            if isinstance(call, ToolResult):
+                continue
+            entry = self._lookup(call.name)
+            if entry is None:
+                continue
+            try:
+                arguments = _parse_arguments(call.arguments)
+                validate_arguments(arguments, _argument_schema(entry))
+            except ValueError:
+                continue
+            decision = PermissionPolicy(entry.permission_rules).evaluate(
+                call.name, _permission_resource(entry, arguments)
+            )
+            if decision.action is not ToolPermission.ASK:
+                continue
+            if (
+                entry.effect is not registry.ToolEffect.READ
+                and self.permission_state.untrusted_content_seen
+            ):
+                continue
+            asks.append((original.id, call, entry, arguments))
+        if not asks:
+            return
+        answers = await asyncio.gather(
+            *(self.approver(call, entry, arguments) for _, call, entry, arguments in asks),
+            return_exceptions=True,
+        )
+        for (call_id, *_), answer in zip(asks, answers, strict=True):
+            if isinstance(answer, BaseException):
+                logger.warning("Approval for call %s failed: %s", call_id, answer)
+                answer = "unsupported"
+            self.approvals[call_id] = str(answer)
 
     def _lookup(self, name: str) -> ToolDeclaration | None:
         if self.surface is not None:
@@ -494,6 +606,10 @@ class ToolExecutor:
         )
 
     async def _dispatch(self, call: ToolCall) -> ToolResult:
+        unwrapped = self._unwrap(call)
+        if isinstance(unwrapped, ToolResult):
+            return await self._record(call, {}, unwrapped)
+        call = unwrapped
         entry = self._lookup(call.name)
         if entry is None:
             return await self._record(
@@ -511,9 +627,10 @@ class ToolExecutor:
         # A tool absent from the offered schema cannot become callable during
         # the task.  The live check may only revoke an offered capability; it
         # cannot widen the frozen surface after the model request was built.
+        overlay = self.surface is not None and call.name in self.surface.overlay_names
         if (
             isinstance(entry, registry.ResolvedTool) and not entry.available
-        ) or not self.availability(call.name):
+        ) or (not overlay and not self.availability(call.name)):
             return await self._record(
                 call,
                 {},
@@ -563,7 +680,9 @@ class ToolExecutor:
         permission = PermissionPolicy(entry.permission_rules).evaluate(
             call.name, resource
         )
-        refusal = _permission_refusal(call.name, permission)
+        refusal = _permission_refusal(
+            call.name, permission, approval=self.approvals.get(call.id)
+        )
         if refusal is not None:
             error, text = refusal
             return await self._record(
@@ -908,13 +1027,22 @@ def _permission_resource(
 
 
 def _permission_refusal(
-    name: str, decision: PermissionDecision
+    name: str, decision: PermissionDecision, *, approval: str | None = None
 ) -> tuple[str, str] | None:
-    """Typed policy outcome; approval is not collapsed into denial."""
+    """Typed policy outcome; approval is not collapsed into denial.
+
+    ``approval`` is what a person answered for this very call. Every answer that
+    is not a yes keeps the code ``approval_required`` — the route did not close,
+    the person did not open it — and says which of the ways it went.
+    """
 
     if decision.action is ToolPermission.ALLOW:
         return None
     if decision.action is ToolPermission.ASK:
+        if approval in APPROVED:
+            return None
+        if approval in _APPROVAL_TEXT:
+            return APPROVAL_REQUIRED, f"{name}: {_APPROVAL_TEXT[approval]}"
         return (
             APPROVAL_REQUIRED,
             f"{name} needs a person's approval for this resource, and no approval "
@@ -965,6 +1093,9 @@ def _normalize(payload: Any) -> str:
 
 __all__ = [
     "APPROVAL_REQUIRED",
+    "APPROVED",
+    "CONNECTOR_CALL_TOOL",
+    "Approver",
     "AUTHORIZATION_DENIED",
     "BLOCKED_CALL",
     "CANCELLED_CALL",

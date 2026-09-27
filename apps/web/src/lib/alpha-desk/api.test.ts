@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AlphaRefusalError } from "@/lib/alpha"
 
 import {
+  answerApproval,
   answerQuestion,
   attachmentUrl,
   createTurn,
@@ -305,5 +306,26 @@ describe("resolving one question card", () => {
 describe("where an attachment's bytes are read from", () => {
   it("is the proxy path, escaped", () => {
     expect(attachmentUrl("a b")).toBe("/api/alpha-desk/attachments/a%20b")
+  })
+})
+
+describe("connector approvals", () => {
+  it("declares that this client draws approval cards on every Turn", async () => {
+    fetchMock.mockResolvedValue(json({ id: "t-1", created: true }))
+
+    await createTurn({ threadId: "thread-1", turnId: newTurnId(), text: "VCB?" })
+
+    expect(sentBody().client_capabilities).toEqual(["approvals"])
+  })
+
+  it("posts the reader's decision to the Turn's approval path", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+
+    await answerApproval("turn 1", "call/1", "always")
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe("/api/alpha-desk/turns/turn%201/approvals/call%2F1")
+    expect(init.method).toBe("POST")
+    expect(JSON.parse(init.body as string)).toEqual({ decision: "always" })
   })
 })

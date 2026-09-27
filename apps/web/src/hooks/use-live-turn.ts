@@ -48,6 +48,8 @@ const EVENT_TYPES: TurnEventType[] = [
   "tool.call",
   "part.progress",
   "part.question",
+  "approval.requested",
+  "approval.resolved",
   "turn.completed",
   "turn.incomplete",
   "turn.failed",
