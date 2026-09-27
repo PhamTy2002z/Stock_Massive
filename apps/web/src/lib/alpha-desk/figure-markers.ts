@@ -5,7 +5,10 @@
  * writes the verdict beside it, in the text itself (`evidence/grounding.py` in
  * the API): `76.500 đồng [1 · phiên 25/09/2026]` for a figure with a dated
  * source, `[2 · 07/01/2026 · nguồn cũ]` for one resting on an old page, and
- * `[chưa kiểm chứng]` for one nothing backs. The text is the canonical record —
+ * `[chưa kiểm chứng]` for one nothing backs. An English answer carries the same
+ * labels in English (`stale source`, `[unverified]`, `**Sources**`): the host
+ * writes them in the answer's own language, and stored answers keep whichever
+ * they were written with, so both sets are read. The text is the canonical record —
  * it is what a reopened Thread, a copy and the next Turn all read — so the
  * surface does not receive a second structure to keep in step with it. It reads
  * the labels back out of the prose.
@@ -19,22 +22,34 @@
  * itself, from the characters the pattern matched, and never parses them.
  */
 
-/** A label the host writes: `[n · date…]` or `[chưa kiểm chứng]`. */
-export const MARKER = /\[(?:(\d{1,3}) · ([^\]\n]{1,80})|(chưa kiểm chứng))\]/g
+/** A label the host writes: `[n · date…]` or `[chưa kiểm chứng]` / `[unverified]`. */
+export const MARKER = /\[(?:(\d{1,3}) · ([^\]\n]{1,80})|(chưa kiểm chứng|unverified))\]/g
 
-export const STALE_LABEL = "nguồn cũ"
-export const UNVERIFIED_LABEL = "chưa kiểm chứng"
+/** How the host says a source is old, in each language it writes. */
+const STALE_LABELS = ["nguồn cũ", "stale source"] as const
+/** What a stale chip says on screen: interface copy, so English whatever the answer. */
+export const STALE_LABEL = "stale source"
 
 /** The note the host appends to explain the unverified label, which is no longer drawn. */
-const UNVERIFIED_NOTE = /\n*Số có nhãn \[chưa kiểm chứng\][^\n]*/g
+const UNVERIFIED_NOTE = /\n*(?:Số có nhãn \[chưa kiểm chứng\]|Figures labelled \[unverified\])[^\n]*/g
 
 /** The answer as the surface draws it: without the note about a label it does not show. */
 export function withoutUnverifiedNote(text: string): string {
   return text.replace(UNVERIFIED_NOTE, "")
 }
 
-/** The heading the host writes above the dated source list. */
-export const SOURCES_HEADING = "**Nguồn số liệu**"
+/** The heading the host writes above the dated source list, in either language. */
+const SOURCES_HEADINGS = ["**Nguồn số liệu**", "**Sources**"] as const
+
+/** Where the host's source list starts, or -1 when the answer has none. */
+function hostHeadingAt(text: string): { at: number; length: number } {
+  let found = { at: -1, length: 0 }
+  for (const heading of SOURCES_HEADINGS) {
+    const at = text.lastIndexOf(heading)
+    if (at > found.at) found = { at, length: heading.length }
+  }
+  return found
+}
 
 export type FigureKind = "cited" | "stale" | "unverified"
 
@@ -50,10 +65,10 @@ export interface FigureMarker {
 export function readMarker(text: string): FigureMarker | null {
   const match = new RegExp(`^${MARKER.source}$`).exec(text)
   if (!match) return null
-  if (match[3]) return { kind: "unverified", source: null, label: UNVERIFIED_LABEL }
+  if (match[3]) return { kind: "unverified", source: null, label: match[3] }
   const detail = match[2].trim()
   return {
-    kind: detail.endsWith(STALE_LABEL) ? "stale" : "cited",
+    kind: STALE_LABELS.some((label) => detail.endsWith(label)) ? "stale" : "cited",
     source: Number(match[1]),
     label: detail,
   }
@@ -63,13 +78,14 @@ export function readMarker(text: string): FigureMarker | null {
  * The dated source list the host appends, by citation number.
  *
  * Read from the text rather than sent alongside it, for the reason in the
- * module note. A line reads `- [1] Publisher — Title — đăng 20/08/2026 — <url>`.
+ * module note. A line reads `- [1] Publisher — Title — đăng 20/08/2026 — <url>`
+ * (`published 20/08/2026` in an English answer).
  */
 export function readSources(text: string): Map<number, string> {
   const sources = new Map<number, string>()
-  const at = text.lastIndexOf(SOURCES_HEADING)
+  const { at, length } = hostHeadingAt(text)
   if (at === -1) return sources
-  for (const line of text.slice(at + SOURCES_HEADING.length).split("\n")) {
+  for (const line of text.slice(at + length).split("\n")) {
     const match = /^(?:- )?\[(\d{1,3})\] (.+)$/.exec(line.trim())
     if (match) sources.set(Number(match[1]), match[2].replace(/\s*—\s*<[^>]+>\s*$/, ""))
   }
@@ -83,11 +99,12 @@ export interface CitedSource {
   url: string | null
 }
 
-/** A heading above a source list: the host's `**Nguồn số liệu**` or the model's own `Nguồn:`. */
-const SOURCES_LINE = /^(?:#{1,4} *)?(?:\*\*)?Nguồn(?: số liệu| tham khảo)?:?(?:\*\*)?:? *$/i
+/** A heading above a source list: the host's `**Nguồn số liệu**` / `**Sources**` or the model's own `Nguồn:` / `Sources:`. */
+const SOURCES_LINE =
+  /^(?:#{1,4} *)?(?:\*\*)?(?:Nguồn(?: số liệu| tham khảo)?|(?:Data )?Sources?|References?):?(?:\*\*)?:? *$/i
 const SOURCE_ENTRY = /^(?:[-*] )?\[(\d{1,3})\] (.+)$/
 /** The host's notes about its labels, which sit among the closing lists. */
-const LABEL_NOTE = /^Số có nhãn /
+const LABEL_NOTE = /^(?:Số có nhãn|Figures labelled) /
 
 /**
  * The answer without the source lists it ends with, and those lists' lines.
@@ -111,7 +128,7 @@ export function splitSources(text: string): { body: string; sources: CitedSource
   // The host's list is built from the evidence itself; one the model wrote says
   // the same sources in other words, so it is read only when the host wrote none.
   let tail = lines.slice(cut)
-  const host = tail.findIndex((line) => line.trim() === SOURCES_HEADING)
+  const host = tail.findIndex((line) => (SOURCES_HEADINGS as readonly string[]).includes(line.trim()))
   if (host !== -1) tail = tail.slice(host)
 
   const seen = new Set<string>()
@@ -224,7 +241,7 @@ export function splitMarkers(value: string, sources: Map<number, string> = new M
 
 function chip(marker: FigureMarker, sources: Map<number, string>): ElementNode {
   const source = marker.source === null ? undefined : sources.get(marker.source)
-  const title = [source ? `[${marker.source}] ${source}` : `Nguồn [${marker.source}]`, marker.label]
+  const title = [source ? `[${marker.source}] ${source}` : `Source [${marker.source}]`, marker.label]
     .filter(Boolean)
     .join(" · ")
   const text = STALE_LABEL

@@ -120,13 +120,13 @@ describe("the answer's prose", () => {
     )
 
     expect(screen.getByRole("table")).toBeInTheDocument()
-    expect(screen.getByRole("region", { name: "Bảng trong câu trả lời" })).toHaveAttribute(
+    expect(screen.getByRole("region", { name: "Table in the answer" })).toHaveAttribute(
       "tabindex",
       "0",
     )
     expect(screen.getByRole("columnheader", { name: "Mã" })).toHaveClass("border-b")
     expect(screen.getByRole("columnheader", { name: "Giá" })).toHaveClass("text-left")
-    expect(screen.getByRole("button", { name: "Sao chép bảng" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Copy table" })).toBeInTheDocument()
   })
 
   it("renders fenced content as a copyable code surface", () => {
@@ -136,9 +136,9 @@ describe("the answer's prose", () => {
       />,
     )
 
-    const codeBlock = screen.getByLabelText("Khối mã")
+    const codeBlock = screen.getByLabelText("Code block")
     expect(codeBlock.parentElement).toHaveClass("rounded-card", "bg-surface-raised")
-    expect(screen.getByRole("button", { name: "Sao chép khối mã" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Copy code block" })).toBeInTheDocument()
   })
 
   it("copies a table as tab-separated data and a code block as plain text", async () => {
@@ -151,15 +151,15 @@ describe("the answer's prose", () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Sao chép bảng" }))
-    expect(await screen.findByRole("button", { name: "Đã sao chép bảng" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Copy table" }))
+    expect(await screen.findByRole("button", { name: "Table copied" })).toBeInTheDocument()
     expect(writeText).toHaveBeenLastCalledWith("Mã\tGiá\nFPT\t100")
     expect(screen.getByRole("columnheader", { name: "Giá" })).toHaveClass("text-right")
     expect(screen.getByRole("cell", { name: "100" })).toHaveClass("text-right")
 
-    fireEvent.click(screen.getByRole("button", { name: "Sao chép khối mã" }))
+    fireEvent.click(screen.getByRole("button", { name: "Copy code block" }))
     expect(
-      await screen.findByRole("button", { name: "Đã sao chép khối mã" }),
+      await screen.findByRole("button", { name: "Code block copied" }),
     ).toBeInTheDocument()
     expect(writeText).toHaveBeenLastCalledWith("Financial Data\n  ↓\nAI Intent")
   })
@@ -200,11 +200,11 @@ describe("the tool calls behind an answer", () => {
     )
 
     // A finished Turn keeps its work folded away; the reader opens it.
-    fireEvent.click(screen.getByRole("button", { name: /Đã làm việc trong/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Worked for/ }))
 
     // Two calls in one round, so the timeline groups them under a count and
     // lists each by the sentence the backend wrote — never one it composed.
-    expect(screen.getByText("Đã chạy 2 truy vấn")).toBeInTheDocument()
+    expect(screen.getByText("Ran 2 queries")).toBeInTheDocument()
     expect(screen.getByText("Đã tìm trên web")).toBeInTheDocument()
     expect(screen.getByText("Không mở được trang")).toBeInTheDocument()
     // A call that failed must not read as a call that found nothing.
@@ -214,8 +214,8 @@ describe("the tool calls behind an answer", () => {
   it("draws no timeline at all on an answer that used no tool and said nothing on the way", () => {
     render(<AssistantMessage view={view()} />)
 
-    expect(screen.queryByText(/Đã làm việc trong/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/Đã chạy/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Worked for/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Ran /)).not.toBeInTheDocument()
   })
 
   it("shows the work open while the Turn is still running", () => {
@@ -223,7 +223,7 @@ describe("the tool calls behind an answer", () => {
 
     // Open by default while running, because the point of it is to show the
     // reader that something is happening rather than to be discoverable.
-    expect(screen.getByText("Đang làm việc…")).toBeInTheDocument()
+    expect(screen.getByText("Working…")).toBeInTheDocument()
     expect(screen.getByText("Đang tìm trên web")).toBeInTheDocument()
   })
 
@@ -244,7 +244,7 @@ describe("the tool calls behind an answer", () => {
 
     // Folded away rather than absent: the rows stay mounted so the fold can
     // animate, so what says "collapsed" is the disclosure state.
-    const toggle = screen.getByRole("button", { name: /Đã làm việc trong/ })
+    const toggle = screen.getByRole("button", { name: /Worked for/ })
     expect(toggle).toHaveAttribute("aria-expanded", "false")
 
     fireEvent.click(toggle)
@@ -272,13 +272,13 @@ describe("the Turn in flight", () => {
   it("shows that it is working before the first delta and the first call", () => {
     render(<DraftMessage entry={draft()} onRetry={vi.fn()} />)
 
-    expect(screen.getByRole("status")).toHaveTextContent("Đang chuẩn bị…")
+    expect(screen.getByRole("status")).toHaveTextContent("Preparing…")
   })
 
   it("drops that line as soon as anything has arrived", () => {
     render(<DraftMessage entry={draft({ text: "câu đầu" })} onRetry={vi.fn()} />)
 
-    expect(screen.queryByText("Đang chuẩn bị…")).not.toBeInTheDocument()
+    expect(screen.queryByText("Preparing…")).not.toBeInTheDocument()
     expect(answerText()).toContain("câu đầu")
   })
 
@@ -319,7 +319,7 @@ describe("the Turn in flight", () => {
   it("carries no flag control, because a flag names a message this draft has not got", () => {
     render(<DraftMessage entry={draft({ text: "một nửa" })} onRetry={vi.fn()} />)
 
-    expect(screen.queryByRole("button", { name: /báo lỗi/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /report a problem/i })).not.toBeInTheDocument()
   })
 })
 
@@ -331,7 +331,7 @@ describe("the positive verdict", () => {
     // offered, so the button is conditional on the handler and not on the
     // message.
     expect(
-      screen.queryByRole("button", { name: "Hữu ích" }),
+      screen.queryByRole("button", { name: "Helpful" }),
     ).not.toBeInTheDocument()
   })
 
@@ -341,7 +341,7 @@ describe("the positive verdict", () => {
       <AssistantMessage view={view()} messageId={7} onHelpful={onHelpful} />,
     )
 
-    const thumb = screen.getByRole("button", { name: "Hữu ích" })
+    const thumb = screen.getByRole("button", { name: "Helpful" })
     expect(thumb).toHaveAttribute("aria-pressed", "false")
     fireEvent.click(thumb)
     expect(onHelpful).toHaveBeenCalledWith(7, true)
@@ -356,7 +356,7 @@ describe("the positive verdict", () => {
         onHelpful={onHelpful}
       />,
     )
-    const marked = screen.getByRole("button", { name: "Hữu ích" })
+    const marked = screen.getByRole("button", { name: "Helpful" })
     expect(marked).toHaveAttribute("aria-pressed", "true")
     fireEvent.click(marked)
     expect(onHelpful).toHaveBeenLastCalledWith(7, false)
@@ -373,7 +373,7 @@ describe("the positive verdict", () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Chưa đúng" }))
+    fireEvent.click(screen.getByRole("button", { name: "Not correct" }))
     expect(
       screen.getByRole("button", { name: FLAG_COPY.action }),
     ).toBeInTheDocument()
@@ -381,7 +381,7 @@ describe("the positive verdict", () => {
     // The two verdicts are one question with two answers on this surface: the
     // reader who changes their mind should not be left with the dispute half
     // still open under a message they just approved.
-    fireEvent.click(screen.getByRole("button", { name: "Hữu ích" }))
+    fireEvent.click(screen.getByRole("button", { name: "Helpful" }))
     expect(
       screen.queryByRole("button", { name: FLAG_COPY.action }),
     ).not.toBeInTheDocument()
@@ -450,7 +450,7 @@ describe("the answer arriving", () => {
       />,
     )
 
-    expect(screen.getByRole("button", { name: /Đã làm việc trong/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Worked for/ })).toBeInTheDocument()
     expect(screen.queryByRole("status")).not.toBeInTheDocument()
   })
 
@@ -462,10 +462,10 @@ describe("the answer arriving", () => {
     try {
       render(<DraftMessage entry={draft({ toolCalls: [call()] })} onRetry={vi.fn()} />)
 
-      expect(screen.getByText("Đang làm việc…")).toBeInTheDocument()
+      expect(screen.getByText("Working…")).toBeInTheDocument()
 
       act(() => vi.advanceTimersByTime(3000))
-      expect(screen.getByText("Đang làm việc · 3s")).toBeInTheDocument()
+      expect(screen.getByText("Working · 3s")).toBeInTheDocument()
     } finally {
       vi.useRealTimers()
     }
@@ -489,7 +489,7 @@ describe("the answer arriving", () => {
         />,
       )
 
-      expect(screen.getByText("Đã làm việc trong 5s")).toBeInTheDocument()
+      expect(screen.getByText("Worked for 5s")).toBeInTheDocument()
     } finally {
       vi.useRealTimers()
     }

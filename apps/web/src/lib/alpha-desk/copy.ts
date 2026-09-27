@@ -7,10 +7,8 @@
  * across the components that render them, that rule would be enforced by
  * whoever happened to write the JSX.
  *
- * Application chrome is English and narration is Vietnamese. Almost everything
- * here is the system narrating, so almost everything here is Vietnamese; the
- * one exception is named where it appears, and it is a control label rather
- * than a sentence.
+ * The whole interface is English: chrome and narration alike. Only the
+ * answer text the backend writes keeps the language it was written in.
  */
 
 import type { FlagReason } from "./types"
@@ -24,11 +22,11 @@ import type { FlagReason } from "./types"
  * templates.
  */
 export const TOOL_CALL_COPY = {
-  label: "Công cụ đã dùng", running: "Đang chạy…", ok: "Xong", error: "Lỗi",
+  label: "Tools used", running: "Running…", ok: "Done", error: "Error",
   // A call written down before its effect ran, and one a permission rule
   // refused. Two more states, and each says something the other four cannot: a
   // pending call has not started yet, and a denied one never will.
-  pending: "Chờ chạy", denied: "Không được phép",
+  pending: "Queued", denied: "Not allowed",
 } as const
 
 /**
@@ -36,7 +34,7 @@ export const TOOL_CALL_COPY = {
  *
  * Keyed by the backend's stable `error` code. Every entry here shares one
  * property: the call was refused by our own ceilings and never dispatched, so
- * nothing outside this deployment was even asked. Calling that "Lỗi" tells the
+ * nothing outside this deployment was even asked. Calling that "Error" tells the
  * reader to retry a search engine that is working perfectly well.
  *
  * A code with no entry keeps `TOOL_CALL_COPY.error`, which is the right default:
@@ -44,10 +42,12 @@ export const TOOL_CALL_COPY = {
  * name no tool answers to — really is a failure.
  */
 const REFUSED_CALL_LABELS: Record<string, string> = {
-  external_budget_exhausted: "Hết lượt tra", round_fanout_exceeded: "Không chạy", halted_turn: "Đã dừng",
+  external_budget_exhausted: "Lookup limit reached", round_fanout_exceeded: "Not run", halted_turn: "Stopped",
   // Nothing ran and nothing will: the route is closed rather than broken, so the
   // word must not invite a retry.
-  permission_denied: "Không được phép",
+  permission_denied: "Not allowed",
+  // The source did not answer within the call's bound; it is not a broken page.
+  tool_call_timeout: "Timed out",
 }
 
 /** The word shown beside a call that did not succeed. */
@@ -67,44 +67,44 @@ export function toolCallErrorLabel(error: string | null): string {
  * its own, never a rewording of one that does.
  */
 export const QUESTION_COPY = {
-  region: "Câu hỏi cần bạn trả lời",
-  skip: "Bỏ qua",
-  answered: "Bạn đã chọn",
-  skipped: "Bạn đã bỏ qua — phần sau chạy theo giả định mặc định.",
-  superseded: "Bạn đã hỏi tiếp nên câu hỏi này không còn cần trả lời.",
-  failed: "Chưa ghi được lựa chọn này. Bạn thử lại giúp nhé.",
+  region: "A question for you",
+  skip: "Skip",
+  answered: "You chose",
+  skipped: "You skipped this — the rest runs on the default assumption.",
+  superseded: "You asked a follow-up, so this question no longer needs an answer.",
+  failed: "Couldn't save this choice. Please try again.",
 } as const
 
 const TERMINAL_REASONS: Record<string, string> = {
-  cancelled_by_user: "Bạn đã dừng lượt này.",
-  shutdown: "Hệ thống khởi động lại nên lượt này dừng giữa chừng.",
-  interrupted_restart: "Hệ thống khởi động lại nên lượt này dừng giữa chừng.",
-  turn_deadline: "Lượt này chạy quá thời gian cho phép nên dừng lại.",
-  turn_failed: "Lượt này gặp sự cố nên dừng lại.",
-  llm_call_timeout: "Mô hình không trả lời kịp nên lượt này dừng lại.",
-  answer_truncated: "Câu trả lời bị cắt giữa chừng vì vượt giới hạn độ dài cho một lượt.",
+  cancelled_by_user: "You stopped this turn.",
+  shutdown: "The system restarted, so this turn stopped partway.",
+  interrupted_restart: "The system restarted, so this turn stopped partway.",
+  turn_deadline: "This turn ran past its time limit and stopped.",
+  turn_failed: "This turn ran into a problem and stopped.",
+  llm_call_timeout: "The model didn't respond in time, so this turn stopped.",
+  answer_truncated: "The answer was cut off because it exceeded the length limit for one turn.",
   empty_answer:
-    "Tuyến mô hình không trả về câu trả lời nào cho lượt này. Bạn thử hỏi lại.",
-  deadline_expired: "Không kết nối kịp tới tuyến mô hình nên lượt này dừng lại.",
-  gateway_timeout: "Tuyến mô hình không phản hồi nên lượt này dừng lại.",
+    "The model route returned no answer for this turn. Try asking again.",
+  deadline_expired: "Couldn't reach the model route in time, so this turn stopped.",
+  gateway_timeout: "The model route didn't respond, so this turn stopped.",
   route_rate_limited:
-    "Tuyến mô hình đã dùng hết lượt gọi được cấp nên lượt này dừng lại. Chờ hạn mức được cấp lại rồi thử lại.",
-  route_error: "Tuyến mô hình gặp lỗi nên lượt này dừng lại.",
+    "The model route has used up its call allowance, so this turn stopped. Wait for the quota to reset, then try again.",
+  route_error: "The model route returned an error, so this turn stopped.",
   context_overflow:
-    "Cuộc hội thoại đã dài hơn mức tuyến mô hình nhận được nên lượt này dừng lại. Bạn thử mở luồng mới.",
+    "The conversation is longer than the model route accepts, so this turn stopped. Try starting a new thread.",
   output_cap_exceeded:
-    "Lượt này cần chỗ trả lời nhiều hơn mức tuyến mô hình cho phép nên dừng lại. Bạn thử hỏi hẹp hơn.",
-  content_policy_blocked: "Tuyến mô hình từ chối câu hỏi này nên lượt này dừng lại.",
+    "This turn needed more answer space than the model route allows, so it stopped. Try a narrower question.",
+  content_policy_blocked: "The model route declined this question, so this turn stopped.",
   model_unavailable:
-    "Tuyến mô hình không còn phục vụ mô hình đang cấu hình nên lượt này dừng lại.",
-  schema_rejected: "Tuyến mô hình không nhận được danh mục công cụ nên lượt này dừng lại.",
-  auth_unavailable: "Không kết nối được tới tuyến mô hình nên lượt này dừng lại.",
-  tool_timeout: "Một công cụ chạy quá thời gian nên lượt này dừng lại.",
-  model_refusal: "Mô hình đã từ chối trả lời câu hỏi này.",
-  user_input_too_large: "Câu hỏi vượt quá giới hạn độ dài cho một lượt.",
+    "The model route no longer serves the configured model, so this turn stopped.",
+  schema_rejected: "The model route didn't accept the tool catalog, so this turn stopped.",
+  auth_unavailable: "Couldn't connect to the model route, so this turn stopped.",
+  tool_timeout: "A tool ran past its time limit, so this turn stopped.",
+  model_refusal: "The model declined to answer this question.",
+  user_input_too_large: "The question exceeds the length limit for one turn.",
 }
 
-const UNNAMED_REASON = "Lượt này dừng trước khi hoàn tất."
+const UNNAMED_REASON = "This turn stopped before it finished."
 
 /** The sentence for a stable reason. Never the code, whatever the code is. */
 export function terminalSentence(reason: string | null): string {
@@ -119,9 +119,9 @@ export function terminalSentence(reason: string | null): string {
  * and the tab a picture files itself under are one feature, and a reader who
  * met it under three names would count three.
  *
- * **There is no "Lưu".** The design draws a save control beside the export one,
- * and there is no endpoint behind it — the sidebar's own "Báo cáo đã lưu" still
- * says "Sắp ra mắt". A button that swallowed the press would promise a reader
+ * **There is no "Save".** The design draws a save control beside the export one,
+ * and there is no endpoint behind it — the sidebar's own "Saved reports" still
+ * says "Coming soon". A button that swallowed the press would promise a reader
  * their work was kept, which is the one failure this surface cannot recover
  * from, so the control is absent rather than inert.
  */
@@ -141,10 +141,10 @@ export const SIGNAL_DESK_COPY = {
    * being on is a state the reader switched into, and it is the fact they will
    * check first if nothing arrives.
    */
-  emptyStatus: "Signal Desk đang bật",
-  emptyTitle: "Bảng phân tích sẽ hiện ở đây",
+  emptyStatus: "Signal Desk is on",
+  emptyTitle: "Your analysis board will appear here",
   emptyBody:
-    "Hỏi về một mã, một ngành hay cả thị trường — mỗi câu trả lời dựng một bảng có số liệu, nguồn và có thể xuất.",
+    "Ask about a ticker, a sector or the whole market — each answer builds a board with figures, sources and export.",
   /**
    * The Universe, said where a reader is about to name a symbol.
    *
@@ -159,9 +159,9 @@ export const SIGNAL_DESK_COPY = {
    * nothing teaches the reader that the product's links do not work, which
    * costs more than the list would have given them.
    */
-  emptyUniverseHint: "Hiện hỗ trợ 30 mã VN30 — sẽ mở rộng dần.",
+  emptyUniverseHint: "Currently covers the 30 VN30 tickers — more coming.",
   /** What the pane says with the desk off and no picture in the conversation. */
-  noDeskView: "Chưa có Signal Desk nào trong hội thoại này.",
+  noDeskView: "No Signal Desk in this conversation yet.",
   /**
    * The pane while a Signal Desk Turn is still running.
    *
@@ -169,7 +169,7 @@ export const SIGNAL_DESK_COPY = {
    * behind this — a picture standing under a new question reads as an answer to
    * it — so the line has to say plainly that one is being worked out.
    */
-  chartWorking: "Đang dựng biểu đồ từ bằng chứng…",
+  chartWorking: "Building the chart from evidence…",
   /**
    * The pane when the answer settled without a chart.
    *
@@ -177,9 +177,9 @@ export const SIGNAL_DESK_COPY = {
    * written in full in the column to the left; restating it here would be the
    * same explanation in two places, drifting apart at the first edit.
    */
-  chartAbsent: "Câu trả lời này không có biểu đồ đủ bằng chứng.",
+  chartAbsent: "This answer has no chart with enough evidence.",
   /** The pane when the chart could not be drawn at all. */
-  chartFailed: "Không dựng được biểu đồ cho câu trả lời này.",
+  chartFailed: "Couldn't build a chart for this answer.",
   /**
    * The line under the chart: how many sources it rests on, and as of when.
    *
@@ -188,13 +188,13 @@ export const SIGNAL_DESK_COPY = {
    * and how old it is.
    */
   chartProvenance: (sources: number, asOf: string) =>
-    `${sources} nguồn · tính đến ${asOf.slice(0, 16).replace("T", " ")}`,
+    `${sources} ${sources === 1 ? "source" : "sources"} · as of ${asOf.slice(0, 16).replace("T", " ")}`,
   chatMode: "Chat",
   toggle: "Signal Desk",
-  sources: "Nguồn",
+  sources: "Sources",
   deskEmptyHeadline: "Signal on your Desk",
-  blockNoData: "Phần này chưa có số liệu.",
-  blockAsTable: "Hiển thị dạng bảng — bản này chưa vẽ được biểu đồ.",
+  blockNoData: "No figures for this section yet.",
+  blockAsTable: "Shown as a table — this one couldn't be charted.",
 } as const
 
 
@@ -217,53 +217,49 @@ export const SIGNAL_DESK_COPY = {
  * asks for one would be teaching the reader to ask for a refusal.
  */
 export const SIGNAL_DESK_STARTERS = [
-  "Thanh khoản của VCB dồn về khung giờ nào trong phiên?",
-  "VCB đang ở đâu trong dải 52 tuần và lợi nhuận quý đi hướng nào?",
-  "Mã nào lợi nhuận quý tăng mạnh mà giá chưa theo?",
+  "Which hours of the session does VCB's liquidity concentrate in?",
+  "Where is VCB in its 52-week range, and which way is quarterly profit heading?",
+  "Which tickers grew quarterly profit strongly while the price hasn't followed?",
 ] as const
 
 /**
  * What the send control is called.
  *
- * Vietnamese, following the design: the composer is the one place in the shell
- * a first-time reader has to act rather than read, and a control they are meant
- * to reach for should not be the one thing on screen in another language.
- *
  * It is never drawn as text — the button is an arrow — so this is what a screen
  * reader announces and what the tooltip says. Both need to be the same word,
  * which is why it is named once here rather than typed twice at the button.
  */
-export const SEND_LABEL = "Gửi"
+export const SEND_LABEL = "Send"
 
 /**
  * What the stop control says once it has been pressed.
  *
  * Shared by the composer and status line so both places describe one state in
- * the product's Vietnamese-first operational language.
+ * the same words.
  */
-export const CANCELLING_LABEL = "Đang dừng…"
+export const CANCELLING_LABEL = "Stopping…"
 
 /**
  * Everything the attachment path says, including every way it says no.
  *
  * The refusals are named by the reason the backend sends rather than by status
  * code, and each one names the action left to take. A reader who sees "413" has
- * been told what happened to the request; a reader who sees "tệp này lớn hơn
- * 4 MB" has been told what to do next.
+ * been told what happened to the request; a reader who sees "this file is larger
+ * than 4 MB" has been told what to do next.
  *
  * `unknown` exists because a refusal this build has never heard of is still a
  * refusal, and a blank space beside a file that did not upload is the one
  * outcome with no reading at all.
  */
 export const ATTACHMENT_COPY = {
-  add: "Thêm tệp hoặc ảnh",
+  add: "Add file or image",
   addHint: "⌘U",
   /** On the button that takes one chip back off the question. */
-  remove: (filename: string) => `Bỏ ${filename}`,
-  uploading: "Đang nạp…",
-  failed: "Không nạp được",
+  remove: (filename: string) => `Remove ${filename}`,
+  uploading: "Uploading…",
+  failed: "Upload failed",
   /** Read by a screen reader for the row of chips above the field. */
-  region: "Tệp đính kèm của câu hỏi này",
+  region: "Attachments for this question",
   /**
    * Said once, beside the chips, when the route cannot read pictures.
    *
@@ -271,15 +267,15 @@ export const ATTACHMENT_COPY = {
    * model will be able to do with it, not a refusal. Saying nothing would let a
    * reader attach a chart and read a generic answer as a wrong answer.
    */
-  imagesNotRead: "Model của phiên này chưa đọc được ảnh — ảnh vẫn được lưu kèm câu hỏi.",
+  imagesNotRead: "This session's model can't read images yet — the image is still saved with the question.",
   refusals: {
-    file_too_large: "Tệp này lớn hơn mức cho phép. Hãy chọn tệp nhỏ hơn.",
-    media_type_not_allowed: "Chỉ nhận ảnh PNG, JPEG, WebP và tệp văn bản .txt, .csv.",
-    empty_file: "Tệp này rỗng.",
-    quota_rows: "Bạn đã lưu quá nhiều tệp. Hãy bỏ vài tệp cũ rồi thử lại.",
-    quota_bytes: "Dung lượng tệp đã lưu đã đầy. Hãy bỏ vài tệp cũ rồi thử lại.",
-    turn_image_budget: "Những ảnh này quá lớn để đi cùng một câu hỏi. Hãy bỏ một ảnh.",
-    unknown: "Không nạp được tệp này. Hãy thử lại.",
+    file_too_large: "This file is larger than allowed. Choose a smaller file.",
+    media_type_not_allowed: "Only PNG, JPEG and WebP images and .txt, .csv text files are accepted.",
+    empty_file: "This file is empty.",
+    quota_rows: "You've stored too many files. Remove a few old ones and try again.",
+    quota_bytes: "Your file storage is full. Remove a few old files and try again.",
+    turn_image_budget: "These images are too large to send with one question. Remove one.",
+    unknown: "Couldn't upload this file. Please try again.",
   },
 } as const
 
@@ -292,17 +288,17 @@ export const ATTACHMENT_COPY = {
  * sent, so the copy has to make "look before you attach" the obvious reading.
  */
 export const CAPTURE_COPY = {
-  /** The menu row. Not "chụp màn hình bảng giá" — it captures anything. */
-  row: "Chụp màn hình",
+  /** The menu row. Not "capture price board" — it captures anything. */
+  row: "Capture screen",
   /** The preview dialog's accessible name. */
-  title: "Xem lại ảnh chụp",
-  explain: "Xem lại trước khi đính kèm. Ảnh này sẽ được gửi tới model.",
-  accept: "Đính kèm",
-  discard: "Bỏ",
+  title: "Review capture",
+  explain: "Review before attaching. This image will be sent to the model.",
+  accept: "Attach",
+  discard: "Discard",
   /** Said on the row when the browser cannot capture at all. */
-  unsupported: "Trình duyệt này không cho chụp màn hình.",
+  unsupported: "This browser doesn't support screen capture.",
   /** The capture came back empty — a stream with no frame in it. */
-  failed: "Không chụp được. Hãy thử lại.",
+  failed: "Capture failed. Please try again.",
 } as const
 
 /** The message for one refusal reason, falling back to the honest generic one. */
@@ -317,7 +313,7 @@ export function attachmentRefusal(reason: string | null | undefined): string {
  * V1 has **no dispute workflow**. One action carries a
  * `message_id` and a reason label; it opens no ticket, notifies nobody and
  * suspends no account. So the acknowledgement states what was recorded and
- * stops there. A sentence like *"chúng tôi sẽ phản hồi"* would be a promise the
+ * stops there. A sentence like *"we will get back to you"* would be a promise the
  * system has no mechanism to keep, and the reader would be waiting for a reply
  * that is never coming — which is worse than an action that admits its limit.
  *
@@ -332,10 +328,10 @@ export function attachmentRefusal(reason: string | null | undefined): string {
  * wrong.
  */
 export const FLAG_REASON_LABELS: Record<FlagReason, string> = {
-  wrong_figure: "Số liệu sai",
-  overreach: "Kết luận đi quá dữ liệu",
-  wrongly_refused: "Từ chối trả lời không đúng",
-  other: "Lý do khác",
+  wrong_figure: "Wrong figure",
+  overreach: "Conclusion goes beyond the data",
+  wrongly_refused: "Wrongly refused to answer",
+  other: "Other reason",
 }
 
 /**
@@ -350,15 +346,15 @@ export const FLAG_REASONS = Object.keys(FLAG_REASON_LABELS) as FlagReason[]
 
 export const FLAG_COPY = {
   /** The control itself. Deliberately quiet: it sits under an answer, not in it. */
-  action: "Báo lỗi câu trả lời",
-  prompt: "Phần nào chưa đúng?",
+  action: "Report a problem with this answer",
+  prompt: "What's wrong?",
   /**
    * Said once the pair is written. It records, and it promises nothing —
    * no ticket number, no reply, no deadline.
    */
   acknowledged:
-    "Đã ghi nhận đánh dấu này. Nó được đọc khi rà soát chất lượng trả lời, và không mở yêu cầu xử lý nào.",
-  remove: "Bỏ đánh dấu",
+    "Flag recorded. It's read when answer quality is reviewed, and it doesn't open a support request.",
+  remove: "Remove flag",
   /**
    * Said when the write itself failed.
    *
@@ -367,5 +363,5 @@ export const FLAG_COPY = {
    * tell the reader their objection was recorded when it was not. Silence here
    * is the same lie, so a rejected write says so.
    */
-  failed: "Chưa ghi được đánh dấu. Bạn thử lại giúp nhé.",
+  failed: "Couldn't save the flag. Please try again.",
 } as const

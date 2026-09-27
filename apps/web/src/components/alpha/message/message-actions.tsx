@@ -53,7 +53,7 @@ export function MessageActions({
   const [justCopied, setJustCopied] = useState(false)
 
   // Mirrors `account-section.tsx`'s own copy feedback: the timer lives beside
-  // the state it clears, so a second click while the label is still "Đã chép"
+  // the state it clears, so a second click while the label is still "Copied"
   // simply restarts the same effect instead of racing an older timer.
   useEffect(() => {
     if (!justCopied) return
@@ -70,7 +70,7 @@ export function MessageActions({
     <div className={cn("flex gap-1", className)}>
       {onLike !== undefined && (
         <ActionButton
-          label="Hữu ích"
+          label="Helpful"
           onClick={onLike}
           pressed={liked}
           activeClassName="text-primary"
@@ -81,7 +81,7 @@ export function MessageActions({
       )}
 
       <ActionButton
-        label="Chưa đúng"
+        label="Not correct"
         onClick={onDislike}
         pressed={disliked}
         activeClassName="text-destructive"
@@ -90,15 +90,15 @@ export function MessageActions({
         <IncorrectIcon />
       </ActionButton>
 
-      <ActionButton label={justCopied ? "Đã chép" : "Sao chép"} onClick={handleCopy}>
+      <ActionButton label={justCopied ? "Copied" : "Copy"} onClick={handleCopy}>
         {justCopied ? <Check className="size-4" /> : <CopyIcon />}
       </ActionButton>
 
-      <ActionButton label="Chia sẻ" onClick={onShare}>
+      <ActionButton label="Share" onClick={onShare}>
         <Link2 className="size-4" strokeWidth={1.6} aria-hidden />
       </ActionButton>
 
-      <ActionButton label="Tải lại" onClick={onRegenerate}>
+      <ActionButton label="Regenerate" onClick={onRegenerate}>
         <ReloadIcon />
       </ActionButton>
     </div>

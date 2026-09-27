@@ -1,5 +1,6 @@
 "use client"
 
+import type { ReactNode } from "react"
 import {
   Check,
   ChevronDown,
@@ -22,12 +23,13 @@ import { useShell } from "./shell-state"
  * are drawn from the signed-in account and are inert: pressing one changes
  * nothing, and the surface does not pretend a switch happened.
  */
-export function AccountMenu() {
+/** `actions` sit on the footer row beside the account, like the sidebar's search. */
+export function AccountMenu({ actions }: { actions?: ReactNode }) {
   const { state, dispatch } = useShell()
   const { user, signOut, isSigningOut } = useAuth()
   const open = state.overlay === "account"
 
-  const name = user?.full_name?.trim() || user?.email?.split("@")[0] || "Tài khoản"
+  const name = user?.full_name?.trim() || user?.email?.split("@")[0] || "Account"
   const initial = name.charAt(0).toUpperCase()
 
   return (
@@ -49,25 +51,25 @@ export function AccountMenu() {
             hint="⇧⌘,"
             onClick={() => dispatch({ type: "overlay", overlay: "settings" })}
           >
-            Cài đặt
+            Settings
           </MenuItem>
-          {/* No language row. The product is Vietnamese-first by commitment and
-              carries no translation layer, so an entry here — disabled, with a
+          {/* No language row. The product commits to one language and carries
+              no translation layer, so an entry here — disabled, with a
               chevron promising a submenu — advertised a choice that does not
               exist and will not be built. */}
           <MenuItem icon={<HelpCircle className="size-[17px] text-ink-4" />} disabled>
-            Trợ giúp
+            Help
           </MenuItem>
 
           <MenuSeparator />
 
           {/* No plan row either. Its two halves resolved in opposite directions:
-              the allowance is now a real pane inside Cài đặt, two rows above,
+              the allowance is now a real pane inside Settings, two rows above,
               and the plan it would sit beside does not exist until entitlement
-              lands. A disabled row reading "hạn mức" beside a working one is
+              lands. A disabled row reading "allowance" beside a working one is
               worse than no row at all. */}
           <MenuItem icon={<Download className="size-[17px] text-ink-4" />} disabled>
-            Tải ứng dụng
+            Download app
           </MenuItem>
 
           <MenuSeparator />
@@ -77,11 +79,12 @@ export function AccountMenu() {
             onClick={() => signOut()}
             disabled={isSigningOut}
           >
-            {isSigningOut ? "Đang đăng xuất…" : "Đăng xuất"}
+            {isSigningOut ? "Signing out…" : "Sign out"}
           </MenuItem>
         </Menu>
       )}
 
+      <div className="flex items-center gap-0.5 pr-2.5">
       <button
         type="button"
         aria-expanded={open}
@@ -90,12 +93,14 @@ export function AccountMenu() {
           event.stopPropagation()
           dispatch({ type: "overlay", overlay: open ? null : "account" })
         }}
-        className="flex w-full items-center gap-2.5 px-4 py-3 text-left transition-colors hover:bg-foreground/[0.035]"
+        className="flex min-w-0 flex-1 items-center gap-2.5 px-4 py-3 text-left transition-colors hover:bg-foreground/[0.035]"
       >
         <Avatar initial={initial} className="size-[26px]" />
         <span className="min-w-0 flex-1 truncate text-control text-foreground">{name}</span>
         <ChevronDown className="size-4 shrink-0 text-ink-6" strokeWidth={1.7} />
       </button>
+      {actions}
+      </div>
     </div>
   )
 }

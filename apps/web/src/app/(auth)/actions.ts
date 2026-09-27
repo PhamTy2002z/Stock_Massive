@@ -5,19 +5,10 @@ import { redirect } from "next/navigation"
 import { AuthApiError, login, logout, register } from "@/lib/auth/api"
 import { clearSessionCookies, getRefreshToken, setSessionCookies } from "@/lib/auth/session"
 
+import { safeRedirectPath } from "./redirect-path"
+
 export interface AuthActionResult {
   error?: string
-}
-
-/**
- * Only relative paths are honoured, so a crafted `?next=https://evil.example`
- * cannot turn the login form into an open redirect.
- */
-function safeRedirectPath(next?: string | null): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//")) {
-    return "/"
-  }
-  return next
 }
 
 async function persist(tokens: {

@@ -19,6 +19,10 @@ import { cn } from "@/lib/utils"
  * while one is in flight — plenty of sites serve no usable icon at all, which
  * makes the fallback an ordinary outcome rather than an error.
  *
+ * `favicon` is the caller's word that the domain came from the backend's own
+ * tool results. A domain only the model's text named gets letters and no
+ * request (`answerSources` explains why).
+ *
  * Decorative in both surfaces that use it: the chip stack stands for "there
  * were sources" and the domain is spelled out in text beside the list version,
  * so an alt text here would only make a screen reader read every hostname
@@ -26,10 +30,13 @@ import { cn } from "@/lib/utils"
  */
 export function SourceIcon({
   source,
+  favicon,
   size = 19,
   className,
 }: {
   source: string
+  /** Whether the favicon proxy may be asked for `source`'s icon. */
+  favicon: boolean
   /** Diameter in px. 19 in the chip stack, 18 in the source list. */
   size?: number
   className?: string
@@ -52,7 +59,7 @@ export function SourceIcon({
     >
       {status !== "loaded" && initials(domain)}
       {/* A publisher's name ("KB Securities") has no favicon to ask for. */}
-      {HOSTNAME.test(domain) && status !== "failed" && (
+      {favicon && HOSTNAME.test(domain) && status !== "failed" && (
         <img
           src={`/api/alpha-desk/assets/favicon?domain=${encodeURIComponent(domain)}`}
           alt=""

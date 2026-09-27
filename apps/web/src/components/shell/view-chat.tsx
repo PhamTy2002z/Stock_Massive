@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { AlertCircle, Check, Copy, Pencil, RotateCcw, X } from "lucide-react"
 
 import { AssistantMessage } from "@/components/alpha/message/assistant-message"
@@ -12,6 +12,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { SIGNAL_DESK_COPY, SIGNAL_DESK_STARTERS } from "@/lib/alpha-desk/copy"
 import { attachmentUrl } from "@/lib/alpha-desk/api"
 import { pinStep } from "@/lib/alpha-desk/pin-question"
+import { motionReduced } from "@/lib/alpha-desk/preferences"
 import { questionBefore } from "@/lib/alpha-desk/transcript"
 import { isImageAttachment, type Attachment } from "@/lib/alpha-desk/types"
 import { greetingFor, plainGreeting } from "@/lib/greeting"
@@ -20,7 +21,7 @@ import Link from "next/link"
 import { cn } from "@/lib/utils"
 
 import { Composer } from "./composer"
-import { useDesk } from "./desk-state"
+import { useDesk, useDeskTranscript } from "./desk-state"
 import { IconButton } from "./primitives"
 import { useShell } from "./shell-state"
 
@@ -29,11 +30,22 @@ import { useShell } from "./shell-state"
  *
  * A browser can refuse — no permission, an insecure origin — and that is not
  * worth an error over text the reader can still select by hand. The button's
- * own "Đã chép" is optimistic for the same reason the question bubble's is.
+ * own "Copied" is optimistic for the same reason the question bubble's is.
  */
 function copyText(text: string): void {
   void navigator.clipboard?.writeText(text).catch(() => {})
 }
+
+/**
+ * An answer already in the history, redrawn only when it or its verdicts change.
+ *
+ * The transcript is rebuilt on every step of a streaming answer, and without
+ * this every earlier answer — its Markdown parsed again, its tables laid out
+ * again — re-rendered with it. `buildTranscript` keeps a history entry the same
+ * object while its message is, so the props here hold still for all of them
+ * but the one arriving.
+ */
+const HistoryAnswer = memo(AssistantMessage)
 
 /**
  * The question this answer answers, or nothing.
@@ -103,7 +115,7 @@ function Greeting() {
 
   return (
     <div className="flex items-center justify-center gap-3">
-      <VisgniteMark className="h-[26px] w-[17px]" />
+      <VisgniteMark className="h-[26px] w-[29px]" />
       <h2 className="min-w-0 font-serif text-[clamp(1.6rem,2.7vw,2.15rem)] font-normal leading-[1.1] tracking-[-0.01em] text-ink-display">
         {line}
       </h2>
@@ -135,7 +147,7 @@ function Greeting() {
 function DeskHeadline() {
   return (
     <div className="flex animate-vg-fade-in items-center justify-center gap-[0.8rem]">
-      <VisgniteMark className="h-[26px] w-[17px]" />
+      <VisgniteMark className="h-[26px] w-[29px]" />
       <h2 className="min-w-0 font-serif text-[2.2rem] font-light leading-[1.15] tracking-[-0.01em] text-ink-display [text-wrap:pretty]">
         {SIGNAL_DESK_COPY.deskEmptyHeadline}
       </h2>
@@ -145,8 +157,11 @@ function DeskHeadline() {
 
 export function ChatView() {
   const desk = useDesk()
+  const { entries } = useDeskTranscript()
   const { dispatch } = useShell()
   const container = useRef<HTMLDivElement>(null)
+  const content = useRef<HTMLDivElement>(null)
+  const hasTranscript = desk.threadId !== null || entries.length > 0
   const following = useRef(true)
   // The newest question, while it is held at the top of the viewport. Cleared by
   // any scroll the reader performs themselves, and by the spacer running out.
@@ -165,16 +180,40 @@ export function ChatView() {
   // the entry itself: a pending question and the committed one that replaces it
   // are two keys for one question, and re-anchoring on the swap would jump the
   // page a second time for nothing.
-  const questionCount = desk.entries.reduce(
+  const questionCount = entries.reduce(
     (total, entry) => (entry.kind === "user" ? total + 1 : total),
     0,
   )
   const asked = useRef(questionCount)
   const thread = useRef(desk.threadId)
-  const lastQuestionIndex = desk.entries.reduce(
+  const lastQuestionIndex = entries.reduce(
     (found, entry, index) => (entry.kind === "user" ? index : found),
     -1,
   )
+
+  // Stable across the stream, so a history answer's props do not change with
+  // every word of the one being written below it.
+  const entriesRef = useRef(entries)
+  entriesRef.current = entries
+  const { resend } = desk
+  const regenerate = useCallback(
+    // Regenerating an answer is asking its question again, so it goes out as
+    // the question rather than as a reference to the answer: `resend` already
+    // knows whether that is a retry of a Turn that ended badly or a fresh ask.
+    (messageId: number) => {
+      const asked = questionBefore(entriesRef.current, `message-${messageId}`)
+      if (asked !== null) resend(asked.text, asked.attachments)
+    },
+    [resend],
+  )
+  const share = useCallback(() => dispatch({ type: "overlay", overlay: "share" }), [dispatch])
+  const openSources = useCallback(
+    (messageId: number) => dispatch({ type: "open-sources", messageId }),
+    [dispatch],
+  )
+  const setAnchor = useCallback((element: HTMLDivElement | null) => {
+    if (element) anchor.current = element
+  }, [])
 
   /** Where the pinned question would sit, as an offset into the transcript. */
   const anchorOffset = useCallback(() => {
@@ -217,14 +256,20 @@ export function ChatView() {
   // question never appears at the bottom for a frame on its way to the top.
   useIsoLayoutEffect(() => {
     const element = container.current
-    if (!element) return
-
+    const continuingFirstQuestion = thread.current === null && asked.current > 0
     const switched = thread.current !== desk.threadId
     thread.current = desk.threadId
     const isNew = questionCount > asked.current
     asked.current = questionCount
+    if (!element) {
+      pinned.current = false
+      landing.current = false
+      following.current = true
+      setTailHeight(0)
+      return
+    }
 
-    if (switched) {
+    if (switched && !continuingFirstQuestion) {
       // Reopening a Thread lands at its end. The last answer is what the reader
       // came back for, not the question that produced it.
       pinned.current = false
@@ -278,34 +323,30 @@ export function ChatView() {
     scrollTo(element, plan.scroll)
   })
 
-  // The answer arriving. While a question is pinned the spacer gives back
-  // exactly the height the answer took, so the transcript does not move at all;
-  // when there is nothing left to give back, the bottom takes over.
-  useEffect(() => {
+  // Read actual layout: the timeline also changes height between React commits.
+  const syncLayout = useCallback(() => {
     const element = container.current
-    if (!element) return
-
-    // A pin still landing owns the spacer. Recomputing it here on the same
-    // commit would measure a DOM that does not carry the new spacer yet and ask
-    // for it twice over — a spacer of double the height, and a scrollbar that
-    // lurches before settling back.
-    if (landing.current) return
-
+    if (!element || landing.current) return
     if (tailHeight.current > 0) {
       const next = step().tail
       setTailHeight(next)
       if (next === 0) pinned.current = false
       return
     }
+    if (!pinned.current && following.current) element.scrollTop = element.scrollHeight
+  }, [step, setTailHeight])
 
-    if (pinned.current || !following.current) return
-    // Assigned rather than animated. A smooth scroll per delta turns a fast
-    // answer into a moving target, and it is motion nobody asked for.
-    element.scrollTop = element.scrollHeight
-    // Every event the live Turn applies produces a new projection, so this is
-    // one dependency for every way the transcript can get taller: a delta, a
-    // tool call joining the list, a status line under an answer that ended.
-  }, [desk.entries, step, setTailHeight])
+  useIsoLayoutEffect(() => {
+    syncLayout()
+  }, [entries, syncLayout])
+
+  useEffect(() => {
+    if (!container.current || !content.current || typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(syncLayout)
+    observer.observe(content.current)
+    observer.observe(container.current)
+    return () => observer.disconnect()
+  }, [hasTranscript, syncLayout])
 
   function onScroll() {
     const element = container.current
@@ -332,7 +373,7 @@ export function ChatView() {
   // fade-in also never sees the greeting. The transcript's own hooks above
   // still run — they all early-return on a null container ref — so React's
   // hook order stays stable across this branch.
-  if (desk.threadId === null && desk.entries.length === 0) {
+  if (desk.threadId === null && entries.length === 0) {
     // The desk's opening is the column the rest of the conversation happens in,
     // already at its width, with the composer already docked where it will
     // stay. The ordinary opening centres a greeting and a field together
@@ -384,10 +425,10 @@ export function ChatView() {
         onWheel={onUserScroll}
         onTouchMove={onUserScroll}
         onClick={() => dispatch({ type: "overlay", overlay: null })}
-        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-[190px] pt-2"
+        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none] px-5 pb-[190px] pt-2"
       >
-        <div className="mx-auto w-full max-w-[760px] space-y-7 py-5">
-          {desk.entries.map((entry, index) => {
+        <div ref={content} className="mx-auto w-full max-w-[760px] space-y-7 py-5">
+          {entries.map((entry, index) => {
             if (entry.kind === "user") {
               // Only the newest question is an anchor. `ref` is never cleared on
               // unmount: a pending question and the committed one that replaces
@@ -396,24 +437,19 @@ export function ChatView() {
               const isAnchor = index === lastQuestionIndex
               return (
                 <UserMessage
-                  key={entry.key}
+                  // Questions are append-only; admission changes the server key, not the row.
+                  key={`question-${index}`}
                   text={entry.text}
                   pending={entry.pending}
                   attachments={entry.attachments}
-                  innerRef={
-                    isAnchor
-                      ? (element) => {
-                          if (element) anchor.current = element
-                        }
-                      : undefined
-                  }
+                  innerRef={isAnchor ? setAnchor : undefined}
                 />
               )
             }
 
             if (entry.kind === "assistant") {
               return (
-                <AssistantMessage
+                <HistoryAnswer
                   key={entry.key}
                   view={entry.view}
                   messageId={entry.messageId}
@@ -424,19 +460,10 @@ export function ChatView() {
                   onUnflag={desk.unflag}
                   onHelpful={desk.helpful}
                   onCopy={copyText}
-                  onShare={() => dispatch({ type: "overlay", overlay: "share" })}
-                  // Regenerating an answer is asking its question again, so it
-                  // goes out as the question rather than as a reference to the
-                  // answer: `resend` already knows whether that is a retry of a
-                  // Turn that ended badly or a fresh ask.
-                  onRegenerate={() => {
-                    const asked = questionBefore(desk.entries, entry.key)
-                    if (asked !== null) desk.resend(asked.text, asked.attachments)
-                  }}
+                  onShare={share}
+                  onRegenerate={regenerate}
                   onFollowUp={desk.submit}
-                  onOpenSources={(messageId) =>
-                    dispatch({ type: "open-sources", messageId })
-                  }
+                  onOpenSources={openSources}
                   onAnswerQuestion={desk.answerQuestion}
                   onSkipQuestion={desk.skipQuestion}
                 />
@@ -539,7 +566,7 @@ function DockedFooter({
                 )}
             </p>
             <IconButton
-              label="Đóng thông báo"
+              label="Dismiss"
               size="sm"
               onClick={desk.dismissRefusal}
               className="size-5 text-destructive hover:bg-destructive/15 hover:text-destructive"
@@ -581,7 +608,7 @@ function DockedFooter({
           )}
         >
           <p className="min-h-0 overflow-hidden pt-2.5 text-center text-micro text-ink-6">
-            VisgniteAI có thể sai sót. Hãy đối chiếu nguồn dữ liệu trước khi ra quyết định đầu tư.
+            VisgniteAI can make mistakes. Check the data sources before making an investment decision.
           </p>
         </div>
       </div>
@@ -597,7 +624,7 @@ function DockedFooter({
  * animation does not.
  */
 function scrollTo(element: HTMLElement, top: number): void {
-  const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+  const still = motionReduced()
   if (typeof element.scrollTo !== "function") {
     element.scrollTop = top
     return
@@ -609,12 +636,12 @@ function scrollTo(element: HTMLElement, top: number): void {
  * One question the user asked, and the three things they can do with it again.
  *
  * The actions sit under the bubble and appear on hover or on focus. Copy is the
- * text itself; Sửa offers it back to the composer *unsent*, which is the same
- * contract a question offered by a panel has (`shell-state`, `ask`); Gửi lại
+ * text itself; Edit offers it back to the composer *unsent*, which is the same
+ * contract a question offered by a panel has (`shell-state`, `ask`); Resend
  * asks it again, and on the last question of a Turn that ended badly that is a
  * linked retry rather than a fresh Turn (`desk-state`, `resend`).
  *
- * **Sửa edits nothing.** A message is immutable in the store, so putting the
+ * **Edit edits nothing.** A message is immutable in the store, so putting the
  * sentence back in the field is the honest version of editing it: what leaves
  * is a new question, and the one already asked stays in the transcript where
  * the answer under it can still be read against it.
@@ -623,7 +650,7 @@ function scrollTo(element: HTMLElement, top: number): void {
  * it out of reach of a keyboard, and makes it appear under a pointer that had
  * already arrived.
  */
-function UserMessage({
+const UserMessage = memo(function UserMessage({
   text,
   pending,
   attachments,
@@ -685,47 +712,49 @@ function UserMessage({
           surface rather than the muted one: on this ground `bg-muted` sits a
           percent off the page and stops reading as a bubble at all. */}
       <p
-        className={cn(
-          "max-w-[82%] animate-vg-message-in whitespace-pre-wrap rounded-2xl bg-surface-bubble px-[1.05em] py-[0.7em] text-[0.95rem] leading-[1.5] text-foreground",
-          pending && "opacity-70",
-        )}
+        aria-busy={pending || undefined}
+        className="max-w-[82%] motion-safe:animate-vg-message-in whitespace-pre-wrap rounded-2xl bg-surface-bubble px-[1.05em] py-[0.7em] text-[0.9rem] leading-[1.5] text-foreground"
       >
         {text}
       </p>
 
       {/* Nothing to act on until the question exists on the backend: a pending
           bubble is a sentence this tab has not yet been told was written. */}
-      {!pending && (
-        <div className="flex items-center gap-0.5 pr-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100">
-          <IconButton label={copied ? "Đã sao chép" : "Sao chép"} size="sm" onClick={() => void copy()}>
-            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          </IconButton>
-          <IconButton
-            label="Sửa câu hỏi"
-            size="sm"
-            onClick={() => dispatch({ type: "ask", text })}
-          >
-            <Pencil className="size-3.5" />
-          </IconButton>
-          <IconButton
-            label="Gửi lại"
-            size="sm"
-            // A Turn is running: the composer offers Stop rather than Send for
-            // this stretch, and this control says the same thing by going inert.
-            disabled={desk.canCancel}
-            // Its own attachments, because this control re-asks *this*
-            // question: the ids are on the message the button sits under.
-            onClick={() =>
-              desk.resend(
-                text,
-                attachments.map((attachment) => attachment.id),
-              )
-            }
-          >
-            <RotateCcw className="size-3.5" />
-          </IconButton>
-        </div>
-      )}
+      <div
+        aria-hidden={pending || undefined}
+        className={cn(
+          "flex h-7 items-center gap-0.5 pr-1 opacity-0 transition-opacity motion-reduce:transition-none",
+          pending ? "invisible" : "focus-within:opacity-100 group-hover/msg:opacity-100",
+        )}
+      >
+        <IconButton label={copied ? "Copied" : "Copy"} size="sm" onClick={() => void copy()}>
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        </IconButton>
+        <IconButton
+          label="Edit question"
+          size="sm"
+          onClick={() => dispatch({ type: "ask", text })}
+        >
+          <Pencil className="size-3.5" />
+        </IconButton>
+        <IconButton
+          label="Resend"
+          size="sm"
+          // A Turn is running: the composer offers Stop rather than Send for
+          // this stretch, and this control says the same thing by going inert.
+          disabled={desk.canCancel || desk.isSubmitting || desk.isCancelling}
+          // Its own attachments, because this control re-asks *this*
+          // question: the ids are on the message the button sits under.
+          onClick={() =>
+            desk.resend(
+              text,
+              attachments.map((attachment) => attachment.id),
+            )
+          }
+        >
+          <RotateCcw className="size-3.5" />
+        </IconButton>
+      </div>
     </div>
   )
-}
+})

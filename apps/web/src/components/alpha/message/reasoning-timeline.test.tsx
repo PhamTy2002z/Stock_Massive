@@ -61,7 +61,7 @@ describe("grouping tool calls by round", () => {
       />,
     )
 
-    expect(screen.getByText("Đã chạy 2 truy vấn")).toBeInTheDocument()
+    expect(screen.getByText("Ran 2 queries")).toBeInTheDocument()
     expect(screen.getByText("Đã tra dữ liệu cho BCTC Q2/2026")).toBeInTheDocument()
     expect(screen.getByText("Đã tra dữ liệu cho đấu giá VAMC")).toBeInTheDocument()
   })
@@ -76,7 +76,7 @@ describe("grouping tool calls by round", () => {
       />,
     )
 
-    expect(screen.queryByText(/Đã chạy \d+ truy vấn/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Ran \d+ queries/)).not.toBeInTheDocument()
     expect(screen.getByText("Đã tra dữ liệu cho STB giá 12 tháng")).toBeInTheDocument()
   })
 
@@ -90,7 +90,7 @@ describe("grouping tool calls by round", () => {
       />,
     )
 
-    expect(screen.getByText("6 kết quả")).toBeInTheDocument()
+    expect(screen.getByText("6 results")).toBeInTheDocument()
   })
 })
 
@@ -126,7 +126,7 @@ describe("what a failed call is called", () => {
    * The distinction the reader acts on. A ceiling of ours refusing a call and a
    * page that would not load both end `error`, and they ask opposite things:
    * one is worth trying again, the other is the product saying it has looked
-   * enough. Drawing both as "Lỗi" sent readers back to a search engine that was
+   * enough. Drawing both as "Error" sent readers back to a search engine that was
    * working the whole time.
    */
   it("names the ceiling when the Turn spent its allowance of lookups", () => {
@@ -139,8 +139,8 @@ describe("what a failed call is called", () => {
       />,
     )
 
-    expect(screen.getByText("Hết lượt tra")).toBeInTheDocument()
-    expect(screen.queryByText("Lỗi")).not.toBeInTheDocument()
+    expect(screen.getByText("Lookup limit reached")).toBeInTheDocument()
+    expect(screen.queryByText("Error")).not.toBeInTheDocument()
   })
 
   it("names it inside a grouped round too, where the refusals actually arrive", () => {
@@ -158,11 +158,11 @@ describe("what a failed call is called", () => {
       />,
     )
 
-    expect(screen.getAllByText("Hết lượt tra")).toHaveLength(2)
-    expect(screen.queryByText("Lỗi")).not.toBeInTheDocument()
+    expect(screen.getAllByText("Lookup limit reached")).toHaveLength(2)
+    expect(screen.queryByText("Error")).not.toBeInTheDocument()
   })
 
-  it("still says Lỗi for a call that really did fail", () => {
+  it("still says Error for a call that really did fail", () => {
     render(
       <ReasoningTimeline
         thoughts={[]}
@@ -172,10 +172,10 @@ describe("what a failed call is called", () => {
       />,
     )
 
-    expect(screen.getByText("Lỗi")).toBeInTheDocument()
+    expect(screen.getByText("Error")).toBeInTheDocument()
   })
 
-  it("falls back to Lỗi for a reason this build has not learned", () => {
+  it("falls back to Error for a reason this build has not learned", () => {
     // A backend that grows a new code must not put the code itself on screen.
     render(
       <ReasoningTimeline
@@ -186,7 +186,7 @@ describe("what a failed call is called", () => {
       />,
     )
 
-    expect(screen.getByText("Lỗi")).toBeInTheDocument()
+    expect(screen.getByText("Error")).toBeInTheDocument()
     expect(screen.queryByText("some_future_reason")).not.toBeInTheDocument()
   })
 })
@@ -204,25 +204,25 @@ describe("saying the Turn has not stopped", () => {
       />,
     )
 
-    expect(screen.getByRole("status")).toHaveTextContent("Đang xử lý…")
+    expect(screen.getByRole("status")).toHaveTextContent("Processing results…")
   })
 
   it("says it is preparing while there is nothing to show yet", () => {
     render(<ReasoningTimeline thoughts={[]} toolCalls={[]} elapsedMs={0} running />)
 
-    expect(screen.getByRole("status")).toHaveTextContent("Đang chuẩn bị…")
+    expect(screen.getByRole("status")).toHaveTextContent("Preparing…")
   })
 
   it("counts the seconds on the line that survives the fold being shut", () => {
     render(<ReasoningTimeline thoughts={[]} toolCalls={[]} elapsedMs={21400} running />)
 
-    expect(screen.getByRole("button", { name: /Đang làm việc · 21s/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Working · 21s/ })).toBeInTheDocument()
   })
 
   it("prints no figure before there is a second of it", () => {
     render(<ReasoningTimeline thoughts={[]} toolCalls={[]} elapsedMs={300} running />)
 
-    expect(screen.getByText("Đang làm việc…")).toBeInTheDocument()
+    expect(screen.getByText("Working…")).toBeInTheDocument()
   })
 
   it("takes the live row away the moment the Turn is over", () => {
@@ -250,7 +250,7 @@ describe("opening and closing by default", () => {
       />,
     )
 
-    expect(screen.getByText("Đang làm việc · 3s")).toBeInTheDocument()
+    expect(screen.getByText("Working · 3s")).toBeInTheDocument()
     expect(screen.getByText("Đã tra dữ liệu cho STB")).toBeInTheDocument()
   })
 
@@ -264,10 +264,10 @@ describe("opening and closing by default", () => {
       />,
     )
 
-    expect(screen.getByText("Đã làm việc trong 12s")).toBeInTheDocument()
+    expect(screen.getByText("Worked for 12s")).toBeInTheDocument()
     // The rows stay mounted so the fold can animate them away, so "collapsed"
     // is a statement about the disclosure and not about the DOM.
-    expect(screen.getByRole("button", { name: /Đã làm việc trong 12s/ })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /Worked for 12s/ })).toHaveAttribute(
       "aria-expanded",
       "false",
     )
@@ -335,8 +335,8 @@ describe("a round of store reads", () => {
       <ReasoningTimeline thoughts={[]} toolCalls={reads} elapsedMs={5000} running />,
     )
 
-    expect(screen.getByText("Đã chạy 3 công cụ nội bộ")).toBeInTheDocument()
-    expect(screen.queryByText(/truy vấn/)).not.toBeInTheDocument()
+    expect(screen.getByText("Ran 3 internal tools")).toBeInTheDocument()
+    expect(screen.queryByText(/queries/)).not.toBeInTheDocument()
   })
 
   it("still names every figure it read", () => {
@@ -359,7 +359,7 @@ describe("a round of store reads", () => {
       />,
     )
 
-    expect(screen.getByText("Đã chạy 2 truy vấn")).toBeInTheDocument()
+    expect(screen.getByText("Ran 2 queries")).toBeInTheDocument()
   })
 
   /**
@@ -387,7 +387,7 @@ describe("a round of store reads", () => {
         <ReasoningTimeline thoughts={[]} toolCalls={calls} elapsedMs={5000} running />,
       )
 
-      expect(screen.getByText("Đã chạy 14 công cụ nội bộ")).toBeInTheDocument()
+      expect(screen.getByText("Ran 14 internal tools")).toBeInTheDocument()
       expect(screen.queryByText(calls[0].summary)).not.toBeInTheDocument()
     })
 
@@ -397,7 +397,7 @@ describe("a round of store reads", () => {
         <ReasoningTimeline thoughts={[]} toolCalls={calls} elapsedMs={5000} running />,
       )
 
-      fireEvent.click(screen.getByRole("button", { name: /Đã chạy 14 công cụ nội bộ/ }))
+      fireEvent.click(screen.getByRole("button", { name: /Ran 14 internal tools/ }))
 
       for (const read of calls) {
         expect(screen.getByText(read.summary)).toBeInTheDocument()
@@ -422,7 +422,7 @@ describe("a round of store reads", () => {
         <ReasoningTimeline thoughts={[]} toolCalls={calls} elapsedMs={5000} running />,
       )
 
-      expect(screen.getByText("· 1 lỗi")).toBeInTheDocument()
+      expect(screen.getByText("· 1 error")).toBeInTheDocument()
     })
   })
 
@@ -437,7 +437,7 @@ describe("a round of store reads", () => {
       />,
     )
 
-    expect(screen.getByText("Đã chạy 2 truy vấn")).toBeInTheDocument()
+    expect(screen.getByText("Ran 2 queries")).toBeInTheDocument()
   })
 })
 
@@ -464,8 +464,8 @@ describe("how many publishers a lookup came back with", () => {
       />,
     )
 
-    expect(screen.getByText("2 nguồn")).toBeInTheDocument()
-    expect(screen.queryByText("3 nguồn")).not.toBeInTheDocument()
+    expect(screen.getByText("2 sources")).toBeInTheDocument()
+    expect(screen.queryByText("3 sources")).not.toBeInTheDocument()
   })
 
   it("draws it on the branch rows of a round, where parallel searches land", () => {
@@ -485,9 +485,9 @@ describe("how many publishers a lookup came back with", () => {
       />,
     )
 
-    expect(screen.getByText("Đã chạy 2 truy vấn")).toBeInTheDocument()
-    expect(screen.getByText("2 nguồn")).toBeInTheDocument()
-    expect(screen.getByText("1 nguồn")).toBeInTheDocument()
+    expect(screen.getByText("Ran 2 queries")).toBeInTheDocument()
+    expect(screen.getByText("2 sources")).toBeInTheDocument()
+    expect(screen.getByText("1 source")).toBeInTheDocument()
   })
 
   it("names the publishers in text, because three marks are a glance", () => {
@@ -537,7 +537,7 @@ describe("how many publishers a lookup came back with", () => {
       />,
     )
 
-    expect(screen.queryByText(/nguồn/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/sources?/)).not.toBeInTheDocument()
   })
 
   it("prints a publisher's name as text and never as markup", () => {
@@ -572,5 +572,17 @@ it("keeps the old sentence for a call that counted results but carried none", ()
     />,
   )
 
-  expect(screen.getByText("6 kết quả")).toBeInTheDocument()
+  expect(screen.getByText("6 results")).toBeInTheDocument()
+})
+
+it("numbers actual rounds and reports unfinished calls without claiming completion", () => {
+  render(<ReasoningTimeline thoughts={[thought({ round: 2 })]} toolCalls={[
+    call({ id: "a", round: 2, status: "ok" }),
+    call({ id: "b", round: 2, status: "running" }),
+    call({ id: "c", round: 4, status: "pending" }),
+  ]} elapsedMs={1000} running />)
+  expect(screen.getAllByRole("heading").map((node) => node.textContent)).toEqual(["Step 1", "Step 2"])
+  expect(screen.getByText("Running 2 queries")).toBeInTheDocument()
+  expect(screen.getByText("· 1/2")).toBeInTheDocument()
+  expect(screen.getByRole("status")).toHaveTextContent("Looking things up · 2 left…")
 })

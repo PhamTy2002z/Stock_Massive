@@ -4,7 +4,7 @@
  * Eight surfaces used to answer the same question separately — the desk panel,
  * the thread rail, the transcript, the sources tab, both auth forms, the query
  * boundary and the connection veil — and they disagreed. The same expired
- * session was "Đã có lỗi xảy ra" in one place, a raw `Failed to fetch` in
+ * session was "Something went wrong" in one place, a raw `Failed to fetch` in
  * another, and a spinner that never resolved in a third. A reader cannot learn
  * a system that describes one state three ways.
  *
@@ -58,10 +58,10 @@ export interface Failure {
 
 /** The label each route out carries, so two surfaces never word it differently. */
 const ACTION_LABEL: Record<RecoveryKind, string | null> = {
-  retry: "Thử lại",
-  signin: "Đăng nhập lại",
-  home: "Về màn hình chính",
-  reload: "Tải lại trang",
+  retry: "Try again",
+  signin: "Sign in again",
+  home: "Go to home",
+  reload: "Reload page",
   none: null,
 }
 
@@ -87,23 +87,23 @@ function fromStatus(status: number, message: string | null): Failure {
     case 401:
       return failure(
         "session_expired",
-        "Phiên đăng nhập đã hết hạn",
-        "Vì lý do an toàn, phiên làm việc chỉ kéo dài một thời gian. Đăng nhập lại là bạn quay về đúng chỗ đang đọc.",
+        "Your session has expired",
+        "For security, sessions only last for a while. Sign in again and you'll return to where you were reading.",
         "signin",
         status,
       )
     case 403:
       return failure(
         "forbidden",
-        "Bạn không có quyền mở mục này",
-        "Tài khoản đang đăng nhập không được cấp quyền với nội dung này. Nếu bạn cho rằng đây là nhầm lẫn, hãy liên hệ người quản trị không gian làm việc.",
+        "You don't have permission to open this",
+        "The signed-in account isn't granted access to this content. If you think this is a mistake, contact your workspace administrator.",
         "none",
         status,
       )
     case 404:
       return failure(
         "not_found",
-        "Không tìm thấy nội dung này",
+        "This content couldn't be found",
         // The title says everything a reader can act on; guessing at why the
         // address is stale only adds a sentence to disbelieve.
         "",
@@ -113,8 +113,8 @@ function fromStatus(status: number, message: string | null): Failure {
     case 429:
       return failure(
         "rate_limited",
-        "Bạn đang gửi quá nhanh",
-        "Hệ thống tạm giới hạn số yêu cầu để giữ chỗ cho mọi người. Chờ một chút rồi thử lại là được.",
+        "You're sending too fast",
+        "The system temporarily limits requests to keep room for everyone. Wait a moment, then try again.",
         "retry",
         status,
       )
@@ -122,20 +122,20 @@ function fromStatus(status: number, message: string | null): Failure {
       if (status >= 500) {
         return failure(
           "server",
-          "Máy chủ gặp sự cố",
+          "The server ran into a problem",
           // Named as the server's fault on purpose: a reader who believes they
           // broke something goes looking for what they did wrong.
-          "Lỗi nằm ở phía chúng tôi, không phải ở thao tác của bạn. Yêu cầu này chưa được xử lý.",
+          "The problem is on our side, not something you did. This request wasn't processed.",
           "retry",
           status,
         )
       }
       return failure(
         "request_failed",
-        "Không thực hiện được yêu cầu",
+        "The request couldn't be completed",
         message && message.trim() !== ""
           ? message
-          : "Yêu cầu bị từ chối và không có lý do nào kèm theo.",
+          : "The request was refused without a reason.",
         "retry",
         status,
       )
@@ -179,7 +179,7 @@ export function describeFailure(error: unknown): Failure {
 
   return failure(
     "request_failed",
-    "Đã xảy ra lỗi ngoài dự kiến",
+    "An unexpected error occurred",
     "",
     "reload",
     null,
@@ -196,8 +196,8 @@ function statusOf(error: unknown): number | null {
 function offline(): Failure {
   return failure(
     "offline",
-    "Không kết nối được máy chủ",
-    "Có thể mạng của bạn đã ngắt, hoặc hệ thống đang khởi động lại. Dữ liệu đã tải vẫn còn nguyên trên màn hình.",
+    "Can't reach the server",
+    "Your network may be down, or the system is restarting. Data already loaded stays on screen.",
     "retry",
     null,
   )

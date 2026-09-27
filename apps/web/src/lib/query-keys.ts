@@ -18,4 +18,7 @@ export const queryKeys = {
   // What the route can do. The opposite of `usage`: constant until a deploy, so
   // it is fetched once and never refetched.
   capabilities: ["capabilities"] as const,
+
+  // What this account asked the assistant to remember, paged by offset.
+  memoryFacts: ["memory", "facts"] as const,
 }

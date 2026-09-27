@@ -3,7 +3,7 @@
  * The attach menu's first test, and what it is guarding.
  *
  * This menu shipped with six rows, all of them inert, and **no test at all** —
- * `AttachMenu|Thêm tệp|attachOpen` matched nothing outside `composer.tsx`. So
+ * `AttachMenu|Add file|attachOpen` matched nothing outside `composer.tsx`. So
  * nothing below is a regression net over old behaviour; all of it is new ground
  * for a menu that now has two rows that do something and one that says plainly
  * that they do not.
@@ -49,7 +49,7 @@ describe("the shape the menu settled on", () => {
     ).toEqual([
       `${ATTACHMENT_COPY.add}${ATTACHMENT_COPY.addHint}`,
       CAPTURE_COPY.row,
-      "Thêm vào danh mục",
+      "Add to portfolio",
     ])
   })
 
@@ -60,7 +60,7 @@ describe("the shape the menu settled on", () => {
     // reader sees what was looked up is the Sources panel.
     open()
 
-    for (const word of ["tin tức", "web", "tìm kiếm"]) {
+    for (const word of ["news", "web", "search"]) {
       expect(screen.queryByText(new RegExp(word, "i"))).not.toBeInTheDocument()
     }
   })

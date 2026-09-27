@@ -12,61 +12,42 @@ import { cn } from "@/lib/utils"
  * so a border around the whole stack would only draw a frame around the pane it
  * already fills.
  *
- * **Half of what this surface offers is not built yet.** The reference design
- * asks for notification channels, a profile, security and data controls that
- * have no backend behind them. Every such row keeps its real shape and carries
- * `soon` — a badge beside the label and an inert control — because a row that
- * looked live and silently did nothing is the one presentation guaranteed to
- * read as a bug.
+ * Every row here has a write path behind it. A row the product cannot honour is
+ * left out rather than drawn inert: a control that looks live and silently does
+ * nothing is the one presentation guaranteed to read as a bug.
  */
 
 export function SettingsSection({
   title,
   description,
   children,
-  footer,
 }: {
   title: string
   description?: string
   children: React.ReactNode
-  footer?: React.ReactNode
 }) {
   return (
-    /* The rail switches between panes rather than scrolling past them, so the
-       heading is the pane's own title, not an anchor to jump to. */
+    /* A pane stacks several of these, 40px apart; the heading is a quiet label
+       over its rows rather than a page title, because the rail already names
+       the pane. */
     <section className="animate-vg-row-in">
-      <h2 className="text-[1.25rem] font-semibold leading-[1.24] tracking-[-0.01em]">
-        {title}
-      </h2>
+      <h2 className="text-[1rem] font-medium leading-6 tracking-[-0.01em]">{title}</h2>
       {description ? (
-        <p className="mt-1.5 max-w-[56ch] text-control text-ink-4">{description}</p>
+        <p className="mt-1 text-control text-ink-5 [text-wrap:pretty]">{description}</p>
       ) : null}
-      <div className="mt-4">{children}</div>
-      {footer ? <p className="mt-[18px] text-micro text-ink-6">{footer}</p> : null}
+      <div className="mt-3">{children}</div>
     </section>
-  )
-}
-
-/** Says a row is drawn but not wired, right where the reader would press it. */
-export function SoonBadge() {
-  return (
-    <span className="shrink-0 rounded-pill border border-hairline bg-foreground/[0.04] px-2 py-[0.15rem] text-[0.68rem] font-medium leading-[1.1] text-ink-6">
-      Sắp ra mắt
-    </span>
   )
 }
 
 export function SettingsRow({
   label,
   description,
-  soon,
   children,
   className,
 }: {
   label: string
-  description?: string
-  /** The control is drawn inert and the label carries a badge saying why. */
-  soon?: boolean
+  description?: React.ReactNode
   children?: React.ReactNode
   className?: string
 }) {
@@ -75,24 +56,19 @@ export function SettingsRow({
       className={cn(
         // Below md the control drops under its label rather than fighting it
         // for a share of a phone-width row.
-        "flex flex-col gap-3 border-b border-hairline py-[22px] first:pt-[26px] last:border-b-0 md:flex-row md:items-center md:justify-between md:gap-8",
+        "flex min-h-[56px] flex-col gap-3 border-b border-hairline py-3.5 last:border-b-0 md:flex-row md:items-center md:justify-between md:gap-8",
         className
       )}
     >
       <div className="min-w-0 md:flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[0.95rem] font-medium">{label}</span>
-          {soon ? <SoonBadge /> : null}
-        </div>
+        <div className="text-row text-foreground">{label}</div>
         {description ? (
-          <p className="mt-1 max-w-[52ch] text-control text-ink-6 [text-wrap:pretty]">
+          <p className="mt-0.5 text-control text-ink-5 [text-wrap:pretty]">
             {description}
           </p>
         ) : null}
       </div>
-      {children ? (
-        <div className={cn("min-w-0 md:flex-none", soon && "opacity-60")}>{children}</div>
-      ) : null}
+      {children ? <div className="min-w-0 md:flex-none">{children}</div> : null}
     </div>
   )
 }
@@ -102,28 +78,36 @@ export function SettingsRow({
  * control rather than as a row of buttons.
  *
  * Selection is a raised neutral, not the amber — the accent is rationed to
- * filled actions, and choosing a colour mode is not one. The pill is the menu
- * surface because that is the one step that lifts on both grounds, where a
- * fixed alpha would vanish into one of them.
+ * filled actions, and choosing a colour mode is not one. The selected segment is
+ * the menu surface because that is the one step that lifts on both grounds,
+ * where a fixed alpha would vanish into one of them.
  */
+const SEGMENT_TRACK = "flex w-full gap-0.5 rounded-lg bg-foreground/[0.05] p-0.5 md:w-auto"
+
+function segmentItem(active: boolean) {
+  return cn(
+    "flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md px-3 text-control outline-none transition-[background-color,color] duration-150 focus-visible:ring-2 focus-visible:ring-ring md:flex-none",
+    active ? "bg-surface-menu text-foreground shadow-sm" : "text-ink-5 hover:text-foreground"
+  )
+}
+
 export function Segmented<T>({
   label,
   options,
   selected,
   onSelect,
+  iconOnly,
 }: {
   label: string
   options: { value: T; label: string; icon?: React.ReactNode }[]
   /** `null` before the browser's own choice has been read. */
   selected: T | null
   onSelect: (value: T) => void
+  /** Draw each choice as its icon alone; the label becomes its accessible name. */
+  iconOnly?: boolean
 }) {
   return (
-    <div
-      role="radiogroup"
-      aria-label={label}
-      className="flex w-full gap-0.5 rounded-[11px] border border-hairline bg-surface-sunken p-[3px] md:w-auto"
-    >
+    <div role="radiogroup" aria-label={label} className={SEGMENT_TRACK}>
       {options.map((option) => {
         const active = selected === option.value
         return (
@@ -132,16 +116,13 @@ export function Segmented<T>({
             type="button"
             role="radio"
             aria-checked={active}
+            aria-label={iconOnly ? option.label : undefined}
+            title={iconOnly ? option.label : undefined}
             onClick={() => onSelect(option.value)}
-            className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 rounded-[8px] px-3 py-1.5 text-control leading-[1.25] outline-none transition-[background-color,color] duration-150 focus-visible:ring-2 focus-visible:ring-ring md:flex-none",
-              active
-                ? "bg-surface-menu text-foreground shadow-sm"
-                : "text-ink-6 hover:text-foreground"
-            )}
+            className={cn(segmentItem(active), iconOnly && "md:w-8 md:px-0")}
           >
             {option.icon}
-            {option.label}
+            {iconOnly ? null : option.label}
           </button>
         )
       })}
@@ -182,7 +163,7 @@ export function Toggle({
       disabled={disabled}
       onClick={() => onChange?.(!checked)}
       className={cn(
-        "relative block h-[22px] w-[38px] shrink-0 rounded-pill outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        "relative block h-5 w-9 shrink-0 rounded-pill outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         checked ? "bg-primary" : "bg-foreground/[0.14]",
         disabled ? "cursor-not-allowed" : "cursor-pointer"
       )}
@@ -190,8 +171,8 @@ export function Toggle({
       <span
         aria-hidden="true"
         className={cn(
-          "absolute top-[3px] size-4 rounded-full bg-ink-1 transition-[left] duration-200",
-          checked ? "left-[19px]" : "left-[3px]"
+          "absolute top-0.5 size-4 rounded-full bg-ink-1 transition-[left] duration-200",
+          checked ? "left-[18px]" : "left-0.5"
         )}
       />
     </button>
@@ -199,40 +180,7 @@ export function Toggle({
 }
 
 /**
- * A choice that will be a menu once there is something to choose between.
- *
- * Drawn as the trigger it will become — current value, chevron — and inert,
- * because the alternatives it would list are all unbuilt. Not a `<select>`
- * with one option: that opens, offers the reader nothing, and closes.
- */
-export function SelectStub({
-  label,
-  value,
-  mono,
-}: {
-  label: string
-  value: string
-  /** Values that name a typeface or a figure are shown in it. */
-  mono?: boolean
-}) {
-  return (
-    <span
-      role="button"
-      aria-disabled="true"
-      aria-label={label}
-      className={cn(
-        "flex cursor-not-allowed items-center gap-1.5 text-control text-ink-3",
-        mono && "font-mono"
-      )}
-    >
-      {value}
-      <ChevronDown className="size-[13px] shrink-0 text-ink-6" strokeWidth={1.8} />
-    </span>
-  )
-}
-
-/**
- * A pill-shaped action beside a row.
+ * A compact action beside a row.
  *
  * `danger` outlines in the negative rather than filling with it: the row it
  * sits in is one of several, and a solid red button in a settings list reads as
@@ -243,23 +191,34 @@ export function PillAction({
   tone = "neutral",
   disabled,
   onClick,
+  label,
+  autoFocus,
+  type = "button",
 }: {
   children: React.ReactNode
-  tone?: "neutral" | "danger"
+  tone?: "neutral" | "danger" | "danger-filled"
+  type?: "button" | "submit"
   disabled?: boolean
   onClick?: () => void
+  /** An accessible name, where the visible text alone would not say enough. */
+  label?: string
+  autoFocus?: boolean
 }) {
   return (
     <button
-      type="button"
+      type={type}
       disabled={disabled}
       onClick={onClick}
+      aria-label={label}
+      autoFocus={autoFocus}
       className={cn(
-        "shrink-0 whitespace-nowrap rounded-pill border px-[0.95rem] py-[0.42rem] text-control outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-        tone === "danger"
-          ? "border-negative/35 text-negative hover:bg-negative/10"
-          : "border-border text-ink-3 hover:bg-accent hover:text-foreground",
-        disabled && "cursor-not-allowed hover:bg-transparent"
+        "h-8 shrink-0 whitespace-nowrap rounded-lg border px-3 text-control outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+        tone === "danger" && "border-negative/35 text-negative hover:bg-negative/10",
+        // The second press of a destructive action is the one place a settings
+        // row fills with the negative: the reader has already said yes once.
+        tone === "danger-filled" && "border-destructive bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        tone === "neutral" && "border-border bg-foreground/[0.04] text-foreground hover:bg-foreground/[0.08]",
+        disabled && "cursor-not-allowed opacity-60"
       )}
     >
       {children}
@@ -268,48 +227,193 @@ export function PillAction({
 }
 
 /**
- * A text field that keeps its shape while the write path behind it is unbuilt.
+ * A destructive action that asks twice, in place.
  *
- * `readOnly` rather than `disabled`: the reader can still select and copy what
- * is in it, which is the only thing the field is currently good for.
+ * The first press turns the button into a filled confirmation beside a cancel,
+ * and only the second press acts — no `window.confirm`, which would take the
+ * question out of the row it is about. Focus moves to the confirmation so a
+ * keyboard reader lands on the question they just raised. While the action
+ * runs both buttons are disabled and the confirmation says what is happening.
+ *
+ * `onConfirm` reports its own failure (a toast); this only puts the row back.
  */
-export function TextFieldStub({
+export function ConfirmAction({
+  children,
+  confirmLabel,
+  pendingLabel,
+  onConfirm,
+  disabled,
+}: {
+  children: React.ReactNode
+  confirmLabel: string
+  pendingLabel: string
+  onConfirm: () => Promise<unknown>
+  disabled?: boolean
+}) {
+  const [phase, setPhase] = React.useState<"idle" | "armed" | "pending">("idle")
+  const mounted = React.useRef(true)
+  React.useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+
+  if (phase === "idle") {
+    return (
+      <PillAction tone="danger" disabled={disabled} onClick={() => setPhase("armed")}>
+        {children}
+      </PillAction>
+    )
+  }
+
+  const pending = phase === "pending"
+  return (
+    <div className="flex items-center gap-2">
+      <PillAction tone="neutral" disabled={pending} onClick={() => setPhase("idle")}>
+        Cancel
+      </PillAction>
+      <PillAction
+        tone="danger-filled"
+        autoFocus
+        disabled={pending}
+        onClick={async () => {
+          setPhase("pending")
+          try {
+            await onConfirm()
+          } catch {
+            // Reported by the caller; the row only has to stop saying "…ing".
+          } finally {
+            if (mounted.current) setPhase("idle")
+          }
+        }}
+      >
+        {pending ? pendingLabel : confirmLabel}
+      </PillAction>
+    </div>
+  )
+}
+
+/** The shared shell of every editable field: 32px, sunken, a visible focus ring. */
+export const FIELD =
+  "w-full rounded-lg border border-input bg-surface-sunken px-3 text-control text-foreground outline-none transition-colors placeholder:text-ink-6 focus-visible:border-ink-6 focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60"
+
+/**
+ * One line of text that saves itself when the reader leaves it or presses Enter.
+ *
+ * The draft is local, so typing costs no request; the commit happens only when
+ * the trimmed text differs from what was saved. A `required` field emptied out
+ * goes back to the saved value instead of being sent. A commit that rejects
+ * puts the saved value back, because a field showing an edit the server
+ * refused would say something that is not true.
+ */
+export function TextField({
   label,
   value,
   placeholder,
-  rows,
+  maxLength,
+  required,
+  disabled,
+  onCommit,
 }: {
   label: string
-  value?: string
+  value: string
   placeholder?: string
-  /** Set for a multi-line field, which spans the row instead of sitting beside it. */
-  rows?: number
+  maxLength?: number
+  required?: boolean
+  disabled?: boolean
+  onCommit: (next: string) => Promise<unknown>
 }) {
-  const shared =
-    "w-full rounded-[10px] border border-input bg-surface-sunken px-3 py-2 text-control text-ink-3 outline-none placeholder:text-ink-6"
+  const [draft, setDraft] = React.useState(value)
+  const inflight = React.useRef<string | null>(null)
 
-  if (rows) {
-    return (
-      <textarea
-        aria-label={label}
-        readOnly
-        rows={rows}
-        defaultValue={value}
-        placeholder={placeholder}
-        className={cn(shared, "block resize-none leading-[1.55]")}
-      />
-    )
+  // A new saved value — this field's own commit, or another tab's — replaces
+  // the draft.
+  React.useEffect(() => setDraft(value), [value])
+
+  const commit = async () => {
+    const next = draft.trim()
+    if (next === value || next === inflight.current) {
+      setDraft(value)
+      return
+    }
+    if (required && next === "") {
+      setDraft(value)
+      return
+    }
+    inflight.current = next
+    try {
+      await onCommit(next)
+    } catch {
+      setDraft(value)
+    } finally {
+      inflight.current = null
+    }
   }
 
   return (
     <input
       type="text"
       aria-label={label}
-      readOnly
-      defaultValue={value}
+      value={draft}
       placeholder={placeholder}
-      className={cn(shared, "md:w-[240px]")}
+      maxLength={maxLength}
+      disabled={disabled}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => void commit()}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault()
+          void commit()
+        }
+      }}
+      className={cn(FIELD, "h-8 md:w-56")}
     />
+  )
+}
+
+/**
+ * A native `<select>`, drawn as the quiet trigger the rest of the pane uses.
+ *
+ * Native on purpose: the platform's own menu is keyboard- and screen-reader-
+ * correct on every device, and a phone gets its own picker. `appearance-none`
+ * removes the browser's arrow so the chevron can match the pane's icons.
+ * The empty string is the "not chosen" option.
+ */
+export function SelectField({
+  label,
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: { value: string; label: string }[]
+  disabled?: boolean
+  onChange: (next: string) => void
+}) {
+  return (
+    <div className="relative -ml-2.5 w-fit md:ml-0">
+      <select
+        aria-label={label}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-8 cursor-pointer appearance-none rounded-lg bg-transparent pl-2.5 pr-8 text-control text-foreground outline-none transition-colors hover:bg-foreground/[0.045] focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value} className="bg-surface-menu text-foreground">
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        aria-hidden="true"
+        className="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-ink-5"
+        strokeWidth={1.7}
+      />
+    </div>
   )
 }
 
@@ -319,7 +423,7 @@ export function TextFieldStub({
  */
 export function ReadOnlyField({ value }: { value: string }) {
   return (
-    <div className="w-full truncate rounded-[10px] border border-hairline bg-surface-sunken px-3 py-2 text-control tabular-nums text-ink-4 md:w-[240px]">
+    <div className="h-8 w-full truncate rounded-lg border border-hairline bg-surface-sunken px-3 text-control leading-[30px] tabular-nums text-foreground md:w-56">
       {value}
     </div>
   )
@@ -380,7 +484,7 @@ export function AllowanceMeter({
   const palette = TONE[tone]
 
   return (
-    <div className="w-full md:w-[240px]">
+    <div className="w-full md:w-56">
       <div className={cn("text-right font-mono text-[0.95rem] tabular-nums", palette.figure)}>
         {figure}
       </div>

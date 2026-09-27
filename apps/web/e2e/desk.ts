@@ -23,7 +23,7 @@ export const API_ORIGIN = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8010}`
  * dialogue itself: pressing it opens them, and the row of actions is what the
  * canonical message grew when the verdict was split in two.
  */
-export const CANONICAL_MARK = { role: "button" as const, name: "Chưa đúng" }
+export const CANONICAL_MARK = { role: "button" as const, name: "Not correct" }
 
 /** The answer on screen, draft or canonical: they share one shell by design. */
 export const ANSWER_LABEL = "Assistant message"
@@ -67,8 +67,8 @@ export async function ask(
   request: APIRequestContext,
   text: string,
 ): Promise<void> {
-  const field = page.getByLabel("Hỏi VisgniteAI")
-  const send = page.getByRole("button", { name: "Gửi" })
+  const field = page.getByLabel("Ask VisgniteAI")
+  const send = page.getByRole("button", { name: "Send" })
 
   await expect(async () => {
     await field.fill(text)

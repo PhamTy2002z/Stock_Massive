@@ -13,6 +13,9 @@ import { describe, expect, it } from "vitest"
 
 import {
   DEFAULT_PREFERENCES,
+  MOTION_BOOT_SCRIPT,
+  applyMotion,
+  motionReduced,
   readPreferences,
   writePreferences,
 } from "./preferences"
@@ -40,8 +43,8 @@ describe("what this browser remembers", () => {
     writePreferences({ chatWidth: 512 })
 
     expect(readPreferences()).toEqual({
+      ...DEFAULT_PREFERENCES,
       signalDeskByDefault: true,
-      sidebarOpen: null,
       chatWidth: 512,
     })
   })
@@ -76,9 +79,8 @@ describe("a record this build did not write", () => {
     window.localStorage.setItem(KEY, JSON.stringify({ signalDeskByDefault: true }))
 
     expect(readPreferences()).toEqual({
+      ...DEFAULT_PREFERENCES,
       signalDeskByDefault: true,
-      sidebarOpen: null,
-      chatWidth: null,
     })
   })
 
@@ -103,6 +105,35 @@ describe("a record this build did not write", () => {
     // Clamping belongs to whoever knows how much room there is. Refusing it
     // here would throw away a width that is legitimate on a wider monitor.
     expect(readPreferences().chatWidth).toBe(99_999)
+  })
+})
+
+describe("motion", () => {
+  it("reads anything but an explicit reduced as following the system", () => {
+    window.localStorage.setItem(KEY, JSON.stringify({ motion: "none" }))
+    expect(readPreferences().motion).toBe("system")
+
+    writePreferences({ motion: "reduced" })
+    expect(readPreferences().motion).toBe("reduced")
+  })
+
+  it("marks the document so the stylesheet can still it, and unmarks it again", () => {
+    applyMotion("reduced")
+    expect(document.documentElement.dataset.motion).toBe("reduced")
+    expect(motionReduced()).toBe(true)
+
+    applyMotion("system")
+    expect(document.documentElement.hasAttribute("data-motion")).toBe(false)
+  })
+
+  it("applies a stored preference before any bundle runs", () => {
+    writePreferences({ motion: "reduced" })
+    delete document.documentElement.dataset.motion
+
+    new Function(MOTION_BOOT_SCRIPT)()
+
+    expect(document.documentElement.dataset.motion).toBe("reduced")
+    applyMotion("system")
   })
 })
 

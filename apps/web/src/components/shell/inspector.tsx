@@ -29,9 +29,10 @@ import { X } from "lucide-react";
 
 import { SignalDeskPanel } from "@/components/signal-desk/signal-desk-panel";
 import { SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy";
+import { motionReduced } from "@/lib/alpha-desk/preferences";
 import { cn } from "@/lib/utils";
 
-import { useDesk } from "./desk-state";
+import { useDeskTranscript } from "./desk-state";
 import { IconButton } from "./primitives";
 import {
   chatColumnWidth,
@@ -47,13 +48,6 @@ import { SourcesTab } from "./sources-tab";
 
 /** How long the pane takes to leave — the same clock as `duration-panel`. */
 const PANEL_LEAVE_MS = 420;
-
-function reducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false)
-  );
-}
 
 /**
  * The pane, kept on screen for as long as it takes to slide shut.
@@ -83,7 +77,7 @@ export function Inspector() {
     if (phase !== "open") setPhase("open");
     if (last !== shell) setLast(shell);
   } else if (phase === "open") {
-    setPhase(reducedMotion() ? "closed" : "leaving");
+    setPhase(motionReduced() ? "closed" : "leaving");
   }
 
   const onGone = useCallback(() => setPhase("closed"), []);
@@ -188,7 +182,7 @@ function Pane({ leaving, onGone }: { leaving: boolean; onGone: () => void }) {
             {chatSources ? SIGNAL_DESK_COPY.sources : SIGNAL_DESK_COPY.name}
           </h2>
           <IconButton
-            label={chatSources ? "Đóng nguồn" : "Đóng Signal Desk"}
+            label={chatSources ? "Close sources" : "Close Signal Desk"}
             onClick={() => dispatch({ type: "close-inspector" })}
           >
             <X className="size-4" />
@@ -251,6 +245,6 @@ function Body({
 
 /** The desk's own body, and the one place the conversation's state reaches it. */
 function DeskBody() {
-  const { deskView } = useDesk();
+  const { deskView } = useDeskTranscript();
   return <SignalDeskPanel view={deskView} />;
 }

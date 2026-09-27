@@ -1,5 +1,7 @@
+import { isIP } from "node:net"
 import { NextResponse, type NextRequest } from "next/server"
 
+import { getApiBaseUrl } from "@/lib/api"
 import { currentAccessToken, rotateAccessToken } from "@/lib/auth/bearer"
 import { UPSTREAM_UNREACHABLE } from "@/lib/connection-status"
 
@@ -76,6 +78,10 @@ import { UPSTREAM_UNREACHABLE } from "@/lib/connection-status"
 // and nothing else, and both resolve the owner through the Thread the question
 // was asked in, so the same argument that covers `messages` covers this: a
 // wider grant here still reaches only this reader's own cards.
+// `memory` is this account's own remembered notes: upstream mounts
+// `GET/DELETE /memory/facts` and `DELETE /memory/facts/{id}`, and every one reads
+// the owner from the resolved session, so no request shape reaches another
+// account's notes.
 const FORWARDED_RESOURCES = new Set([
   "threads",
   "turns",
@@ -85,10 +91,91 @@ const FORWARDED_RESOURCES = new Set([
   "assets",
   "usage",
   "capabilities",
+  "memory",
 ])
 
 function isForwardedPath(path: string[]): boolean {
-  return path.length > 0 && FORWARDED_RESOURCES.has(path[0])
+  return path.length > 0 && FORWARDED_RESOURCES.has(path[0]) && path.every(isPlainSegment)
+}
+
+/**
+ * Whether one path segment names a resource rather than moving between them.
+ *
+ * `encodeURIComponent` leaves `.` alone, so a `..` segment would reach the
+ * upstream URL as a real parent step — `threads/../../admin` leaves the
+ * allowlisted prefix entirely. A separator inside a segment is the same step in
+ * disguise, and an empty one is a path nothing upstream mounts.
+ */
+function isPlainSegment(segment: string): boolean {
+  let decoded = segment
+  try {
+    decoded = decodeURIComponent(segment)
+  } catch {
+    return false
+  }
+  return [segment, decoded].every(
+    (form) =>
+      form !== "" && form !== "." && form !== ".." && !form.includes("/") && !form.includes("\\"),
+  )
+}
+
+/**
+ * The most a request body may carry. An attachment is capped at 4 MiB upstream;
+ * this leaves room for the multipart framing around one and no more, so a body
+ * this process would buffer can never be large enough to hurt it.
+ */
+const MAX_BODY_BYTES = 6 * 1024 * 1024
+
+/**
+ * The request body, read once and counted as it arrives, or null past the cap.
+ *
+ * Counted rather than trusted to `Content-Length`: a chunked upload declares no
+ * length at all, and `arrayBuffer()` would hold however much of it arrived.
+ */
+async function readCappedBody(request: NextRequest): Promise<ArrayBuffer | null> {
+  const declared = Number(request.headers.get("content-length"))
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return null
+  if (request.body === null) return new ArrayBuffer(0)
+
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > MAX_BODY_BYTES) {
+      // Not awaited: the rest of the body is not wanted, and this handler's
+      // answer must not wait on how the runtime tears the stream down.
+      void reader.cancel().catch(() => {})
+      return null
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes.buffer
+}
+
+/**
+ * The reader's own address, as the reverse proxy in front of this app saw it.
+ *
+ * The API limits sign-ins and uploads per address, and without this every
+ * request reaches it from this process's one address — so one stranger's
+ * failed logins lock everybody out. Only the first entry is taken, and only if
+ * it is an address at all: the raw chain is never passed on, because whatever
+ * a client wrote into it is not something the API should be asked to believe.
+ */
+function clientAddress(request: NextRequest): string | null {
+  const candidates = [
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim(),
+    request.headers.get("x-real-ip")?.trim(),
+  ]
+  return candidates.find((candidate) => candidate && isIP(candidate) !== 0) ?? null
 }
 
 const EVENT_STREAM = "text/event-stream"
@@ -109,11 +196,6 @@ const STREAM_HEADERS = {
   "X-Accel-Buffering": "no",
   Connection: "keep-alive",
 } as const
-
-const upstreamBase = () =>
-  process.env.INTERNAL_API_URL ||
-  process.env.NEXT_PUBLIC_API_URL ||
-  "http://localhost:8000/api/v1"
 
 interface RouteContext {
   params: Promise<{ path: string[] }>
@@ -198,7 +280,7 @@ async function forward(request: NextRequest, path: string[]): Promise<NextRespon
     return NextResponse.json({ detail: "Cross-origin request refused" }, { status: 403 })
   }
 
-  const target = `${upstreamBase()}/${path.map(encodeURIComponent).join("/")}${request.nextUrl.search}`
+  const target = `${getApiBaseUrl()}/${path.map(encodeURIComponent).join("/")}${request.nextUrl.search}`
   const requestContentType = request.headers.get("Content-Type")
   // Absent means the browser's own JSON-by-default caller (`lib/alpha.ts`), not
   // a body that happens to look like JSON — this is a Content-Type check, not
@@ -215,9 +297,16 @@ async function forward(request: NextRequest, path: string[]): Promise<NextRespon
   // depends on. The alternative — read nothing and let a 401 racing an upload
   // fail outright — would turn one token rotation into a corrupted or dropped
   // attachment; buffering costs one upload's bytes in memory for the length of
-  // one request and turns that failure into an ordinary, retryable one.
-  const body: BodyInit | undefined =
-    request.method === "GET" ? undefined : isJsonRequest ? await request.text() : await request.arrayBuffer()
+  // one request and turns that failure into an ordinary, retryable one. That
+  // cost is why the read is capped.
+  let body: BodyInit | undefined
+  if (request.method !== "GET") {
+    const bytes = await readCappedBody(request)
+    if (bytes === null) {
+      return NextResponse.json({ detail: "Request body too large" }, { status: 413 })
+    }
+    body = isJsonRequest ? new TextDecoder().decode(bytes) : bytes
+  }
 
   // Awaited *before* anything is returned. A streaming response that went out
   // and only then discovered it had no token would have to report the failure
@@ -348,7 +437,7 @@ async function send(
       {
         detail: {
           reason: UPSTREAM_UNREACHABLE,
-          message: "Hệ thống đang không phản hồi. Đang thử lại…",
+          message: "The system isn't responding. Retrying…",
         },
       },
       { status: 503 },
@@ -364,6 +453,7 @@ function dispatch(
   contentType: string | null,
 ): Promise<Response> {
   const lastEventId = request.headers.get("Last-Event-ID")
+  const address = clientAddress(request)
   return fetch(target, {
     method: request.method,
     headers: {
@@ -378,7 +468,11 @@ function dispatch(
       // sets it natively, and dropping it here would leave the backend unable
       // to say where this reader believes it got to.
       ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}),
+      ...(address ? { "X-Forwarded-For": address } : {}),
     },
+    // A reader who closes the tab ends the upstream request too, rather than
+    // leaving an event stream open to a socket nobody is reading.
+    signal: request.signal,
     // An empty string (a write with no body at all) is normalised to
     // `undefined`, same as before this file carried binary bodies; an
     // `ArrayBuffer`, empty or not, is passed through as-is.

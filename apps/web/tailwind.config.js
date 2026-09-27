@@ -37,14 +37,15 @@ module.exports = {
         fit: 'minmax(0, 1fr)',
       },
       fontSize: {
-        // The reference's own steps, all derived from a 15px body. Named rather
-        // than written as arbitrary values so a card eyebrow is the same size
-        // in every card.
-        'eyebrow': ['0.7rem', { lineHeight: '1rem', letterSpacing: '0.08em' }],
-        'micro': ['0.74rem', { lineHeight: '1.05rem' }],
-        'meta': ['0.8rem', { lineHeight: '1.15rem' }],
-        'control': ['0.86rem', { lineHeight: '1.25rem' }],
-        'row': ['0.9rem', { lineHeight: '1.3rem' }],
+        // The steps under a 14px body, one pixel below the original 15px scale:
+        // Inter's tall x-height made that scale read a size larger than it
+        // measured. Named rather than written as arbitrary values so a card
+        // eyebrow is the same size in every card.
+        'eyebrow': ['0.66rem', { lineHeight: '1rem', letterSpacing: '0.08em' }],
+        'micro': ['0.6875rem', { lineHeight: '1rem' }],
+        'meta': ['0.75rem', { lineHeight: '1.1rem' }],
+        'control': ['0.8125rem', { lineHeight: '1.25rem' }],
+        'row': ['0.875rem', { lineHeight: '1.25rem' }],
       },
       keyframes: {
         'auth-up': {

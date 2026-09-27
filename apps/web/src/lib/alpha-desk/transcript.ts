@@ -202,26 +202,9 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
   const heldBack = drafting && !reveal.handedOver ? input.live.messageId : null
 
   for (const message of ordered) {
-    if (message.role === "user") {
-      entries.push({
-        kind: "user",
-        key: `message-${message.id}`,
-        text: textOf(message),
-        pending: false,
-        attachments: attachmentsOf(message),
-      })
-    } else if (message.role === "assistant" && message.id !== heldBack) {
-      // `summary` is context compaction. It is a fact about what the model was
-      // handed, not about what the user said or was told, so it is not a row.
-      entries.push({
-        kind: "assistant",
-        key: `message-${message.id}`,
-        messageId: message.id,
-        view: assistantView(message),
-        flaggedReason: message.flagged_reason ?? null,
-        helpful: message.helpful_at !== null && message.helpful_at !== undefined,
-      })
-    }
+    if (message.role === "assistant" && message.id === heldBack) continue
+    const entry = historyEntry(message)
+    if (entry !== null) entries.push(entry)
   }
 
   const last = ordered[ordered.length - 1]
@@ -253,6 +236,41 @@ export function buildTranscript(input: TranscriptInput): TranscriptEntry[] {
   }
 
   return entries
+}
+
+// One entry per message object, for as long as that object lives. The query
+// cache keeps an unchanged message the same object across refetches, so the
+// history rows keep their identity while the live Turn rebuilds the transcript
+// on every event — which is what lets a memoised row skip those renders.
+const historyEntries = new WeakMap<ThreadMessage, TranscriptEntry | null>()
+
+function historyEntry(message: ThreadMessage): TranscriptEntry | null {
+  const cached = historyEntries.get(message)
+  if (cached !== undefined) return cached
+  const entry: TranscriptEntry | null =
+    message.role === "user"
+      ? {
+          kind: "user",
+          key: `message-${message.id}`,
+          text: textOf(message),
+          pending: false,
+          attachments: attachmentsOf(message),
+        }
+      : message.role === "assistant"
+        ? {
+            kind: "assistant",
+            key: `message-${message.id}`,
+            messageId: message.id,
+            view: assistantView(message),
+            flaggedReason: message.flagged_reason ?? null,
+            helpful: message.helpful_at !== null && message.helpful_at !== undefined,
+          }
+        : // `summary` is context compaction. It is a fact about what the model
+          // was handed, not about what the user said or was told, so it is not
+          // a row.
+          null
+  historyEntries.set(message, entry)
+  return entry
 }
 
 /**

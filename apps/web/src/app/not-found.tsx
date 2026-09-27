@@ -17,11 +17,11 @@ export default function NotFound() {
       density="page"
       failure={{
         kind: "not_found",
-        title: "Không có gì ở địa chỉ này",
+        title: "There's nothing at this address",
         detail:
-          "Đường dẫn bạn mở không còn tồn tại. Toàn bộ VisgniteAI nằm trên một màn hình duy nhất.",
+          "The link you opened no longer exists. All of VisgniteAI lives on a single screen.",
         recovery: "home",
-        action: "Về màn hình chính",
+        action: "Go to the main screen",
         status: 404,
       }}
     />

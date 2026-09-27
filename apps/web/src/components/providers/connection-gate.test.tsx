@@ -34,7 +34,7 @@ describe("ConnectionGate recovery", () => {
     render(
       <QueryClientProvider client={queryClient}>
         <ConnectionGate>
-          <p>Nội dung</p>
+          <p>Content</p>
         </ConnectionGate>
       </QueryClientProvider>,
     )
@@ -47,6 +47,25 @@ describe("ConnectionGate recovery", () => {
 
     expect(screen.getByRole("status")).toBeInTheDocument()
     expect(connectionStatus.get()).toBe("waiting")
+  })
+
+  it("probes the same-origin health route, never the API's own address", async () => {
+    connectionStatus.reportWaiting("unavailable-operation")
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 503 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ConnectionGate>
+          <p>Content</p>
+        </ConnectionGate>
+      </QueryClientProvider>,
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/health", { cache: "no-store" })
   })
 
   it("stays waiting while any active request is still unavailable", async () => {
@@ -114,7 +133,7 @@ function ActiveQueries() {
     initialData: [],
     staleTime: Infinity,
   })
-  return <p>Nội dung</p>
+  return <p>Content</p>
 }
 
 function deferred<T>() {

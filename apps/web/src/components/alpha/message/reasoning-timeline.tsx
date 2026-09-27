@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { Loader2 } from "lucide-react"
+import { Check, Loader2 } from "lucide-react"
 
 import { toolCallErrorLabel } from "@/lib/alpha-desk/copy"
 import {
@@ -41,7 +41,7 @@ import { SourceList } from "./source-list"
  * carrying `round` on `ToolCall` at all — the model asks for several searches
  * in one breath, and a client re-deriving groups from timing would be
  * guessing at a fact the backend already knows. A round with two or more
- * calls collapses to "Đã chạy N truy vấn" with the calls listed under it,
+ * calls collapses to "Ran N queries" with the calls listed under it,
  * because a reader does not need N separate rows to learn the model looked at
  * N things at once; a round with exactly one stays a single row, and that one
  * gets the result count and source stack the design gives a single lookup —
@@ -75,6 +75,7 @@ export function ReasoningTimeline({
 
   if (!running && items.length === 0) return null
 
+  const waitingCount = toolCalls.filter(toolCallWaiting).length
   const seconds = Math.max(0, Math.round(elapsedMs / 1000))
 
   return (
@@ -85,7 +86,7 @@ export function ReasoningTimeline({
         aria-expanded={open}
         className="flex items-center gap-[0.4rem] text-meta text-muted-foreground transition-colors hover:text-ink-2"
       >
-        {running ? workingLabel(seconds) : `Đã làm việc trong ${seconds}s`}
+        {running ? workingLabel(seconds) : `Worked for ${seconds}s`}
         <ChevronIcon open={open} />
       </button>
 
@@ -131,6 +132,13 @@ export function ReasoningTimeline({
             // The live row below is the last one whenever there is one, so a
             // trace that is still growing keeps its connecting line.
             const isLast = !running && index === items.length - 1
+            if (item.kind === "step") {
+              return (
+                <h3 key={item.key} className="mb-2 mt-3 text-micro font-medium text-ink-3 first:mt-0">
+                  {item.text}
+                </h3>
+              )
+            }
             if (item.kind === "thought") {
               return (
                 <RailRow key={item.key} icon={<BulbIcon />} isLast={isLast}>
@@ -158,7 +166,9 @@ export function ReasoningTimeline({
                 role="status"
                 className="text-meta leading-[22px] text-muted-foreground"
               >
-                {items.length === 0 ? "Đang chuẩn bị…" : "Đang xử lý…"}
+                {waitingCount > 0
+                  ? `Looking things up · ${waitingCount} left…`
+                  : items.length === 0 ? "Preparing…" : "Processing results…"}
               </span>
             </RailRow>
           )}
@@ -174,11 +184,11 @@ export function ReasoningTimeline({
  *
  * The seconds go here rather than in the row below, because this is the half
  * that survives the reader folding the rail shut — and because a timer next to
- * the words `Đang làm việc` is the same sentence the finished state ends on,
+ * the words `Working` is the same sentence the finished state ends on,
  * rather than a second one. Under a second there is no figure worth printing.
  */
 function workingLabel(seconds: number): string {
-  return seconds > 0 ? `Đang làm việc · ${seconds}s` : "Đang làm việc…"
+  return seconds > 0 ? `Working · ${seconds}s` : "Working…"
 }
 
 /**
@@ -196,7 +206,7 @@ function WorkingDots() {
         <span
           key={delay}
           style={{ animationDelay: `${delay}ms` }}
-          className="size-[3px] rounded-full bg-current animate-vg-dot-pulse"
+          className="size-[3px] rounded-full bg-current motion-safe:animate-vg-dot-pulse"
         />
       ))}
     </span>
@@ -204,6 +214,7 @@ function WorkingDots() {
 }
 
 type RailItem =
+  | { kind: "step"; key: string; text: string }
   | { kind: "thought"; key: string; text: string }
   | { kind: "single"; key: string; call: ToolCall }
   | { kind: "group"; key: string; calls: ToolCall[] }
@@ -219,7 +230,8 @@ function buildRailItems(thoughts: Thought[], toolCalls: ToolCall[]): RailItem[] 
   for (const call of toolCalls) rounds.add(call.round)
 
   const items: RailItem[] = []
-  for (const round of Array.from(rounds).sort((a, b) => a - b)) {
+  for (const [index, round] of Array.from(rounds).sort((a, b) => a - b).entries()) {
+    items.push({ kind: "step", key: `step-${round}`, text: `Step ${index + 1}` })
     thoughts
       .filter((thought) => thought.round === round)
       .forEach((thought, index) => {
@@ -290,7 +302,7 @@ function SourceTally({ call }: { call: ToolCall }) {
   if (domains.length === 0) {
     return call.result_count > 0 ? (
       <span className="ml-auto flex-none text-meta leading-[22px] text-muted-foreground">
-        {call.result_count} kết quả
+        {call.result_count} {plural(call.result_count, "result")}
       </span>
     ) : null
   }
@@ -300,12 +312,16 @@ function SourceTally({ call }: { call: ToolCall }) {
       className="ml-auto flex flex-none items-center gap-[0.55rem] text-meta leading-[22px] text-muted-foreground"
       title={domains.join(", ")}
     >
-      {domains.length} nguồn
-      <SourceChips sources={domains} />
+      {domains.length} {plural(domains.length, "source")}
+      <SourceChips sources={domains.map((mark) => ({ mark, favicon: true }))} />
     </span>
   )
 }
 
+
+function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return count === 1 ? singular : pluralForm
+}
 
 /** A round with exactly one tool call: its own row, its own result count. */
 function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
@@ -334,7 +350,7 @@ function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
         </span>
       )}
       {/* A result count only where results are what came back. A store read
-          answers with local content and no sources, so "0 kết quả" beside a call
+          answers with local content and no sources, so "0 results" beside a call
           that succeeded said the opposite of what happened. */}
       {call.status === "ok" && toolCallKind(call) === "external" && (
         <SourceTally call={call} />
@@ -344,7 +360,7 @@ function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
 
   return (
     <RailRow
-      icon={waiting ? <Spinner /> : <CallIcon call={call} />}
+      icon={waiting ? <Spinner /> : call.status === "ok" ? <Check aria-label="Done" className="size-[15px]" /> : <CallIcon call={call} />}
       isLast={isLast}
     >
       {hasResults ? (
@@ -432,16 +448,13 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
         className="flex w-full items-center gap-[0.55rem] text-left text-meta leading-[22px] text-muted-foreground transition-colors hover:text-ink-2"
       >
         <span className="min-w-0">
-          {allStore
-            ? `Đã chạy ${calls.length} công cụ nội bộ`
-            : `Đã chạy ${calls.length} truy vấn`}
+          {`${anyWaiting ? "Running" : "Ran"} ${calls.length} ${allStore ? plural(calls.length, "internal tool") : plural(calls.length, "query", "queries")}`}
         </span>
-        {/* Only while the rows that would say it themselves are folded away. */}
-        {!open && anyWaiting && (
+        {anyWaiting && (
           <span className="flex-none tabular-nums">{`· ${settled}/${calls.length}`}</span>
         )}
         {!open && failed > 0 && (
-          <span className="flex-none text-destructive">{`· ${failed} lỗi`}</span>
+          <span className="flex-none text-destructive">{`· ${failed} ${plural(failed, "error")}`}</span>
         )}
         <ChevronIcon open={open} />
       </button>
@@ -451,6 +464,8 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
           <div key={call.id} className="flex items-center gap-[0.55rem]">
             {toolCallWaiting(call) ? (
               <Spinner className="flex-none" />
+            ) : call.status === "ok" ? (
+              <Check aria-label="Done" className="size-[15px] flex-none text-muted-foreground" />
             ) : (
               <BranchIcon className="flex-none text-muted-foreground/70" />
             )}

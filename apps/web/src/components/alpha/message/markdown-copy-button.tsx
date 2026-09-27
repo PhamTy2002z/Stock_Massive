@@ -31,7 +31,7 @@ export function MarkdownCopyButton({
       await navigator.clipboard.writeText(getText())
       setCopied(true)
     } catch {
-      toast.error("Trình duyệt không cho phép sao chép")
+      toast.error("Your browser blocked copying")
     }
   }
 

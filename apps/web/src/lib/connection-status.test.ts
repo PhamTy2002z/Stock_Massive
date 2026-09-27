@@ -26,7 +26,7 @@ describe("what the app does when the API cannot answer", () => {
       vi.fn().mockRejectedValue(new TypeError("Failed to fetch"))
     )
 
-    await expect(alphaFetch("/threads")).rejects.toThrow(/không phản hồi|unavailable/i)
+    await expect(alphaFetch("/threads")).rejects.toThrow(/isn't responding|unavailable/i)
     expect(connectionStatus.get()).toBe("waiting")
   })
 

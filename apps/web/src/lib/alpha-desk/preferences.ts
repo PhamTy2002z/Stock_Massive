@@ -20,7 +20,12 @@
 
 import { guardedStore } from "./guarded-storage"
 
-const store = guardedStore(() => window.localStorage, "alpha-desk.preferences")
+export const PREFERENCES_KEY = "alpha-desk.preferences"
+
+const store = guardedStore(() => window.localStorage, PREFERENCES_KEY)
+
+/** `system` follows the operating system's reduced-motion setting; `reduced` always stills. */
+export type MotionPreference = "system" | "reduced"
 
 export interface Preferences {
   /**
@@ -46,12 +51,24 @@ export interface Preferences {
   sidebarOpen: boolean | null
   /** The chat column width the reader dragged to, in px, or null. */
   chatWidth: number | null
+  /** Whether this browser stills motion even where the system does not ask. */
+  motion: MotionPreference
+  /**
+   * Whether a Turn that settles while this tab is hidden raises a system
+   * notification. A wish: the browser's own permission still decides.
+   */
+  notifyOnAnswer: boolean
+  /** Whether a Turn that settles while this tab is hidden plays a short tone. */
+  soundOnAnswer: boolean
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
   signalDeskByDefault: false,
   sidebarOpen: null,
   chatWidth: null,
+  motion: "system",
+  notifyOnAnswer: false,
+  soundOnAnswer: false,
 }
 
 export function readPreferences(): Preferences {
@@ -72,6 +89,9 @@ export function readPreferences(): Preferences {
     signalDeskByDefault: flag(record.signalDeskByDefault) ?? false,
     sidebarOpen: flag(record.sidebarOpen),
     chatWidth: width(record.chatWidth),
+    motion: record.motion === "reduced" ? "reduced" : "system",
+    notifyOnAnswer: flag(record.notifyOnAnswer) ?? false,
+    soundOnAnswer: flag(record.soundOnAnswer) ?? false,
   }
 }
 
@@ -104,4 +124,37 @@ function width(value: unknown): number | null {
     return null
   }
   return value
+}
+
+/**
+ * Put the motion preference on the document, where the stylesheet reads it.
+ *
+ * An attribute rather than a class, so it cannot collide with the theme class
+ * `next-themes` owns on the same element.
+ */
+export function applyMotion(motion: MotionPreference): void {
+  if (typeof document === "undefined") return
+  if (motion === "reduced") document.documentElement.dataset.motion = "reduced"
+  else delete document.documentElement.dataset.motion
+}
+
+/**
+ * The same thing, before the first paint.
+ *
+ * Inlined into the document head by the root layout, so a reader who asked for
+ * stillness never sees the first screen animate in. It repeats the reader
+ * above in miniature because it runs before any bundle has loaded.
+ */
+export const MOTION_BOOT_SCRIPT = `try{var p=JSON.parse(localStorage.getItem(${JSON.stringify(
+  PREFERENCES_KEY,
+)})||"null");if(p&&p.motion==="reduced")document.documentElement.dataset.motion="reduced"}catch(e){}`
+
+/**
+ * Whether motion should be stilled right now: by this browser's preference or
+ * by the system's. For the few places that animate from script rather than CSS.
+ */
+export function motionReduced(): boolean {
+  if (typeof window === "undefined") return false
+  if (document.documentElement.dataset.motion === "reduced") return true
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
 }

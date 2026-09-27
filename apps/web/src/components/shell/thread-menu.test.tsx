@@ -51,7 +51,7 @@ function thread(overrides: Partial<Thread> = {}): Thread {
 
 /** Open one row's menu the way a user does: press its ellipsis. */
 function openMenu(name: string) {
-  fireEvent.click(screen.getByRole("button", { name: `Tuỳ chọn cho ${name}` }))
+  fireEvent.click(screen.getByRole("button", { name: `Options for ${name}` }))
   return screen.getByRole("menu")
 }
 
@@ -66,7 +66,7 @@ beforeEach(() => {
 })
 
 describe("the two groups", () => {
-  it("puts a pinned Thread under Đã ghim and leaves it out of the other list", () => {
+  it("puts a pinned Thread under Pinned and leaves it out of the other list", () => {
     threads.data = {
       threads: [
         thread({ id: "pinned-id", title: "Ghim", pinned_at: "2026-08-16T03:00:00Z" }),
@@ -88,7 +88,7 @@ describe("the two groups", () => {
 
     render(<Conversations />)
 
-    expect(screen.getByText(/Tất cả hội thoại đang được ghim/)).toBeInTheDocument()
+    expect(screen.getByText(/All conversations are pinned/)).toBeInTheDocument()
   })
 })
 
@@ -96,7 +96,7 @@ describe("the menu", () => {
   it("pins without sending a title", () => {
     render(<Conversations />)
 
-    fireEvent.click(within(openMenu("Xu hướng STB")).getByRole("menuitem", { name: "Ghim" }))
+    fireEvent.click(within(openMenu("Xu hướng STB")).getByRole("menuitem", { name: "Pin" }))
 
     expect(update.mutate).toHaveBeenCalledWith({
       threadId: "11111111-1111-4111-8111-111111111111",
@@ -108,7 +108,7 @@ describe("the menu", () => {
     threads.data = { threads: [thread({ pinned_at: "2026-08-16T03:00:00Z" })] }
     render(<Conversations />)
 
-    fireEvent.click(within(openMenu("Xu hướng STB")).getByRole("menuitem", { name: "Bỏ ghim" }))
+    fireEvent.click(within(openMenu("Xu hướng STB")).getByRole("menuitem", { name: "Unpin" }))
 
     expect(update.mutate).toHaveBeenCalledWith({
       threadId: "11111111-1111-4111-8111-111111111111",
@@ -119,7 +119,7 @@ describe("the menu", () => {
   it("links a new tab at the Thread's own deep link", () => {
     render(<Conversations />)
 
-    const link = within(openMenu("Xu hướng STB")).getByRole("link", { name: /Mở ở tab mới/ })
+    const link = within(openMenu("Xu hướng STB")).getByRole("link", { name: /Open in new tab/ })
 
     expect(link).toHaveAttribute("href", "/?thread=11111111-1111-4111-8111-111111111111")
     expect(link).toHaveAttribute("target", "_blank")
@@ -128,7 +128,7 @@ describe("the menu", () => {
   it("deletes on the press, without a second confirmation", () => {
     render(<Conversations />)
 
-    fireEvent.click(within(openMenu("Xu hướng STB")).getByRole("menuitem", { name: "Xoá" }))
+    fireEvent.click(within(openMenu("Xu hướng STB")).getByRole("menuitem", { name: "Delete" }))
 
     expect(remove.mutate).toHaveBeenCalledWith(
       "11111111-1111-4111-8111-111111111111",
@@ -151,7 +151,7 @@ describe("the menu", () => {
 describe("renaming in place", () => {
   it("commits what was typed on Enter", () => {
     render(<Conversations />)
-    fireEvent.click(within(openMenu("Xu hướng STB")).getByRole("menuitem", { name: "Đổi tên" }))
+    fireEvent.click(within(openMenu("Xu hướng STB")).getByRole("menuitem", { name: "Rename" }))
 
     const field = screen.getByRole("textbox")
     fireEvent.change(field, { target: { value: "  Cổ phiếu STB  " } })
@@ -166,7 +166,7 @@ describe("renaming in place", () => {
 
   it("writes nothing when Escape abandons it", () => {
     render(<Conversations />)
-    fireEvent.click(within(openMenu("Xu hướng STB")).getByRole("menuitem", { name: "Đổi tên" }))
+    fireEvent.click(within(openMenu("Xu hướng STB")).getByRole("menuitem", { name: "Rename" }))
 
     const field = screen.getByRole("textbox")
     fireEvent.change(field, { target: { value: "bỏ đi" } })
@@ -179,7 +179,7 @@ describe("renaming in place", () => {
 
   it("writes nothing when the name was not actually changed", () => {
     render(<Conversations />)
-    fireEvent.click(within(openMenu("Xu hướng STB")).getByRole("menuitem", { name: "Đổi tên" }))
+    fireEvent.click(within(openMenu("Xu hướng STB")).getByRole("menuitem", { name: "Rename" }))
 
     fireEvent.blur(screen.getByRole("textbox"))
 

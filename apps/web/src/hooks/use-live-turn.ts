@@ -1,15 +1,18 @@
 "use client"
 
-import { useCallback, useEffect, useReducer, useState } from "react"
+import { useCallback, useEffect, useReducer, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 
+import { AlphaRefusalError } from "@/lib/alpha"
 import {
   cancelTurn,
   createTurn,
   fetchTurn,
   newTurnId,
   turnStreamUrl,
+  type CreateTurnInput,
 } from "@/lib/alpha-desk/api"
+import { announceSettledTurn } from "@/lib/alpha-desk/answer-alert"
 import {
   IDLE,
   isActive,
@@ -18,7 +21,8 @@ import {
   type LiveTurn,
   type LiveTurnAction,
 } from "@/lib/alpha-desk/live-turn"
-import type { TurnEvent, TurnEventType } from "@/lib/alpha-desk/types"
+import type { Thread, Turn, TurnEvent, TurnEventType } from "@/lib/alpha-desk/types"
+import { ApiUnavailableError, isRetryableStatus } from "@/lib/connection-status"
 import { queryKeys } from "@/lib/query-keys"
 
 /**
@@ -55,6 +59,22 @@ const EVENT_TYPES: TurnEventType[] = [
 // seconds) gets to try first, so an ordinary blip costs no request at all.
 const ERROR_PROBE_MS = 4000
 
+// When the probe itself cannot reach the backend — a restart, a 503, a session
+// being rotated — it asks again on a widening interval rather than giving up,
+// because giving up is what left a finished Turn spinning forever.
+const PROBE_BACKOFF_MS = 2000
+const PROBE_BACKOFF_MAX_MS = 30_000
+
+/** How long to wait before the next probe, after this many failed ones. */
+export function probeBackoffMs(failures: number): number {
+  return Math.min(PROBE_BACKOFF_MS * 2 ** failures, PROBE_BACKOFF_MAX_MS)
+}
+
+// A create whose answer was lost may still have committed. Bounded, because a
+// reader pressed Send once and is waiting on the outcome of that press.
+const ADMIT_RETRIES = 2
+const ADMIT_BACKOFF_MS = 1000
+
 /** What the composer hands over: the question, and the mode it was asked in. */
 export interface TurnInput {
   text: string
@@ -68,6 +88,14 @@ export interface TurnInput {
    * stays a small JSON request and stays idempotent.
    */
   attachments?: string[]
+  /**
+   * The Thread to ask in, when it is not the one this hook was given.
+   *
+   * The first question of a new conversation names the Thread its create just
+   * returned. Reading the open Thread instead would send it wherever the reader
+   * had clicked in the meantime.
+   */
+  threadId?: string
 }
 
 export interface LiveTurnController {
@@ -93,6 +121,10 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
   // snapshot, and only a new connection produces one.
   const [attempt, setAttempt] = useState(0)
   const queryClient = useQueryClient()
+  // The state as of the last render, for the actions below that must know what
+  // they are replacing without re-creating themselves on every event.
+  const stateRef = useRef(state)
+  stateRef.current = state
 
   const turnId = state.turnId
   const subscribable = state.subscribable
@@ -108,13 +140,41 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
     if (!turnId || settled || !subscribable) return
 
     const source = new EventSource(turnStreamUrl(turnId))
-    let probe: ReturnType<typeof setTimeout> | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // One probe chain at a time, from the first error until it has an answer.
+    // `EventSource` reports an error on every reconnect attempt, and a second
+    // chain would only ask the same question twice as often.
+    let probing = false
+    let failures = 0
+    let closed = false
+
+    const stopProbing = () => {
+      if (timer) clearTimeout(timer)
+      timer = undefined
+      probing = false
+    }
+
+    const probe = async () => {
+      timer = undefined
+      const outcome = await settleFromServer(turnId, dispatch)
+      if (closed || !probing) return
+      if (outcome === "unreachable") {
+        timer = setTimeout(() => void probe(), probeBackoffMs(failures))
+        failures += 1
+        return
+      }
+      probing = false
+      // A Turn that is still running means the connection failed rather than
+      // the Turn ending, so this reopens it. `EventSource` retries a dropped
+      // connection itself but gives up on a refused one, and the two are the
+      // same thing to a reader watching an answer that stopped arriving.
+      if (outcome === "running") setAttempt((previous) => previous + 1)
+    }
 
     const onEvent = (message: MessageEvent<string>) => {
-      if (probe) {
-        clearTimeout(probe)
-        probe = undefined
-      }
+      // The stream is speaking again, so whatever the probe was about to ask
+      // has been answered.
+      stopProbing()
       try {
         dispatch({ type: "event", event: JSON.parse(message.data) as TurnEvent })
       } catch {
@@ -127,26 +187,21 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
     const onError = () => {
       // `EventSource` reports an error for an ordinary reconnect as well as for
       // a Turn that has gone away, and it retries either way. Rather than guess,
-      // ask the backend once — a Turn that ended while the connection was down
-      // must not leave the UI spinning on a stream that will never speak.
-      if (probe) return
-      probe = setTimeout(() => {
-        probe = undefined
-        // A Turn that is still running means the connection failed rather than
-        // the Turn ending, so this reopens it. `EventSource` retries a dropped
-        // connection itself but gives up on a refused one, and the two are the
-        // same thing to a reader watching an answer that stopped arriving.
-        void settleFromServer(turnId, dispatch).then((running) => {
-          if (running) setAttempt((previous) => previous + 1)
-        })
-      }, ERROR_PROBE_MS)
+      // ask the backend — and keep asking, further apart, while it cannot
+      // answer. A Turn that ended while the connection was down must not leave
+      // the UI spinning on a stream that will never speak.
+      if (probing) return
+      probing = true
+      failures = 0
+      timer = setTimeout(() => void probe(), ERROR_PROBE_MS)
     }
 
     for (const type of EVENT_TYPES) source.addEventListener(type, onEvent as EventListener)
     source.addEventListener("error", onError)
 
     return () => {
-      if (probe) clearTimeout(probe)
+      closed = true
+      stopProbing()
       for (const type of EVENT_TYPES) source.removeEventListener(type, onEvent as EventListener)
       source.removeEventListener("error", onError)
       source.close()
@@ -173,19 +228,54 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
     void queryClient.invalidateQueries({ queryKey: queryKeys.threads })
   }, [settledThreadId, state.phase, queryClient])
 
+  // -- telling a reader who looked away ------------------------------------
+
+  // Only a Turn this mount watched running is announced. A reload that
+  // reattaches to a Turn which ended while nobody was looking settles on its
+  // first snapshot, and announcing that would be news the reader already has.
+  const watched = useRef<string | null>(null)
+  useEffect(() => {
+    if (turnId && active) watched.current = turnId
+  }, [turnId, active])
+  const phase = state.phase
+  useEffect(() => {
+    if (!settled || !turnId || watched.current !== turnId) return
+    watched.current = null
+    // A cancel is the reader's own act; there is nothing to come back for.
+    if (phase === "cancelled") return
+    const thread = queryClient
+      .getQueryData<{ threads: Thread[] }>(queryKeys.threads)
+      ?.threads.find((row) => row.id === state.threadId)
+    announceSettledTurn({ turnId, title: thread?.title ?? null, answered: phase !== "failed" })
+  }, [settled, turnId, phase, state.threadId, queryClient])
+
   // -- the three actions --------------------------------------------------
 
   const start = useCallback(
     async (input: TurnInput, retryOfTurnId: string | null) => {
-      if (!threadId) return
+      const target = input.threadId ?? threadId
+      if (!target) return
       // Generated before the request, so a retried admission on a flaky network
       // resolves to the same Turn instead of starting a second one.
       const id = newTurnId()
+      // A Turn still running in another Thread, which this one is about to
+      // take the screen from. Its Thread is marked stale now, because nothing
+      // will be watching for its terminal event to refetch it.
+      const previous = stateRef.current
+      const displaced =
+        previous.turnId !== null &&
+        previous.threadId !== null &&
+        (isActive(previous) || previous.phase === "cancelling")
+          ? { turnId: previous.turnId, threadId: previous.threadId }
+          : null
+      if (displaced) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.thread(displaced.threadId) })
+      }
       setRefusal(null)
-      dispatch({ type: "start", turnId: id, threadId })
+      dispatch({ type: "start", turnId: id, threadId: target })
       try {
-        await createTurn({
-          threadId,
+        await admitTurn({
+          threadId: target,
           turnId: id,
           text: input.text,
           attachments: input.attachments ?? [],
@@ -197,6 +287,9 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
         // An admission refusal is an HTTP outcome, never an event. The draft is
         // dropped because there is no Turn behind it.
         dispatch({ type: "reset" })
+        // The refusal is usually that Turn still holding the account's one
+        // active slot, so it goes back on the screen it was taken from.
+        if (displaced) dispatch({ type: "start", ...displaced, subscribable: true })
         setRefusal(error instanceof Error ? error : new Error(String(error)))
         return
       }
@@ -204,7 +297,7 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
       dispatch({ type: "admitted" })
       // The user message is committed by the time the create returns, so the
       // transcript can show it without an optimistic copy that might not match.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.thread(threadId) })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.thread(target) })
       // The same commit names an unnamed Thread after the question that opened
       // it, so the list is refetched now rather than at the terminal event —
       // the sidebar would otherwise show the timestamped fallback for as long
@@ -218,16 +311,21 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
 
   const retry = useCallback(
     // A retry is a new Turn carrying `retry_of_turn_id`; the previous Turn, its
-    // spend, its message and its traces stay immutable.
-    (input: TurnInput) => start(input, state.turnId),
-    [start, state.turnId],
+    // spend, its message and its traces stay immutable. Only a Turn of the
+    // Thread being asked in can be the one retried.
+    (input: TurnInput) =>
+      start(input, state.threadId === (input.threadId ?? threadId) ? state.turnId : null),
+    [start, state.turnId, state.threadId, threadId],
   )
 
   const cancel = useCallback(async () => {
     if (!turnId || !active) return
     dispatch({ type: "cancelling" })
     try {
-      await cancelTurn(turnId)
+      // A Turn that had already ended answers with its ending, and the stream
+      // that would have said so may be the thing that stopped working.
+      const action = settledAction(await cancelTurn(turnId))
+      if (action) dispatch(action)
     } catch {
       // Idempotent upstream, and the terminal event is what actually settles
       // the Turn. A failed cancel leaves the UI honest rather than stuck.
@@ -251,32 +349,87 @@ export function useLiveTurn(threadId: string | null): LiveTurnController {
   }
 }
 
+/** The ending a Turn row records, or null while it is still running. */
+function settledAction(turn: Turn): LiveTurnAction | null {
+  if (turn.status === "admitted" || turn.status === "running") return null
+  return {
+    type: "settled",
+    turnId: turn.id,
+    status: turn.status,
+    terminalReason: turn.terminal_reason,
+    messageId: turn.response_message_id,
+  }
+}
+
+/**
+ * A request whose answer never arrived, as opposed to one that was refused.
+ *
+ * A `401` counts: the proxy has already tried to rotate the session, and one
+ * that could not be rotated this second is often a restart racing the cookie.
+ */
+function unreachable(error: unknown): boolean {
+  if (error instanceof ApiUnavailableError || error instanceof TypeError) return true
+  return (
+    error instanceof AlphaRefusalError &&
+    (error.status === 401 || isRetryableStatus(error.status))
+  )
+}
+
 /**
  * Ask the backend how a Turn ended, when the stream stopped saying.
  *
  * Synthesised into the same terminal event the stream would have carried, so
  * the reducer has exactly one way to settle rather than two.
  *
- * Returns whether the Turn is still running, which is the caller's cue to
- * reopen the stream rather than keep waiting on one that has stopped.
+ * `running` is the caller's cue to reopen the stream rather than keep waiting
+ * on one that has stopped; `unreachable` is its cue to ask again later.
  */
 async function settleFromServer(
   turnId: string,
   dispatch: (action: LiveTurnAction) => void,
-): Promise<boolean> {
+): Promise<"running" | "settled" | "unreachable" | "gone"> {
   try {
-    const turn = await fetchTurn(turnId)
-    if (turn.status === "admitted" || turn.status === "running") return true
-    dispatch({
-      type: "settled",
-      status: turn.status,
-      terminalReason: turn.terminal_reason,
-      messageId: turn.response_message_id,
-    })
-    return false
-  } catch {
-    // The Turn is unreachable — signed out, or gone. The surface keeps what it
-    // has rather than replacing a partial answer with an error.
-    return false
+    const action = settledAction(await fetchTurn(turnId))
+    if (action === null) return "running"
+    dispatch(action)
+    return "settled"
+  } catch (error) {
+    if (unreachable(error)) return "unreachable"
+    // The Turn is gone. The surface keeps what it has rather than replacing a
+    // partial answer with an error.
+    return "gone"
   }
+}
+
+/**
+ * Create a Turn, and survive losing the answer to that request.
+ *
+ * The id is the idempotency key, but admission is checked before the key is:
+ * re-sending a create that did commit meets the account's one-active-Turn
+ * ceiling held by that very Turn. So a lost answer is followed by asking for the
+ * Turn by id, and only a Turn that is not there is created again — under the
+ * same id, so a create that commits twice still names one Turn.
+ */
+async function admitTurn(input: CreateTurnInput): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await createTurn(input)
+      return
+    } catch (error) {
+      if (!unreachableCreate(error) || attempt >= ADMIT_RETRIES) throw error
+    }
+    await new Promise((resolve) => setTimeout(resolve, ADMIT_BACKOFF_MS * 2 ** attempt))
+    try {
+      await fetchTurn(input.turnId)
+      return // the lost create committed
+    } catch (probe) {
+      const missing = probe instanceof AlphaRefusalError && probe.status === 404
+      if (!missing && !unreachableCreate(probe)) throw probe
+    }
+  }
+}
+
+/** A create that may or may not have reached the backend. */
+function unreachableCreate(error: unknown): boolean {
+  return error instanceof ApiUnavailableError || error instanceof TypeError
 }

@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import { useQueryClient } from "@tanstack/react-query"
 
 import { useAnswerReveal } from "@/hooks/use-answer-reveal"
 import { useLiveTurn } from "@/hooks/use-live-turn"
@@ -45,6 +46,7 @@ import { AlphaRefusalError } from "@/lib/alpha"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import type { Attachment, FlagReason } from "@/lib/alpha-desk/types"
 import { describeFailure, type Failure } from "@/lib/failure"
+import { queryKeys } from "@/lib/query-keys"
 
 import { useShell } from "./shell-state"
 
@@ -92,10 +94,33 @@ export interface PendingAttachment {
   error?: string
 }
 
+/**
+ * What changes as the answer arrives: the transcript, and what the pane shows.
+ *
+ * A context of its own because it changes on every stream event and every step
+ * of the reveal. Everything else a region reads from the desk changes when the
+ * reader does something, and folding the two together re-rendered the whole
+ * shell — every sidebar row included — many times a second while a Turn ran.
+ */
+interface DeskTranscript {
+  entries: TranscriptEntry[]
+  /**
+   * What the right-hand pane is currently about, for the Thread on screen.
+   *
+   * Derived rather than stored, from the messages of this Thread and the Turn
+   * in flight, so switching Threads changes it by construction and a running
+   * Turn never leaves the previous answer's chart standing as the current one.
+   */
+  deskView: DeskView
+}
+
 interface DeskApi {
   threadId: string | null
-  entries: TranscriptEntry[]
-  /** A Turn is running, so the composer's control stops it rather than sending. */
+  /**
+   * A Turn of *this* Thread is running, so the composer's control stops it
+   * rather than sending. A Turn running in another Thread is not this
+   * composer's to stop.
+   */
   canCancel: boolean
   isCancelling: boolean
   isSubmitting: boolean
@@ -106,7 +131,7 @@ interface DeskApi {
    *
    * Beside `refusal` rather than replacing it: the message is what the backend
    * wrote about *this* request and is often more specific than any category
-   * ("ngân sách lượt đã hết"), while the classification is what knows that a
+   * ("this turn's budget is used up"), while the classification is what knows that a
    * 401 means the reader should sign in again. The banner shows the first and
    * takes its recovery from the second.
    */
@@ -128,14 +153,6 @@ interface DeskApi {
    * mode would be read from on the day the request carries one.
    */
   setSignalDesk: (on: boolean) => void
-  /**
-   * What the right-hand pane is currently about, for the Thread on screen.
-   *
-   * Derived rather than stored, from the messages of this Thread and the Turn
-   * in flight, so switching Threads changes it by construction and a running
-   * Turn never leaves the previous answer's chart standing as the current one.
-   */
-  deskView: DeskView
   flagFailedFor: number | null
   submit: (text: string) => void
   /** What this unsent question carries, in the order it was added. */
@@ -195,6 +212,7 @@ interface DeskApi {
 }
 
 const DeskContext = createContext<DeskApi | null>(null)
+const DeskTranscriptContext = createContext<DeskTranscript | null>(null)
 
 export function DeskProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
@@ -221,21 +239,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   // Sent, and the create has not committed it yet. Shown locally for exactly
   // that gap, then replaced by the copy the Thread comes back with.
   const [unconfirmedQuestion, setUnconfirmedQuestion] = useState<string | null>(null)
-  // Held because there is no Thread to send it to yet.
-  const [queuedQuestion, setQueuedQuestion] = useState<string | null>(null)
-  // The ids the queued question carries. Held beside it rather than re-read
-  // from the pending list when the Thread arrives: by then a second file may
-  // have finished uploading, and a question must go out with what it was sent
-  // with rather than with whatever had landed by the time a Thread existed.
-  const [queuedAttachments, setQueuedAttachments] = useState<string[]>([])
-  // And the mode it was sent in. A question queued behind a Thread create goes
-  // out with the mode the reader pressed Send in, not with whatever the pill
-  // says by the time the Thread exists: the two are seconds apart and the
-  // toggle is one click away, so reading it again would silently send a
-  // different question from the one that was asked.
-  const [queuedSignalDesk, setQueuedSignalDesk] = useState(false)
-  // What the unsent question carries. Beside `queuedQuestion` because it
-  // belongs to the same thing: a question nobody has sent yet.
+  // What the unsent question carries.
   const [pending, setPending] = useState<PendingAttachment[]>([])
 
   /**
@@ -259,12 +263,22 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   // that answer for.
   const [signalDeskThreads, setSignalDeskThreads] = useState<string[]>([])
 
+  const queryClient = useQueryClient()
   const thread = useThread(threadId)
   const turn = useLiveTurn(threadId)
   const createThread = useCreateThread()
-  const flagging = useFlagMessage(threadId)
-  const helpfulness = useHelpfulMessage(threadId)
-  const questions = useResolveQuestion(threadId)
+  const flagging = useFlagMessage()
+  const helpfulness = useHelpfulMessage()
+  const questions = useResolveQuestion()
+
+  // Whether the Turn in flight belongs to the conversation on screen. One
+  // account runs one Turn at a time, but the reader may be looking at another
+  // Thread while it runs, and that Thread's composer has nothing to stop.
+  const ownTurn = turn.state.threadId === threadId
+  // Read through a ref by the callbacks that must know the live Turn without
+  // re-creating themselves on every event it streams.
+  const liveRef = useRef(turn.state)
+  liveRef.current = turn.state
 
   // The deep link is consumed once. Left in the URL, every later reload would
   // read as a fresh arrival and open yet another Thread.
@@ -305,8 +319,9 @@ export function DeskProvider({ children }: { children: ReactNode }) {
 
   // What this tab was doing, for the next mount. A settled Turn is forgotten:
   // reattaching to it would open a stream for a Turn the transcript already
-  // shows as a canonical message.
-  const liveTurnId = turn.state.turnId
+  // shows as a canonical message. So is one running in another Thread, because
+  // the next mount reattaches the Turn to the Thread written beside it.
+  const liveTurnId = ownTurn ? turn.state.turnId : null
   const turnSettled = isSettled(turn.state)
   useEffect(() => {
     if (!restored) return
@@ -474,16 +489,17 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   // -- sending ------------------------------------------------------------
 
   const { send } = turn
+  const { mutate: openNewThread } = createThread
 
   /**
    * Send one question with one explicit list of attachments.
    *
    * The list is a parameter rather than read from state, because the four
    * places that send a question do not agree about where it comes from: the
-   * composer sends what is pending, the queued effect sends what was pending
-   * when the reader pressed Send, a retry sends what the last question carried,
-   * and a resend sends what *that* message carried. A single reader of state
-   * here would have been right for one of the four.
+   * composer sends what is pending, the first question of a Thread sends what
+   * was pending when the reader pressed Send, a retry sends what the last
+   * question carried, and a resend sends what *that* message carried. A single
+   * reader of state here would have been right for one of the four.
    */
   const submitWith = useCallback(
     (text: string, attachments: string[]) => {
@@ -500,28 +516,34 @@ export function DeskProvider({ children }: { children: ReactNode }) {
         void send({ text, signalDesk, attachments })
         return
       }
-      setQueuedQuestion(text)
-      setQueuedAttachments(attachments)
-      setQueuedSignalDesk(signalDesk)
-      createThread.mutate(undefined, {
-        onSuccess: (created) => setThreadId(created.id),
+      // The first question of a Thread goes out once the create returns, to the
+      // Thread that create returned — not to whichever one is open by then,
+      // which is wherever the reader clicked while it was in flight. It goes
+      // out with the text, files and mode it was sent with, captured here: the
+      // two moments are seconds apart and the pill is one click away. The
+      // attachment rows carry no `thread_id` precisely so their ids survive
+      // this gap — the upload happened before there was a Thread to belong to.
+      openNewThread(undefined, {
+        onSuccess: (created) => {
+          // Moved there only if the reader is still waiting on the empty
+          // conversation; one who opened another Thread meanwhile stays put.
+          setThreadId((current) => current ?? created.id)
+          void send({ text, signalDesk, attachments, threadId: created.id })
+        },
         onError: (error) => {
-          // Nothing stays queued behind a Thread that does not exist. The
-          // attachments are *not* dropped: the rows are still there and the
-          // chips are still on screen, so a second press sends the same files
-          // rather than making the reader choose them again.
-          setQueuedQuestion(null)
-          setQueuedAttachments([])
+          // The attachments are *not* dropped: the rows are still there and
+          // the chips are still on screen, so a second press sends the same
+          // files rather than making the reader choose them again.
           setUnconfirmedQuestion(null)
           // Kept as the thrown value rather than as its message: the status on
           // it is what tells the banner whether to offer a retry or a sign-in.
           setThreadError(
-            error instanceof Error ? error : new Error("Không mở được cuộc trò chuyện."),
+            error instanceof Error ? error : new Error("Couldn't open this conversation."),
           )
         },
       })
     },
-    [threadId, signalDesk, send, createThread],
+    [threadId, signalDesk, send, openNewThread],
   )
 
   /** What the composer calls: this question, carrying what is pending. */
@@ -532,18 +554,6 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     },
     [submitWith, readyIds, clearPending],
   )
-
-  // The first question of a Thread goes out here, after the create returns.
-  // The attachment rows carry no `thread_id` precisely so their ids survive
-  // this gap — the upload happened before there was a Thread to belong to.
-  useEffect(() => {
-    if (!threadId || queuedQuestion === null) return
-    const text = queuedQuestion
-    setQueuedQuestion(null)
-    const attachments = queuedAttachments
-    setQueuedAttachments([])
-    void send({ text, signalDesk: queuedSignalDesk, attachments })
-  }, [threadId, queuedQuestion, queuedAttachments, queuedSignalDesk, send])
 
   // The create commits the user message before it returns, so the copy on
   // screen stops being a local one as soon as the Thread comes back.
@@ -597,20 +607,25 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   // The last question asked, with what it carried. From `questionBefore` rather
   // than derived here, because the transcript's own module is where that
   // decision lives and the resend control in `view-chat` asks it the same way.
+  // Through a ref, so `retry` and `resend` stay one function for the whole Turn
+  // rather than a new one for every word of it.
   const lastQuestion = useMemo(() => questionBefore(entries), [entries])
+  const lastQuestionRef = useRef(lastQuestion)
+  lastQuestionRef.current = lastQuestion
 
   const { retry: retryTurn } = turn
   const retry = useCallback(() => {
     // A new Turn pointing at the old one. The previous Turn and everything it
     // wrote stay exactly where they are.
-    if (lastQuestion === null) return
+    const last = lastQuestionRef.current
+    if (last === null) return
     setUnconfirmedQuestion(null)
     void retryTurn({
-      text: lastQuestion.text,
+      text: last.text,
       signalDesk,
-      attachments: lastQuestion.attachments,
+      attachments: last.attachments,
     })
-  }, [lastQuestion, signalDesk, retryTurn])
+  }, [signalDesk, retryTurn])
 
   /**
    * Ask a question from the transcript again, from the message that carries it.
@@ -622,13 +637,19 @@ export function DeskProvider({ children }: { children: ReactNode }) {
    * again is a new question that happens to repeat one, and must not claim to
    * be a second attempt at a Turn that already answered.
    *
-   * Nothing is sent while a Turn is in flight. The composer offers Stop rather
-   * than Send for exactly that stretch, and a resend that slipped past it would
-   * open a second Turn behind the one on screen.
+   * Nothing is sent while this Thread's Turn is in flight. The composer offers
+   * Stop rather than Send for exactly that stretch, and a resend that slipped
+   * past it would open a second Turn behind the one on screen. A Turn running
+   * in another Thread is not this one's to retry, so a question here is asked
+   * as new, and the backend answers for the account's one active Turn.
    */
   const resend = useCallback(
     (text: string, attachments: string[] = []) => {
-      const plan = resendPlan(turn.state, text === lastQuestion?.text)
+      const live = liveRef.current
+      const plan =
+        live.threadId === threadId
+          ? resendPlan(live, text === lastQuestionRef.current?.text)
+          : "submit"
       if (plan === "retry") retry()
       // The fourth call site, and the one the first draft of this plan did not
       // count. An earlier question asked again is a *new* question, so its
@@ -636,38 +657,58 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       // `lastQuestion` — that one is a different question entirely.
       else if (plan === "submit") submitWith(text, attachments)
     },
-    [turn.state, lastQuestion, retry, submitWith],
+    [threadId, retry, submitWith],
   )
 
   // -- the two verdicts ---------------------------------------------------
 
-  const { flag, unflag } = flagging
+  // Each write names the Thread it was made in, so its answer patches that
+  // Thread's cache even when the reader has moved on before it lands. The
+  // `mutate` functions are taken rather than the mutation objects, which are
+  // new on every render and would re-create every callback below with them.
+  const { mutate: flag } = flagging.flag
+  const { mutate: unflag } = flagging.unflag
   const onFlag = useCallback(
-    (messageId: number, reason: FlagReason) => flag.mutate({ messageId, reason }),
-    [flag],
+    (messageId: number, reason: FlagReason) => {
+      if (threadId) flag({ threadId, messageId, reason })
+    },
+    [flag, threadId],
   )
-  const onUnflag = useCallback((messageId: number) => unflag.mutate(messageId), [unflag])
+  const onUnflag = useCallback(
+    (messageId: number) => {
+      if (threadId) unflag({ threadId, messageId })
+    },
+    [unflag, threadId],
+  )
 
   // One callback for both directions, because the caller knows which state the
   // press is asking for and the two endpoints differ only in method.
-  const { mark, unmark } = helpfulness
+  const { mutate: mark } = helpfulness.mark
+  const { mutate: unmark } = helpfulness.unmark
   const onHelpful = useCallback(
-    (messageId: number, helpful: boolean) =>
-      helpful ? mark.mutate(messageId) : unmark.mutate(messageId),
-    [mark, unmark],
+    (messageId: number, helpful: boolean) => {
+      if (!threadId) return
+      if (helpful) mark({ threadId, messageId })
+      else unmark({ threadId, messageId })
+    },
+    [mark, unmark, threadId],
   )
 
   // -- the question card --------------------------------------------------
 
-  const { answer, skip } = questions
+  const { mutate: answer } = questions.answer
+  const { mutate: skip } = questions.skip
   const onAnswerQuestion = useCallback(
-    (questionId: string, selectedOptionIds: string[]) =>
-      answer.mutate({ questionId, selectedOptionIds }),
-    [answer],
+    (questionId: string, selectedOptionIds: string[]) => {
+      if (threadId) answer({ threadId, questionId, selectedOptionIds })
+    },
+    [answer, threadId],
   )
   const onSkipQuestion = useCallback(
-    (questionId: string) => skip.mutate(questionId),
-    [skip],
+    (questionId: string) => {
+      if (threadId) skip({ threadId, questionId })
+    },
+    [skip, threadId],
   )
 
   // Read through a ref so the two below do not re-create themselves every time
@@ -693,6 +734,12 @@ export function DeskProvider({ children }: { children: ReactNode }) {
 
   const { clearRefusal, reset } = turn
   const newThread = useCallback(() => {
+    const live = liveRef.current
+    // The Thread being left is marked stale, so reopening it refetches rather
+    // than showing a transcript cached before its answer landed.
+    if (live.threadId !== null) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.thread(live.threadId) })
+    }
     setThreadId(null)
     setUnconfirmedQuestion(null)
     setThreadError(null)
@@ -704,8 +751,11 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       signalDesk: readPreferences().signalDeskByDefault,
       opened: true,
     })
-    reset()
-  }, [reset, shellDispatch])
+    // A Turn still running is left running, and watched: its terminal event is
+    // what refetches the Thread it belongs to. Only a settled one is forgotten,
+    // so nothing of it (a retry target, a draft) follows the reader here.
+    if (!isActive(live) && live.phase !== "cancelling") reset()
+  }, [reset, shellDispatch, queryClient])
 
   const setSignalDesk = useCallback(
     (on: boolean) => shellDispatch({ type: "signal-desk", on }),
@@ -721,18 +771,22 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   // never come from two different failures.
   const refusalError: Error | null = turn.refusal ?? threadError
 
+  // Booleans rather than the Turn itself, so the value below changes when the
+  // control changes and not on every event of the Turn that drives it.
+  const canCancel = ownTurn && isActive(turn.state)
+  const isCancelling = ownTurn && turn.state.phase === "cancelling"
+  const isSubmitting = createThread.isPending
+
   const value = useMemo<DeskApi>(
     () => ({
       threadId,
-      entries,
-      canCancel: isActive(turn.state),
-      isCancelling: turn.state.phase === "cancelling",
-      isSubmitting: createThread.isPending || queuedQuestion !== null,
+      canCancel,
+      isCancelling,
+      isSubmitting,
       refusal: refusalError?.message ?? null,
       refusalFailure: refusalError === null ? null : describeFailure(refusalError),
       signalDesk,
       setSignalDesk,
-      deskView,
       attachments: pending,
       attach: attachFiles,
       detach,
@@ -758,16 +812,14 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     }),
     [
       threadId,
-      entries,
-      turn.state,
+      canCancel,
+      isCancelling,
+      isSubmitting,
       refusalError,
       turn.cancel,
-      createThread.isPending,
-      queuedQuestion,
       flagging.failedMessageId,
       signalDesk,
       setSignalDesk,
-      deskView,
       pending,
       attachFiles,
       detach,
@@ -790,12 +842,30 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     ],
   )
 
-  return <DeskContext.Provider value={value}>{children}</DeskContext.Provider>
+  const transcript = useMemo<DeskTranscript>(() => ({ entries, deskView }), [entries, deskView])
+
+  return (
+    <DeskContext.Provider value={value}>
+      <DeskTranscriptContext.Provider value={transcript}>{children}</DeskTranscriptContext.Provider>
+    </DeskContext.Provider>
+  )
 }
 
-
+/** The desk's state and actions: everything but the answer as it arrives. */
 export function useDesk(): DeskApi {
   const value = useContext(DeskContext)
   if (value === null) throw new Error("useDesk must be used inside <DeskProvider>")
+  return value
+}
+
+/**
+ * The transcript and the pane's subject, which change as the answer arrives.
+ *
+ * Read only where they are drawn; a component that reads this re-renders on
+ * every step of a streaming answer.
+ */
+export function useDeskTranscript(): DeskTranscript {
+  const value = useContext(DeskTranscriptContext)
+  if (value === null) throw new Error("useDeskTranscript must be used inside <DeskProvider>")
   return value
 }

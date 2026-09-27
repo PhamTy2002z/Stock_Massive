@@ -6,8 +6,7 @@ import { useEffect, useState, useSyncExternalStore } from "react"
 import { toast } from "sonner"
 
 import { FailureState } from "@/components/ui/failure-state"
-import { getApiBaseUrl } from "@/lib/api"
-import { connectionStatus, healthUrlFrom } from "@/lib/connection-status"
+import { connectionStatus } from "@/lib/connection-status"
 import { describeFailure } from "@/lib/failure"
 
 /** How often to ask whether the API is back. Restarts take a second or two. */
@@ -22,6 +21,11 @@ const PROBE_INTERVAL_MS = 3000
  */
 const PROLONGED_AFTER_MS = 20_000
 const TOAST_ID = "connection-waiting"
+/**
+ * Same-origin, like every other request this page makes: the route asks the
+ * API from the server side, so the browser never needs the API's own address.
+ */
+const HEALTH_URL = "/api/health"
 
 /**
  * Veils the page while the API is unreachable, and lifts by itself.
@@ -64,18 +68,17 @@ export function ConnectionGate({ children }: { children: React.ReactNode }) {
       return
     }
 
-    toast.loading("Đang chờ hệ thống phản hồi…", {
+    toast.loading("Waiting for the system to respond…", {
       id: TOAST_ID,
-      description: "Dữ liệu sẽ tự hiện lại, bạn không cần tải lại trang.",
+      description: "Data will reappear on its own — no need to reload the page.",
       duration: Infinity,
     })
 
-    const healthUrl = healthUrlFrom(getApiBaseUrl())
     let cancelled = false
 
     const probe = async () => {
       try {
-        const response = await fetch(healthUrl, { cache: "no-store" })
+        const response = await fetch(HEALTH_URL, { cache: "no-store" })
         if (cancelled || !response.ok) return
         // The health endpoint can be healthy while an application endpoint is
         // still rate-limited or failing. Let a successful retried request call
@@ -127,7 +130,7 @@ export function ConnectionGate({ children }: { children: React.ReactNode }) {
             </div>
           ) : (
             <>
-              <span className="sr-only">Đang chờ hệ thống phản hồi</span>
+              <span className="sr-only">Waiting for the system to respond</span>
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden />
             </>
           )}

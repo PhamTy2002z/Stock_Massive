@@ -11,8 +11,8 @@ import { VisgniteMark } from "@/components/shared/visgnite-logo"
 export default function Loading() {
   return (
     <div className="flex h-dvh items-center justify-center bg-background">
-      <VisgniteMark className="h-8 w-[21px] animate-vg-fade-in" />
-      <span className="sr-only">Đang tải VisgniteAI</span>
+      <VisgniteMark className="h-8 w-9 animate-vg-fade-in" />
+      <span className="sr-only">Loading VisgniteAI</span>
     </div>
   )
 }

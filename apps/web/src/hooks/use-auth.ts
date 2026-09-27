@@ -1,17 +1,33 @@
 "use client"
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 
+import { updateProfileAction } from "@/app/(auth)/account-actions"
 import { logoutAction } from "@/app/(auth)/actions"
+import type { AuthUser, ProfilePatch, UserPreferences } from "@/lib/auth/api"
 import { ApiUnavailableError, connectionStatus, isRetryableStatus } from "@/lib/connection-status"
 import { queryKeys } from "@/lib/query-keys"
 
-export interface AuthUser {
-  id: number
-  email: string
-  full_name: string | null
-  is_active: boolean
-  created_at: string | null
+export type { AuthUser, InvestingStyle, ProfilePatch, UserPreferences } from "@/lib/auth/api"
+
+/**
+ * What an account that has never set a preference means by each one.
+ *
+ * Applied to the session read, so an API that has not yet learned to send
+ * `preferences` answers as an account with no opinions rather than as a
+ * crash in every pane that reads one.
+ */
+export const DEFAULT_USER_PREFERENCES: UserPreferences = {
+  nickname: null,
+  investing_style: null,
+  custom_instructions: null,
+  memory_enabled: true,
+}
+
+function withPreferences(user: AuthUser | null): AuthUser | null {
+  if (user === null) return null
+  return { ...user, preferences: { ...DEFAULT_USER_PREFERENCES, ...user.preferences } }
 }
 
 const ME_URL = "/api/auth/me"
@@ -46,7 +62,7 @@ async function fetchCurrentUser(): Promise<AuthUser | null> {
   if (!response.ok) {
     throw new Error("Unable to resolve session")
   }
-  return (await response.json()).user ?? null
+  return withPreferences((await response.json()).user ?? null)
 }
 
 /**
@@ -86,4 +102,69 @@ export function useAuth() {
     signOut: signOut.mutate,
     isSigningOut: signOut.isPending,
   }
+}
+
+/** A profile write the API refused, with the status that says why. */
+export class ProfileWriteError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message)
+    this.name = "ProfileWriteError"
+  }
+}
+
+function merge(user: AuthUser, patch: ProfilePatch): AuthUser {
+  return {
+    ...user,
+    ...(patch.full_name === undefined ? {} : { full_name: patch.full_name }),
+    preferences: { ...user.preferences, ...patch.preferences },
+  }
+}
+
+/**
+ * Write part of the profile, and put the answer where every pane reads it.
+ *
+ * The response replaces the cached user rather than the patch being merged in,
+ * because the API is the one that normalises what was sent. `optimistic` draws
+ * the change before the answer and puts the old user back on a refusal — right
+ * for a switch, whose new position the reader expects at once; a text field
+ * keeps its own draft instead and needs nothing drawn early.
+ */
+export function useUpdateProfile({ optimistic = false }: { optimistic?: boolean } = {}) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (patch: ProfilePatch) => {
+      const result = await updateProfileAction(patch)
+      if (!result.ok) throw new ProfileWriteError(result.status, result.error)
+      return result.value
+    },
+    onMutate: async (patch) => {
+      const previous = queryClient.getQueryData<AuthUser | null>(queryKeys.currentUser)
+      if (optimistic && previous) {
+        await queryClient.cancelQueries({ queryKey: queryKeys.currentUser })
+        queryClient.setQueryData(queryKeys.currentUser, merge(previous, patch))
+      }
+      return { previous }
+    },
+    onSuccess: (user) => {
+      queryClient.setQueryData(queryKeys.currentUser, withPreferences(user))
+      toast.success("Saved")
+    },
+    onError: (error, _patch, context) => {
+      if (optimistic && context?.previous !== undefined) {
+        queryClient.setQueryData(queryKeys.currentUser, context.previous)
+      }
+      const status = error instanceof ProfileWriteError ? error.status : 0
+      toast.error(
+        status === 422
+          ? "That value isn't valid."
+          : status === 401
+            ? "Your session has expired. Please sign in again."
+            : "Couldn't save the change. Please try again.",
+      )
+    },
+  })
 }

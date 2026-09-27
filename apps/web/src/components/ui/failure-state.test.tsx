@@ -36,14 +36,14 @@ describe("the recovery control", () => {
     const retry = vi.fn()
     render(<FailureState failure={offline} onRetry={retry} />)
 
-    fireEvent.click(screen.getByRole("button", { name: /Thử lại/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Try again/ }))
     expect(retry).toHaveBeenCalledTimes(1)
   })
 
   it("sends an expired session to sign in, without needing a handler", () => {
     render(<FailureState failure={expired} />)
 
-    const link = screen.getByRole("link", { name: "Đăng nhập lại" })
+    const link = screen.getByRole("link", { name: "Sign in again" })
     expect(link).toHaveAttribute("href", "/login")
   })
 })

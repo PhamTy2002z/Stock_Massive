@@ -7,6 +7,7 @@ import { QueryErrorBoundary } from "@/components/providers/query-error-boundary"
 import { ConnectionGate } from "@/components/providers/connection-gate";
 import { Toaster } from "@/components/ui/sonner";
 import { AgentationToolbar } from "@/components/dev/agentation-toolbar";
+import { MOTION_BOOT_SCRIPT } from "@/lib/alpha-desk/preferences";
 
 /**
  * The body face, and the one every label in the product is set in.
@@ -56,7 +57,7 @@ const newsreader = Newsreader({
  */
 export const metadata: Metadata = {
   title: "VisgniteAI",
-  description: "Trợ lý phân tích chứng khoán Việt Nam — HOSE, HNX, UPCOM",
+  description: "Research assistant for Vietnamese listed equities — HOSE, HNX, UPCOM",
 };
 
 export default function RootLayout({
@@ -71,10 +72,15 @@ export default function RootLayout({
        `font-sans` and a component inheriting from the body resolve to the same
        stack — with a class on the body those two answers can differ. */
     <html
-      lang="vi"
+      lang="en"
       suppressHydrationWarning
       className={`${inter.variable} ${jetBrainsMono.variable} ${newsreader.variable}`}
     >
+      <head>
+        {/* Before the first paint, like the theme: a reader who asked for
+            stillness must not watch the first screen animate in. */}
+        <script dangerouslySetInnerHTML={{ __html: MOTION_BOOT_SCRIPT }} />
+      </head>
       <body>
         {/* Night is the design, not a mode: the VisgniteAI reference is drawn
             on #101112 and every surface step above it is defined against that
@@ -99,8 +105,9 @@ export default function RootLayout({
             <Toaster />
           </QueryProvider>
         </ThemeProvider>
-        {/* Devtool annotate UI cho AI coding agent — component tự no-op ở
-            production build, xem `components/dev/agentation-toolbar.tsx`. */}
+        {/* UI-annotation devtool for AI coding agents — the component no-ops
+            itself out at production build; see
+            `components/dev/agentation-toolbar.tsx`. */}
         <AgentationToolbar />
       </body>
     </html>

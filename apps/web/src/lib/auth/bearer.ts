@@ -78,6 +78,28 @@ export async function rotateAccessToken(): Promise<string | null> {
 }
 
 /**
+ * Run one upstream call as the signed-in user, rotating once on a 401.
+ *
+ * The same recovery the Alpha Desk proxy performs, for the account writes that
+ * go through server actions instead. A session with no usable token at all is
+ * reported as the 401 it is, so the caller answers it like any other refusal.
+ */
+export async function withAccessToken<T>(call: (token: string) => Promise<T>): Promise<T> {
+  const token = (await currentAccessToken()) ?? (await rotateAccessToken())
+  if (!token) throw new AuthApiError(401, "Not authenticated")
+
+  try {
+    return await call(token)
+  } catch (error) {
+    if (!(error instanceof AuthApiError) || error.status !== 401) throw error
+  }
+
+  const rotated = await rotateAccessToken()
+  if (!rotated) throw new AuthApiError(401, "Not authenticated")
+  return call(rotated)
+}
+
+/**
  * One exchange with the API. Null means the session is over; anything else
  * throws, because an unreachable API is not a signed-out user.
  */

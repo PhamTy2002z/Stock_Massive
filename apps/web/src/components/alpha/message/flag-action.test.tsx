@@ -44,7 +44,7 @@ function action(overrides: Partial<React.ComponentProps<typeof FlagAction>> = {}
 }
 
 function open() {
-  fireEvent.click(screen.getByRole("button", { name: /báo lỗi/i }))
+  fireEvent.click(screen.getByRole("button", { name: /report a problem/i }))
   return screen.getByRole("menu")
 }
 
@@ -66,7 +66,7 @@ describe("the four reasons", () => {
     // `wrong_figure` is a column value. A reader flags an answer because the
     // number is wrong, not because a label is.
     expect(menu.textContent).not.toMatch(/wrong_figure|overreach|wrongly_refused/)
-    expect(menu.textContent).toMatch(/Số liệu sai/)
+    expect(menu.textContent).toMatch(/Wrong figure/)
   })
 
   it("offers no free-text field, because nothing reads one", () => {
@@ -80,7 +80,7 @@ describe("the four reasons", () => {
     const props = action({ messageId: 42 })
     const menu = within(open())
 
-    fireEvent.click(menu.getByRole("menuitemradio", { name: /Số liệu sai/ }))
+    fireEvent.click(menu.getByRole("menuitemradio", { name: /Wrong figure/ }))
 
     expect(props.onFlag).toHaveBeenCalledWith(42, "wrong_figure")
   })
@@ -90,15 +90,15 @@ describe("once a message is flagged", () => {
   it("acknowledges it and promises nothing", () => {
     render(<FlagAction messageId={7} reason="overreach" onFlag={vi.fn()} onUnflag={vi.fn()} />)
 
-    const acknowledgement = screen.getByText(/Đã ghi nhận/)
+    const acknowledgement = screen.getByText(/Flag recorded/)
     expect(acknowledgement).toBeInTheDocument()
     // No ticket, no reply, no deadline, and nobody getting back to them.
     expect(acknowledgement.textContent).not.toMatch(
-      /sẽ liên hệ|phản hồi trong|mã yêu cầu|ticket|xử lý trong/i,
+      /will contact|respond within|ticket number|ticket|processed within/i,
     )
     // A reference number is the single most common way a surface implies a
     // process. There is no process, so there is no number.
-    expect(acknowledgement.textContent).not.toMatch(/#\d|\bmã số\b/i)
+    expect(acknowledgement.textContent).not.toMatch(/#\d|\breference number\b/i)
   })
 
   it("shows which reason is on the message", () => {
@@ -127,7 +127,7 @@ describe("once a message is flagged", () => {
     const props = action({ reason: "other" })
     const menu = within(open())
 
-    fireEvent.click(menu.getByRole("menuitem", { name: /Bỏ đánh dấu/ }))
+    fireEvent.click(menu.getByRole("menuitem", { name: /Remove flag/ }))
 
     expect(props.onUnflag).toHaveBeenCalledWith(7)
   })
@@ -136,7 +136,7 @@ describe("once a message is flagged", () => {
     action()
     const menu = within(open())
 
-    expect(menu.queryByRole("menuitem", { name: /Bỏ đánh dấu/ })).not.toBeInTheDocument()
+    expect(menu.queryByRole("menuitem", { name: /Remove flag/ })).not.toBeInTheDocument()
   })
 })
 
@@ -154,7 +154,7 @@ describe("when the write is rejected", () => {
       />,
     )
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/Chưa ghi được đánh dấu/)
+    expect(screen.getByRole("alert")).toHaveTextContent(/Couldn't save the flag/)
   })
 
   it("does not also claim the flag was recorded", () => {
@@ -170,7 +170,7 @@ describe("when the write is rejected", () => {
       />,
     )
 
-    expect(screen.queryByText(/Đã ghi nhận/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Flag recorded/)).not.toBeInTheDocument()
   })
 
   it("still offers the reasons, because pressing again is the whole retry", () => {
@@ -194,7 +194,7 @@ describe("the control itself", () => {
   it("is reachable by name, not only by its icon", () => {
     action()
 
-    expect(screen.getByRole("button", { name: /báo lỗi câu trả lời/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /report a problem with this answer/i })).toBeInTheDocument()
   })
 })
 
@@ -213,11 +213,11 @@ describe("where the action lives", () => {
     // The four reasons are the vocabulary a reviewer reads, so they are kept
     // rather than replaced by a bare down-vote — but they are asked for only
     // once the reader says something went wrong.
-    expect(screen.queryByRole("button", { name: /báo lỗi/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /report a problem/i })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: /chưa đúng/i }))
+    fireEvent.click(screen.getByRole("button", { name: /not correct/i }))
 
-    expect(screen.getByRole("button", { name: /báo lỗi/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /report a problem/i })).toBeInTheDocument()
   })
 
   it("is absent where there is nowhere to send it", () => {
@@ -225,6 +225,6 @@ describe("where the action lives", () => {
     // swallows the press and leaves the reader thinking they objected.
     render(<AssistantMessage view={view()} messageId={3} />)
 
-    expect(screen.queryByRole("button", { name: /báo lỗi/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /report a problem/i })).not.toBeInTheDocument()
   })
 })

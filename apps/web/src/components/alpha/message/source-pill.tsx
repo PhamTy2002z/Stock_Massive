@@ -18,7 +18,7 @@ import { SourceChips } from "./source-chips"
  * one source. The sources the answer lists at its end count too: that list is
  * not drawn under the answer, so this is where a reader finds it.
  *
- * Absent when there is nothing behind the answer. A pill reading *0 nguồn* is a
+ * Absent when there is nothing behind the answer. A pill reading *0 sources* is a
  * claim about an answer that never went looking, and it invites a click onto an
  * empty panel.
  */
@@ -36,7 +36,9 @@ export function SourcePill({
 }) {
   const sources = answerSources(text, toolCalls)
   if (sources.length === 0) return null
-  const marks = [...new Set(sources.map((source) => source.mark))]
+  // One disc per mark. Rows sharing a hostname mark agree on `favicon`: it is
+  // true exactly when a tool result recorded that host.
+  const marks = [...new Map(sources.map((source) => [source.mark, source])).values()]
 
   return (
     <div className={cn("flex", className)}>
@@ -46,7 +48,7 @@ export function SourcePill({
         className="flex items-center gap-2 rounded-full border border-border bg-surface-raised py-1.5 pl-[0.55rem] pr-3.5 text-meta text-ink-3 transition-colors hover:bg-accent hover:text-foreground"
       >
         <SourceChips sources={marks} />
-        {sources.length} nguồn
+        {sources.length} {sources.length === 1 ? "source" : "sources"}
       </button>
     </div>
   )

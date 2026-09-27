@@ -5,8 +5,8 @@ import AuthFormFallback from "../auth-form-fallback"
 import RegisterForm from "./register-form"
 
 export const metadata: Metadata = {
-  title: "Tạo tài khoản · VisgniteAI",
-  description: "Tạo tài khoản VisgniteAI",
+  title: "Create account · VisgniteAI",
+  description: "Create a VisgniteAI account",
 }
 
 export default function RegisterPage() {

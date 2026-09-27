@@ -181,10 +181,10 @@
        resolve to the same stack, which they cannot if the two are declared in
        different places. */
     @apply bg-background font-sans text-foreground;
-    /* The reference sets 15px as the body size — every ratio in the design
-       (.9rem nav rows, .86rem controls, .74rem eyebrow labels) is derived from
-       it, so it is stated once here rather than fought per component. */
-    font-size: 15px;
+    /* 14px body — every ratio in the design (.875rem nav rows, .8125rem
+       controls, .6875rem micro labels) sits under it, so it is stated once here
+       rather than fought per component. */
+    font-size: 14px;
     /* Both halves of the pair. On a near-black ground the default rendering
        thickens light type until it blooms, and the two properties cover the two
        engines that do it. */
@@ -337,7 +337,7 @@
   /* The host's figure labels (`figure-markers.ts`). Small, tabular and in the
      line of text, so a table of figures stays readable with a chip on every
      cell. Doubt is the caution tone; the market's up/down colours mean
-     direction and can be swapped by the reader, so they are never used here. */
+     direction, so they are never used here. */
   .vg-figure {
     display: inline-block;
     margin-left: 0.2em;
@@ -351,19 +351,10 @@
     vertical-align: 0.08em;
     cursor: help;
   }
-  .vg-figure-cited {
-    color: hsl(var(--ink-3));
-    background: hsl(var(--surface-raised));
-  }
   .vg-figure-stale {
     color: hsl(var(--caution));
     background: hsl(var(--surface-raised));
     border: 1px dashed hsl(var(--caution) / 0.55);
-  }
-  .vg-figure-unverified {
-    color: hsl(var(--caution));
-    background: hsl(var(--caution) / 0.12);
-    border: 1px solid hsl(var(--caution) / 0.45);
   }
 
   /* 0.26s is `CHUNK_FADE_MS` in `word-cadence.ts`, which is how the surface
@@ -389,6 +380,19 @@
     .stock-detail-enter {
       animation: none;
     }
+  }
+
+  /* The same stillness asked for in Settings ("Motion: Reduced") rather
+     than by the system. Wider than the list above on purpose: Tailwind's
+     `motion-safe:` and `motion-reduce:` variants answer only the media query,
+     so the preference has to reach every animation and transition itself.
+     `preferences.ts` sets the attribute, before first paint as well. */
+  [data-motion="reduced"] *,
+  [data-motion="reduced"] *::before,
+  [data-motion="reduced"] *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -619,8 +623,9 @@
        rather than directions.
 
        The hues are what is left once the meanings above are spoken for: amber
-       ~30° is the brand and the focus mark, violet ~262° reads as *trần* to a
-       Vietnamese reader, ~3° is a fall and ~140° is a rise. Each of these sits
+       ~30° is the brand and the focus mark, violet ~262° reads as the
+       ceiling-price mark ("trần") to a Vietnamese reader, ~3° is a fall and
+       ~140° is a rise. Each of these sits
        at least ~22° clear of all four, and at least 25° from its neighbours
        here, so the six are told apart by hue rather than by a legend.
 

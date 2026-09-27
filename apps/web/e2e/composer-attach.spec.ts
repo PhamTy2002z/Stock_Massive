@@ -31,7 +31,7 @@ test.beforeEach(async ({ page }) => {
   email = newEmail()
   await signUp(page, email)
   await page.goto("/")
-  await expect(page.getByLabel("Hỏi VisgniteAI")).toBeVisible()
+  await expect(page.getByLabel("Ask VisgniteAI")).toBeVisible()
 })
 
 test.afterEach(async ({ request }) => {
@@ -39,10 +39,10 @@ test.afterEach(async ({ request }) => {
 })
 
 test("both live rows of the attach menu can actually be pressed", async ({ page }) => {
-  await page.getByRole("button", { name: "Đính kèm" }).click()
+  await page.getByRole("button", { name: "Attach" }).click()
 
-  const addFile = page.getByRole("menuitem", { name: /Thêm tệp hoặc ảnh/ })
-  const capture = page.getByRole("menuitem", { name: /Chụp màn hình/ })
+  const addFile = page.getByRole("menuitem", { name: /Add file or image/ })
+  const capture = page.getByRole("menuitem", { name: /Capture screen/ })
 
   await expect(addFile).toBeVisible()
   await expect(capture).toBeVisible()
@@ -57,13 +57,13 @@ test("a press outside still closes the menu, and the trigger still toggles it", 
 }) => {
   // The scrim used to do this. Losing dismissal would be a fair price to
   // notice, so it is asserted rather than assumed.
-  const trigger = page.getByRole("button", { name: "Đính kèm" })
-  const addFile = page.getByRole("menuitem", { name: /Thêm tệp hoặc ảnh/ })
+  const trigger = page.getByRole("button", { name: "Attach" })
+  const addFile = page.getByRole("menuitem", { name: /Add file or image/ })
 
   await trigger.click()
   await expect(addFile).toBeVisible()
 
-  await page.getByLabel("Hỏi VisgniteAI").click()
+  await page.getByLabel("Ask VisgniteAI").click()
   await expect(addFile).not.toBeVisible()
 
   // And the trigger closes what it opened rather than reopening it: the press

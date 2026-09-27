@@ -30,7 +30,7 @@ describe("figure labels in an answer", () => {
     // decision 2026-09-27: the words cost more reading than they told); only an
     // old source is marked in the prose.
     expect(chips.map((chip) => chip.getAttribute("data-figure"))).toEqual(["stale"])
-    expect(chips.map((chip) => chip.textContent)).toEqual(["nguồn cũ"])
+    expect(chips.map((chip) => chip.textContent)).toEqual(["stale source"])
     expect(chips[0].getAttribute("title")).toContain("07/01/2026")
     expect(container.textContent).not.toContain("chưa kiểm chứng")
     expect(container.textContent).toContain("21,35%")

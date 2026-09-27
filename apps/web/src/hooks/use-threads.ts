@@ -129,7 +129,7 @@ export function useUpdateThread() {
     // the app having ignored the edit rather than as the request having
     // failed.
     onError: () => {
-      toast.error("Không lưu được thay đổi cho hội thoại này.")
+      toast.error("Couldn't save the change to this conversation.")
     },
   })
 }
@@ -162,7 +162,7 @@ export function useDeleteThread() {
     // stayed, with nothing to distinguish a refused request from a control
     // that does not work.
     onError: () => {
-      toast.error("Không xoá được hội thoại này.")
+      toast.error("Couldn't delete this conversation.")
     },
   })
 }
@@ -197,12 +197,15 @@ function sortThreads(threads: Thread[]): Thread[] {
  * flag that appeared instantly and then vanished on a 401 would tell the reader
  * their objection was recorded when it was not. The write is a single small
  * request; the honest ordering costs nothing worth having.
+ *
+ * The Thread travels with each write rather than being read from the one on
+ * screen: an answer that lands after the reader opened another conversation
+ * belongs to the Thread the press was made in.
  */
-export function useFlagMessage(threadId: string | null) {
+export function useFlagMessage() {
   const queryClient = useQueryClient()
 
-  function applyToThread(flag: MessageFlag): void {
-    if (threadId === null) return
+  function applyToThread(flag: MessageFlag, { threadId }: { threadId: string }): void {
     queryClient.setQueryData<ThreadDetail>(queryKeys.thread(threadId), (thread) =>
       thread === undefined
         ? thread
@@ -222,13 +225,20 @@ export function useFlagMessage(threadId: string | null) {
   }
 
   const flag = useMutation({
-    mutationFn: ({ messageId, reason }: { messageId: number; reason: FlagReason }) =>
-      flagMessage(messageId, reason),
+    mutationFn: ({
+      messageId,
+      reason,
+    }: {
+      threadId: string
+      messageId: number
+      reason: FlagReason
+    }) => flagMessage(messageId, reason),
     onSuccess: applyToThread,
   })
 
   const unflag = useMutation({
-    mutationFn: (messageId: number) => unflagMessage(messageId),
+    mutationFn: ({ messageId }: { threadId: string; messageId: number }) =>
+      unflagMessage(messageId),
     onSuccess: applyToThread,
   })
 
@@ -244,7 +254,7 @@ export function useFlagMessage(threadId: string | null) {
   const failedMessageId = flag.isError
     ? flag.variables.messageId
     : unflag.isError
-      ? unflag.variables
+      ? unflag.variables.messageId
       : null
 
   return { flag, unflag, failedMessageId }
@@ -263,11 +273,10 @@ export function useFlagMessage(threadId: string | null) {
  * and got one figure wrong is both, and the UI showing one at a time is a fact
  * about pressing buttons rather than about the record.
  */
-export function useHelpfulMessage(threadId: string | null) {
+export function useHelpfulMessage() {
   const queryClient = useQueryClient()
 
-  function applyToThread(mark: MessageHelpful): void {
-    if (threadId === null) return
+  function applyToThread(mark: MessageHelpful, { threadId }: { threadId: string }): void {
     queryClient.setQueryData<ThreadDetail>(queryKeys.thread(threadId), (thread) =>
       thread === undefined
         ? thread
@@ -283,12 +292,14 @@ export function useHelpfulMessage(threadId: string | null) {
   }
 
   const mark = useMutation({
-    mutationFn: (messageId: number) => markHelpful(messageId),
+    mutationFn: ({ messageId }: { threadId: string; messageId: number }) =>
+      markHelpful(messageId),
     onSuccess: applyToThread,
   })
 
   const unmark = useMutation({
-    mutationFn: (messageId: number) => clearHelpful(messageId),
+    mutationFn: ({ messageId }: { threadId: string; messageId: number }) =>
+      clearHelpful(messageId),
     onSuccess: applyToThread,
   })
 
@@ -309,11 +320,12 @@ export function useHelpfulMessage(threadId: string | null) {
  * that appeared instantly and then vanished on a `409` would tell the reader
  * their answer was recorded when the work had already gone another way.
  */
-export function useResolveQuestion(threadId: string | null) {
+export function useResolveQuestion() {
   const queryClient = useQueryClient()
 
-  function refetchThread(): void {
-    if (threadId === null) return
+  // The Thread the card was answered in, carried on the write for the reason
+  // the verdicts above carry theirs.
+  function refetchThread(threadId: string): void {
     void queryClient.invalidateQueries({ queryKey: queryKeys.thread(threadId) })
   }
 
@@ -322,26 +334,28 @@ export function useResolveQuestion(threadId: string | null) {
       questionId,
       selectedOptionIds,
     }: {
+      threadId: string
       questionId: string
       selectedOptionIds: string[]
     }) => answerQuestion(questionId, selectedOptionIds),
-    onSuccess: refetchThread,
+    onSuccess: (_answer, { threadId }) => refetchThread(threadId),
     // A card that could not be resolved stays exactly as it was, pressable
     // again. The reader is told by the row not moving; a settled question that
     // answers `409` is one the conversation has already left behind, and the
     // refetch is what draws it in the state it is actually in.
-    onError: () => {
+    onError: (_error, { threadId }) => {
       toast.error(QUESTION_COPY.failed)
-      refetchThread()
+      refetchThread(threadId)
     },
   })
 
   const skip = useMutation({
-    mutationFn: (questionId: string) => skipQuestion(questionId),
-    onSuccess: refetchThread,
-    onError: () => {
+    mutationFn: ({ questionId }: { threadId: string; questionId: string }) =>
+      skipQuestion(questionId),
+    onSuccess: (_answer, { threadId }) => refetchThread(threadId),
+    onError: (_error, { threadId }) => {
       toast.error(QUESTION_COPY.failed)
-      refetchThread()
+      refetchThread(threadId)
     },
   })
 

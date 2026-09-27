@@ -50,35 +50,35 @@ describe("formatBillions", () => {
     expect(formatBillions(-3e9)).toBe("-3.0B")
   })
 
-  it("groups digits below 1 million the Vietnamese way, wherever it is read", () => {
+  it("groups digits below 1 million with a thousands separator, wherever it is read", () => {
     // Pinned to the literal rather than to `toLocaleString()` with no locale:
     // the old assertion asked the environment the same question the code was
     // asking, so it agreed with the bug in every environment and would only
     // have failed where nobody runs it.
-    expect(formatBillions(1234)).toBe("1.234")
+    expect(formatBillions(1234)).toBe("1,234")
   })
 })
 
 describe("formatDataAge", () => {
   it("names the coarsest unit that still says something", () => {
-    expect(formatDataAge(30)).toBe("dưới 1 phút")
-    expect(formatDataAge(60)).toBe("1 phút")
-    expect(formatDataAge(8 * 86_400)).toBe("8 ngày")
+    expect(formatDataAge(30)).toBe("under 1 minute")
+    expect(formatDataAge(60)).toBe("1 minute")
+    expect(formatDataAge(8 * 86_400)).toBe("8 days")
   })
 
   it("says a partial unit out loud rather than dropping it", () => {
-    // Flooring alone would show 47 hours as "1 ngày" — half its real age.
-    expect(formatDataAge(47 * 3600)).toBe("hơn 1 ngày")
-    expect(formatDataAge(82_779)).toBe("hơn 22 giờ")
-    expect(formatDataAge(3599)).toBe("hơn 59 phút")
+    // Flooring alone would show 47 hours as "1 day" — half its real age.
+    expect(formatDataAge(47 * 3600)).toBe("over 1 day")
+    expect(formatDataAge(82_779)).toBe("over 22 hours")
+    expect(formatDataAge(3599)).toBe("over 59 minutes")
   })
 
   it("never rounds up, so freshly written data is not aged", () => {
-    expect(formatDataAge(86_399)).toBe("hơn 23 giờ")
+    expect(formatDataAge(86_399)).toBe("over 23 hours")
   })
 
   it("reads a clock-skewed negative age as brand new", () => {
-    expect(formatDataAge(-5)).toBe("dưới 1 phút")
+    expect(formatDataAge(-5)).toBe("under 1 minute")
   })
 })
 

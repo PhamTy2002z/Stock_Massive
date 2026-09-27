@@ -626,6 +626,7 @@ describe("settling from the Turn row", () => {
   it("applies without regard to the stream's sequence, because the stream stopped speaking", () => {
     const state = liveTurnReducer(apply(started(), delta(1, "một")), {
       type: "settled",
+      turnId: TURN,
       status: "incomplete",
       terminalReason: "shutdown",
       messageId: null,
@@ -637,6 +638,7 @@ describe("settling from the Turn row", () => {
   it("reads an incomplete Turn with nothing to keep as failed", () => {
     const state = liveTurnReducer(started(), {
       type: "settled",
+      turnId: TURN,
       status: "incomplete",
       terminalReason: "turn_failed",
       messageId: null,
@@ -648,11 +650,25 @@ describe("settling from the Turn row", () => {
     const completed = apply(started(), event("turn.completed", 1, { message_id: 5 }))
     const state = liveTurnReducer(completed, {
       type: "settled",
+      turnId: TURN,
       status: "cancelled",
       terminalReason: "cancelled_by_user",
       messageId: null,
     })
     expect(state).toBe(completed)
+  })
+
+  it("ignores an ending that names a Turn other than the live one", () => {
+    // A slow probe for the previous Turn answering after the next one started.
+    const running = apply(started(), delta(1, "một"))
+    const state = liveTurnReducer(running, {
+      type: "settled",
+      turnId: "turn-previous",
+      status: "complete",
+      terminalReason: null,
+      messageId: 3,
+    })
+    expect(state).toBe(running)
   })
 })
 

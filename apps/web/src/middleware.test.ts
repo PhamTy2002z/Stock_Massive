@@ -40,6 +40,10 @@ describe("the login redirect", () => {
     expect(matches("/api/alpha-desk/attachments/a-1")).toBe(false)
   })
 
+  it("does not run on the connection probe, which a login page would answer 200", () => {
+    expect(matches("/api/health")).toBe(false)
+  })
+
   it("still runs on the pages it is for", () => {
     // The exclusion is narrow on purpose: without this, the test above would
     // pass for a matcher that had stopped matching anything at all.

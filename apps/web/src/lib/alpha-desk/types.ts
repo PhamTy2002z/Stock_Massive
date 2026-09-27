@@ -580,3 +580,26 @@ export interface Usage {
   spend_today_micro_usd: Allowance
   spend_rolling_30d_micro_usd: Allowance
 }
+
+/**
+ * One note this account asked the assistant to keep, with where it came from.
+ *
+ * `as_of` is the moment the note is about, `created_at` when it was kept; the
+ * two differ whenever the reader saves an older figure.
+ */
+export interface MemoryFact {
+  id: number
+  title: string
+  body: string
+  symbol: string | null
+  source_url: string | null
+  source_name: string | null
+  as_of: string | null
+  created_at: string
+}
+
+/** One page of remembered notes, and how many there are in all. */
+export interface MemoryFactPage {
+  items: MemoryFact[]
+  total: number
+}

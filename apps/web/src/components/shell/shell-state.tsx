@@ -127,7 +127,7 @@ interface ShellState {
    *
    * Two surfaces mount a composer — the opening screen and the docked one — and
    * switching between them must not lose a half-typed question. It is also what
-   * lets another panel *offer* a question: a panel's "Hỏi VisgniteAI" fills
+   * lets another panel *offer* a question: a panel's "Ask VisgniteAI" fills
    * the field and leaves the user to press send, rather than sending on their
    * behalf.
    */

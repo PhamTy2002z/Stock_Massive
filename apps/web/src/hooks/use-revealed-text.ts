@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 
+import { motionReduced } from "@/lib/alpha-desk/preferences"
 import { advanceCursor, revealedLength } from "@/lib/alpha-desk/reveal"
 
 /**
@@ -24,7 +25,8 @@ import { advanceCursor, revealedLength } from "@/lib/alpha-desk/reveal"
  * new answer starts from nothing, and cannot inherit a cursor measured in
  * another one.
  *
- * **It stops entirely under `prefers-reduced-motion`, and when told to.** Text
+ * **It stops entirely under reduced motion — the system's or Settings' own —
+ * and when told to.** Text
  * appearing a word at a time is motion, and a reader who asked for none gets
  * the answer at once. `instant` is the same escape for prose that is being
  * redrawn rather than written.
@@ -64,7 +66,7 @@ export function useRevealedText(text: string, options: RevealOptions = {}): Reve
   // Read once, and no listener: a reader who changes the setting mid-answer is
   // not who this is for, and the subscription would outlive every draft.
   const still = useRef<boolean | null>(null)
-  if (still.current === null) still.current = prefersReducedMotion()
+  if (still.current === null) still.current = motionReduced()
 
   const [shown, setShown] = useState(0)
   const shownRef = useRef(0)
@@ -128,7 +130,3 @@ export function useRevealedText(text: string, options: RevealOptions = {}): Reve
   }
 }
 
-function prefersReducedMotion(): boolean {
-  if (typeof window === "undefined") return false
-  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
-}

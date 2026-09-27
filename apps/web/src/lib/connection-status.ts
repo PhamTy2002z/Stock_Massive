@@ -101,7 +101,7 @@ export const connectionStatus = new ConnectionStatus()
  */
 export class ApiUnavailableError extends Error {
   constructor(
-    message = "Hệ thống đang không phản hồi. Đang thử lại…",
+    message = "The system isn't responding. Retrying…",
     public readonly status?: number,
     options?: ErrorOptions
   ) {

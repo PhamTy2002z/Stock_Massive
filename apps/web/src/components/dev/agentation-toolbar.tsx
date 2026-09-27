@@ -1,13 +1,14 @@
 "use client";
 
 /**
- * Agentation là devtool annotate UI cho AI coding agent — chỉ có ích lúc
- * developer đang mở app trong dev. Bọc bằng `dynamic(..., { ssr: false })`
- * để module không nằm trên server bundle, và gate bằng `NODE_ENV` để Next
- * dead-code-eliminate toàn bộ nhánh này ở `next build` production.
+ * Agentation is a UI-annotation devtool for AI coding agents — useful only
+ * while a developer has the app open in dev. Wrapped in
+ * `dynamic(..., { ssr: false })` so the module never lands in the server
+ * bundle, and gated on `NODE_ENV` so Next dead-code-eliminates this whole
+ * branch at production `next build`.
  *
- * Không truyền prop: default `copyToClipboard=true` là đúng loop copy →
- * paste vào chat agent mà tài liệu package mô tả.
+ * No props passed: the default `copyToClipboard=true` is exactly the
+ * copy-then-paste-into-agent-chat loop the package's own docs describe.
  */
 import dynamic from "next/dynamic";
 

@@ -18,22 +18,22 @@ interface AuthFormProps {
 
 const COPY = {
   login: {
-    title: "Chào bạn trở lại",
-    description: "Đăng nhập để tiếp tục cuộc phân tích đang dở.",
-    submit: "Đăng nhập",
-    pending: "Đang đăng nhập…",
-    footerText: "Chưa có tài khoản?",
+    title: "Welcome back",
+    description: "Sign in to pick up your research where you left off.",
+    submit: "Sign in",
+    pending: "Signing in…",
+    footerText: "Don't have an account?",
     footerHref: "/register",
-    footerLink: "Đăng ký",
+    footerLink: "Sign up",
   },
   register: {
-    title: "Mở tài khoản",
-    description: "Một màn hình để hỏi, để đọc bảng giá, và để theo dõi mã của bạn.",
-    submit: "Tạo tài khoản",
-    pending: "Đang tạo tài khoản…",
-    footerText: "Đã có tài khoản?",
+    title: "Open an account",
+    description: "One screen to ask questions, read the tape, and track your tickers.",
+    submit: "Create account",
+    pending: "Creating account…",
+    footerText: "Already have an account?",
     footerHref: "/login",
-    footerLink: "Đăng nhập",
+    footerLink: "Sign in",
   },
 } as const
 
@@ -76,7 +76,7 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
         // reason — and the spinner was left running forever on a form the
         // reader could no longer submit. Releasing the control is the part
         // that matters; the sentence is what stops it reading as success.
-        toast.error("Không nhận được phản hồi từ máy chủ. Vui lòng thử lại.")
+        toast.error("No response from the server. Please try again.")
         setIsLoading(false)
       }
     } catch (error) {
@@ -84,7 +84,7 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
       // rejecting the action promise — swallowing it here would show a failure
       // toast on success and leave the router with nothing to act on.
       unstable_rethrow(error)
-      toast.error("Đã có lỗi xảy ra. Vui lòng thử lại.")
+      toast.error("Something went wrong. Please try again.")
       setIsLoading(false)
     }
   }
@@ -98,7 +98,7 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
       <div className="my-auto flex justify-center py-12">
         <div className="w-full max-w-[392px] animate-vg-message-in">
           <header className="mb-7 flex flex-col items-start gap-3">
-            <VisgniteMark className="h-[26px] w-[17px]" />
+            <VisgniteMark className="h-[26px] w-[29px]" />
             <h1 className="font-serif text-[clamp(1.8rem,4vw,2.3rem)] font-normal leading-[1.1] tracking-[-0.01em] text-ink-display">
               {copy.title}
             </h1>
@@ -107,13 +107,13 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
 
           <form action={onSubmit} className="space-y-3.5">
             {isRegister && (
-              <Field id="full_name" label="Họ và tên">
+              <Field id="full_name" label="Full name">
                 <input
                   id="full_name"
                   name="full_name"
                   type="text"
                   autoComplete="name"
-                  placeholder="Nguyễn Văn A"
+                  placeholder="Jane Doe"
                   className={FIELD_CLASS}
                 />
               </Field>
@@ -131,7 +131,7 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
               />
             </Field>
 
-            <Field id="password" label="Mật khẩu">
+            <Field id="password" label="Password">
               <div className="relative">
                 <input
                   id="password"
@@ -140,13 +140,13 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
                   required
                   minLength={isRegister ? 8 : undefined}
                   autoComplete={isRegister ? "new-password" : "current-password"}
-                  placeholder={isRegister ? "Tối thiểu 8 ký tự" : "Nhập mật khẩu"}
+                  placeholder={isRegister ? "At least 8 characters" : "Enter your password"}
                   className={`${FIELD_CLASS} pr-12`}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((visible) => !visible)}
-                  aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
                   className="absolute inset-y-0 right-1 flex w-11 items-center justify-center rounded-lg text-ink-5 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {showPassword ? <EyeOff className="size-[18px]" /> : <Eye className="size-[18px]" />}
@@ -157,7 +157,7 @@ export default function AuthForm({ mode, action }: AuthFormProps) {
             <button
               type="submit"
               disabled={isLoading}
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-[11px] bg-primary text-[0.95rem] font-medium text-primary-foreground transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-60"
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-[11px] bg-primary text-[0.9rem] font-medium text-primary-foreground transition-[filter] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-60"
             >
               {isLoading && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
               {isLoading ? copy.pending : copy.submit}
@@ -205,4 +205,4 @@ function Field({
 }
 
 const FIELD_CLASS =
-  "h-12 w-full rounded-[11px] border border-border bg-surface-sunken px-3.5 text-[0.95rem] text-foreground outline-none transition-colors placeholder:text-ink-6 focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/40"
+  "h-12 w-full rounded-[11px] border border-border bg-surface-sunken px-3.5 text-[0.9rem] text-foreground outline-none transition-colors placeholder:text-ink-6 focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/40"

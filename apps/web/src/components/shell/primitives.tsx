@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils"
  * description a screen reader is pointed at. Two copies would let one of them
  * drift into saying something the other does not.
  */
-export const COMING_SOON = "Sắp ra mắt"
+export const COMING_SOON = "Coming soon"
 
 /**
  * The handful of shapes the whole shell is drawn from.
@@ -245,17 +245,17 @@ export function deltaClass(value: number | null | undefined): string {
   return "text-reference"
 }
 
-/** A signed percentage in the Vietnamese convention: comma decimal, unicode minus. */
+/** A signed percentage: period decimal, unicode minus. */
 export function signedPercent(value: number | null | undefined, digits = 2): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "—"
   const sign = value > 0 ? "+" : value < 0 ? "−" : ""
-  return `${sign}${Math.abs(value).toFixed(digits).replace(".", ",")}%`
+  return `${sign}${Math.abs(value).toFixed(digits)}%`
 }
 
-/** A price, grouped the way a Vietnamese board groups it. */
+/** A price, grouped the way the board groups it. */
 export function price(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "—"
-  return Math.round(value).toLocaleString("vi-VN")
+  return Math.round(value).toLocaleString("en-US")
 }
 
 /**
@@ -334,10 +334,10 @@ export function SampleDataNote({ children }: { children?: ReactNode }) {
       <i className="mt-[5px] block size-1.5 shrink-0 rounded-full bg-caution" aria-hidden="true" />
       <span>
         <strong className="block font-semibold uppercase tracking-[0.04em] text-caution">
-          Dữ liệu minh họa · Không dùng để ra quyết định
+          Sample data · Not for decision-making
         </strong>
         <span className="mt-0.5 block">
-          {children ?? "API chưa phục vụ mục này."}
+          {children ?? "The API doesn't serve this section yet."}
         </span>
       </span>
     </p>
@@ -348,7 +348,7 @@ export function SampleDataNote({ children }: { children?: ReactNode }) {
 export function SampleBadge() {
   return (
     <span className="rounded-md border border-caution/40 bg-caution/[0.1] px-1.5 py-0.5 text-micro font-semibold uppercase tracking-[0.05em] text-caution">
-      Minh họa
+      Sample
     </span>
   )
 }
@@ -358,7 +358,7 @@ export function UnavailableNote({ children }: { children: ReactNode }) {
   return (
     <p role="status" className="rounded-lg border border-border bg-foreground/[0.035] px-2.5 py-2 text-micro leading-relaxed text-ink-4">
       <strong className="block font-semibold uppercase tracking-[0.04em] text-ink-3">
-        Tính năng sắp ra mắt
+        Feature coming soon
       </strong>
       <span className="mt-0.5 block">{children}</span>
     </p>

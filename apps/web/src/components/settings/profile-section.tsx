@@ -1,72 +1,151 @@
 "use client"
 
-import { useAuth } from "@/hooks/use-auth"
+import * as React from "react"
+
 import { Avatar } from "@/components/shell/primitives"
+import { useAuth, useUpdateProfile, type InvestingStyle } from "@/hooks/use-auth"
+import { cn } from "@/lib/utils"
 
 import {
-  ReadOnlyField,
-  SelectStub,
+  FIELD,
+  PillAction,
+  SelectField,
   SettingsRow,
   SettingsSection,
-  TextFieldStub,
+  TextField,
 } from "./settings-primitives"
 
+/** The longest custom instruction the account will keep. */
+export const INSTRUCTIONS_LIMIT = 1500
+
+const STYLES: { value: InvestingStyle | ""; label: string }[] = [
+  { value: "", label: "Choose" },
+  { value: "long_term", label: "Long-term / value" },
+  { value: "growth", label: "Growth" },
+  { value: "dividend", label: "Dividend" },
+  { value: "swing", label: "Short-term swing" },
+  { value: "learning", label: "Learning to invest" },
+]
+
 /**
- * Who is signed in, and who the product will one day be told they are.
+ * The reader's standing instruction, saved on an explicit press.
  *
- * Two different things sit in this pane and the difference is marked. The name
- * and the avatar are read from the session — real values, read-only, because
- * there is no profile write endpoint. The three rows below them are the
- * reference's own personalisation fields, and each would have to reach the turn
- * loop's prompt to mean anything; none does yet.
+ * Unlike the one-line fields this does not save on blur: a paragraph is
+ * written over several visits to the field, and saving each half-sentence
+ * would make the assistant read drafts. Cancel and Save appear only once the text
+ * differs from what is saved. The parent keys this on the saved text, so a
+ * save — this one or another tab's — starts the field over from it.
+ */
+function InstructionsField({ saved, disabled }: { saved: string; disabled: boolean }) {
+  const [draft, setDraft] = React.useState(saved)
+  const update = useUpdateProfile()
+  const dirty = draft !== saved
+
+  const save = () =>
+    update.mutate({
+      preferences: { custom_instructions: draft.trim() === "" ? null : draft.trim() },
+    })
+
+  return (
+    <div className="w-full">
+      <textarea
+        aria-label="Custom instructions"
+        aria-describedby="instructions-count"
+        rows={4}
+        maxLength={INSTRUCTIONS_LIMIT}
+        value={draft}
+        disabled={disabled || update.isPending}
+        onChange={(event) => setDraft(event.target.value)}
+        placeholder="e.g. prefer concise analysis, focus on liquidity and cash flow"
+        className={cn(FIELD, "block min-h-[96px] resize-y py-2.5 leading-[1.55]")}
+      />
+      <div className="mt-2 flex min-h-8 items-center gap-2">
+        <span id="instructions-count" className="text-meta tabular-nums text-ink-6">
+          {draft.length}/{INSTRUCTIONS_LIMIT}
+        </span>
+        {dirty ? (
+          <div className="ml-auto flex gap-2">
+            <PillAction disabled={update.isPending} onClick={() => setDraft(saved)}>
+              Cancel
+            </PillAction>
+            <PillAction disabled={update.isPending} onClick={save}>
+              {update.isPending ? "Saving…" : "Save"}
+            </PillAction>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Who is signed in, and what the assistant should know about them.
+ *
+ * Every field writes `PATCH /auth/me` with only the key it owns, so two fields
+ * saved in quick succession cannot overwrite each other with stale values.
  */
 export function ProfileSection() {
   const { user, isPending } = useAuth()
+  const update = useUpdateProfile()
 
   const email = user?.email ?? ""
   const displayName = user?.full_name?.trim() || (email ? email.split("@")[0] : "")
   const initial = (displayName || "?").charAt(0).toUpperCase()
+  const preferences = user?.preferences
+  const unavailable = isPending || user === null
 
   return (
-    <SettingsSection
-      title="Hồ sơ"
-      description="Thông tin giúp hệ thống hiểu bạn hơn trong mọi hội thoại."
-      footer="Chỉnh sửa hồ sơ chưa được build — tên và ảnh đại diện lấy từ phiên đăng nhập."
-    >
-      <SettingsRow label="Ảnh đại diện" description="Sinh từ chữ đầu của tên hiển thị.">
-        <Avatar initial={initial} className="size-[42px] text-[1rem]" />
+    <SettingsSection title="Profile">
+      <SettingsRow label="Avatar">
+        <Avatar initial={initial} className="size-10 text-row" />
       </SettingsRow>
 
-      <SettingsRow label="Họ và tên" description="Tên dùng trong thanh tài khoản.">
-        <ReadOnlyField value={isPending ? "Đang tải…" : displayName || "Chưa đăng nhập"} />
+      <SettingsRow label="Full name">
+        <TextField
+          label="Full name"
+          value={user?.full_name ?? ""}
+          placeholder={isPending ? "Loading…" : displayName}
+          required
+          disabled={unavailable}
+          onCommit={(next) => update.mutateAsync({ full_name: next })}
+        />
+      </SettingsRow>
+
+      <SettingsRow label="What should the system call you?">
+        <TextField
+          label="Nickname"
+          value={preferences?.nickname ?? ""}
+          placeholder={displayName || "Nickname"}
+          disabled={unavailable}
+          onCommit={(next) =>
+            update.mutateAsync({ preferences: { nickname: next === "" ? null : next } })
+          }
+        />
+      </SettingsRow>
+
+      <SettingsRow label="What's your investing style?">
+        <SelectField
+          label="Investing style"
+          value={preferences?.investing_style ?? ""}
+          options={STYLES}
+          disabled={unavailable || update.isPending}
+          onChange={(next) =>
+            update.mutate({
+              preferences: { investing_style: next === "" ? null : (next as InvestingStyle) },
+            })
+          }
+        />
       </SettingsRow>
 
       <SettingsRow
-        label="Hệ thống nên gọi bạn là gì?"
-        description="Tên gọi dùng trong câu trả lời, khi khác với tên trên hồ sơ."
-        soon
-      >
-        <TextFieldStub label="Tên gọi" placeholder={displayName || "Tên gọi"} />
-      </SettingsRow>
-
-      <SettingsRow
-        label="Bạn đầu tư theo phong cách nào?"
-        description="Dùng để chọn mức chi tiết và khung thời gian khi phân tích."
-        soon
-      >
-        <SelectStub label="Phong cách đầu tư" value="Chọn" />
-      </SettingsRow>
-
-      <SettingsRow
-        label="Hướng dẫn riêng"
-        description="Hệ thống sẽ ghi nhớ trong mọi hội thoại và bảng phân tích."
-        soon
+        label="Custom instructions"
+        description="The system remembers this in every conversation. It's a presentation preference; it doesn't change source-verification rules."
         className="md:flex-col md:items-stretch"
       >
-        <TextFieldStub
-          label="Hướng dẫn riêng"
-          rows={4}
-          placeholder="vd. ưu tiên phân tích ngắn gọn, tập trung vào thanh khoản và dòng tiền"
+        <InstructionsField
+          key={preferences?.custom_instructions ?? ""}
+          saved={preferences?.custom_instructions ?? ""}
+          disabled={unavailable}
         />
       </SettingsRow>
     </SettingsSection>

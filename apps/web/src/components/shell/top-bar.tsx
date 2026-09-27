@@ -36,12 +36,7 @@ export function TopBar() {
   const [renaming, setRenaming] = React.useState(false)
 
   const current = threads.data?.threads.find((row) => row.id === desk.threadId)
-  const fullTitle =
-    desk.threadId === null
-      ? "Trò chuyện mới"
-      : current
-        ? threadTitle(current.title, current.updated_at)
-        : "Hội thoại"
+  const fullTitle = current ? threadTitle(current.title, current.updated_at) : "Conversation"
   const title = shorten(fullTitle)
 
   const menuOpen = state.overlay === "thread"
@@ -102,8 +97,9 @@ export function TopBar() {
           came to look at — the list already says which conversation is open,
           one corner away. The chevron goes with it rather than being left
           naming nothing: switching the desk off brings the title and the menu
-          back together. */}
-      {!state.signalDesk &&
+          back together. The empty composer has no conversation yet, so it
+          has no name and nothing for the menu to act on either. */}
+      {!state.signalDesk && desk.threadId !== null &&
         (renaming && current !== undefined ? (
           // The name, as a text field, in the place the name was. A dialog to
           // change one word would take the reader off the conversation they are
@@ -124,12 +120,12 @@ export function TopBar() {
           <div className="relative flex min-w-0 items-center gap-1">
             <h1
               title={title === fullTitle ? undefined : fullTitle}
-              className="min-w-0 truncate text-[0.95rem] font-normal text-ink-2"
+              className="min-w-0 truncate text-[0.9rem] font-normal text-ink-2"
             >
               {title}
             </h1>
             <IconButton
-              label="Tuỳ chọn hội thoại"
+              label="Conversation options"
               size="sm"
               aria-expanded={menuOpen}
               aria-haspopup="menu"
@@ -145,7 +141,7 @@ export function TopBar() {
             {/* The same 212px the sidebar's per-Thread menu is: it is the same
                 menu over the same four writes, and two widths for one object
                 read as two different menus. Fixed rather than grown to fit, so
-                the box does not change shape when Ghim becomes Bỏ ghim. */}
+                the box does not change shape when Pin becomes Unpin. */}
             {menuOpen && (
               <Menu className="absolute left-0 top-[34px] w-[212px] rounded-xl">
                 {/* Every row is dead while the bar names a conversation that
@@ -163,7 +159,7 @@ export function TopBar() {
                   disabled={current === undefined}
                   onClick={pin}
                 >
-                  {pinned ? "Bỏ ghim" : "Ghim"}
+                  {pinned ? "Unpin" : "Pin"}
                 </MenuItem>
                 {/* Read state is not a thing a Thread has: the API carries no
                     such field, so there is nothing to write and nothing for the
@@ -171,7 +167,7 @@ export function TopBar() {
                     will be, badged as unavailable rather than wired to a value
                     this browser would be the only holder of. */}
                 <MenuItem icon={<EyeOff className="size-4 text-ink-4" strokeWidth={1.6} />} hint="U" disabled quiet>
-                  Đánh dấu chưa đọc
+                  Mark as unread
                 </MenuItem>
                 <MenuItem
                   icon={<Pencil className="size-4 text-ink-4" strokeWidth={1.6} />}
@@ -179,7 +175,7 @@ export function TopBar() {
                   disabled={current === undefined}
                   onClick={rename}
                 >
-                  Đổi tên
+                  Rename
                 </MenuItem>
                 <MenuSeparator />
                 <MenuItem
@@ -189,7 +185,7 @@ export function TopBar() {
                   disabled={current === undefined}
                   onClick={drop}
                 >
-                  Xoá
+                  Delete
                 </MenuItem>
               </Menu>
             )}
@@ -208,7 +204,7 @@ export function TopBar() {
           onClick={() => dispatch({ type: "overlay", overlay: "share" })}
           className="ml-auto shrink-0 whitespace-nowrap rounded-[9px] border border-border bg-foreground/[0.04] px-3.5 py-1.5 text-control text-ink-2 transition-colors hover:bg-foreground/[0.08] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
-          Chia sẻ
+          Share
         </button>
       )}
     </header>
@@ -257,8 +253,8 @@ function OpenSidebarButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
-      title="Mở thanh bên"
-      aria-label="Mở thanh bên"
+      title="Open sidebar"
+      aria-label="Open sidebar"
       onClick={onClick}
       className={cn(
         "group relative flex h-[26px] w-7 flex-none animate-vg-fade-in items-center justify-center",
@@ -266,7 +262,7 @@ function OpenSidebarButton({ onClick }: { onClick: () => void }) {
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
     >
-      <VisgniteMark className="h-[18px] w-3 transition-opacity duration-150 group-hover:opacity-0 group-focus-visible:opacity-0" />
+      <VisgniteMark className="h-4 w-[18px] transition-opacity duration-150 group-hover:opacity-0 group-focus-visible:opacity-0" />
       {/* Three rules of falling length — the reference's own hamburger, not the
           even-width one every icon set ships. Absolute so it shares the mark's
           centre instead of pushing it aside. */}

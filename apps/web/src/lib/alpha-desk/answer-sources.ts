@@ -8,8 +8,27 @@ export interface AnswerSource {
   title: string
   /** Where a click goes; `null` only when there is nowhere honest to send it. */
   url: string | null
+  /**
+   * The host a click actually lands on, read from `url`.
+   *
+   * Shown beside the publisher because the publisher is a label the answer
+   * wrote: "Vietcap — …" can sit on a link to any domain, and the host is the
+   * part of the row an injected page cannot choose.
+   */
+  host: string | null
   /** What its icon is drawn from: a hostname when there is one. */
   mark: string
+  /**
+   * Whether `mark` may be sent to the favicon proxy.
+   *
+   * Only for a host this Turn's own tool results recorded. A link that appears
+   * only in the answer's text was written by the model, possibly under a page's
+   * injection, and asking the proxy for its icon would make the backend resolve
+   * and call a host the text chose — with nobody clicking anything. Its DNS
+   * labels alone can carry whatever the model was told to leak. Such a row
+   * keeps its letters and makes no request.
+   */
+  favicon: boolean
 }
 
 /**
@@ -29,11 +48,30 @@ export function answerSources(text: string, toolCalls: ToolCall[]): AnswerSource
     sources.push(source)
   }
 
+  // Hosts the backend itself reached for this Turn: the only ones a cited link
+  // may borrow a favicon from.
+  const recorded = new Set<string>()
+  for (const call of toolCalls) {
+    for (const result of call.results) {
+      const host = hostname(result.url || null)
+      if (host) recorded.add(host)
+      if (result.source) recorded.add(result.source.toLowerCase())
+    }
+  }
+
   for (const cited of splitSources(text).sources) {
     const [publisher, ...rest] = cited.label.split(" — ")
     const title = rest.join(" — ") || publisher
     const url = cited.url ?? providerLink(publisher, title)
-    add({ publisher, title, url, mark: hostname(cited.url) ?? publisher })
+    const citedHost = hostname(cited.url)
+    add({
+      publisher,
+      title,
+      url,
+      host: hostname(url),
+      mark: citedHost ?? publisher,
+      favicon: citedHost !== null && recorded.has(citedHost),
+    })
   }
   for (const call of toolCalls) {
     for (const result of call.results) {
@@ -41,7 +79,9 @@ export function answerSources(text: string, toolCalls: ToolCall[]): AnswerSource
         publisher: result.source,
         title: result.title || result.source,
         url: result.url || null,
+        host: hostname(result.url || null),
         mark: result.source,
+        favicon: true,
       })
     }
   }

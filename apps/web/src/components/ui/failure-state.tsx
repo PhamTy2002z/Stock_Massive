@@ -84,7 +84,7 @@ export function FailureState({
           className,
         )}
       >
-        <VisgniteMark className="h-8 w-[21px]" />
+        <VisgniteMark className="h-8 w-9" />
         <h1 className="font-serif text-[1.8rem] font-normal leading-tight text-ink-display">
           {failure.title}
         </h1>
@@ -119,7 +119,7 @@ export function FailureState({
  * The way out, drawn at this density.
  *
  * Returns nothing at all when the failure has no route out. A disabled button,
- * or a "Thử lại" that re-asks a question already answered, is worse than the
+ * or a "Try again" that re-asks a question already answered, is worse than the
  * blank: it tells the reader there is something to try when the whole point of
  * the state is that there is not.
  */

@@ -96,8 +96,8 @@ describe("one attachment chip", () => {
 
 describe("what a refusal says", () => {
   it("names the action left to take for each reason the backend sends", () => {
-    expect(attachmentRefusal("file_too_large")).toContain("nhỏ hơn")
-    expect(attachmentRefusal("turn_image_budget")).toContain("bỏ một ảnh")
+    expect(attachmentRefusal("file_too_large")).toContain("smaller file")
+    expect(attachmentRefusal("turn_image_budget")).toContain("Remove one")
   })
 
   it("still says something for a reason this build has never heard of", () => {

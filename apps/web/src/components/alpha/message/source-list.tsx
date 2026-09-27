@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { SourceIcon } from "./source-icon"
 
 /**
- * The result card behind a tool call — the thing "8 nguồn" or a single search
+ * The result card behind a tool call — the thing "8 sources" or a single search
  * row expands into.
  *
  * **Every string a `ToolResult` carries was written by a page a search engine
@@ -53,7 +53,7 @@ function SourceRow({ result }: { result: ToolResult }) {
         {/* One mark, not a stack: the domain is spelled out beside it, so
             the chip stack's overlap and ring would be decoration on a row that
             is already saying the thing plainly. */}
-        <SourceIcon source={result.source} size={18} />
+        <SourceIcon source={result.source} favicon size={18} />
         <span className="text-micro text-muted-foreground">{result.source}</span>
       </div>
     </div>

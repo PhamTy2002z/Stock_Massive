@@ -15,7 +15,7 @@ import { useDesk } from "./desk-state"
 import { IconButton, UnavailableNote } from "./primitives"
 import { SettingsDialog } from "./settings-dialog"
 import { threadTitle } from "./sidebar"
-import { useShell } from "./shell-state"
+import { sidebarFloats, useShell } from "./shell-state"
 
 /**
  * The two things that take over the screen, and the scrim they share.
@@ -38,7 +38,7 @@ export function Overlays() {
   }
   if (state.overlay === "settings") {
     return (
-      <Scrim label="Cài đặt">
+      <Scrim label="Settings">
         <SettingsDialog />
       </Scrim>
     )
@@ -103,7 +103,7 @@ function Scrim({
 }
 
 const FOCUSABLE_SELECTOR =
-  'input, textarea, select, button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+  'input, textarea, select, button:not([disabled]):not([tabindex="-1"]), [href], [tabindex]:not([tabindex="-1"])'
 
 /** Responsive panels may leave hidden controls in the DOM; they cannot anchor a trap. */
 export function focusableElements(root: HTMLElement | null): HTMLElement[] {
@@ -128,24 +128,33 @@ export function focusableElements(root: HTMLElement | null): HTMLElement[] {
  * up with.
  */
 function CommandPalette() {
-  const { dispatch } = useShell()
+  const { state, dispatch } = useShell()
   const desk = useDesk()
   const threads = useThreads(true)
   const [term, setTerm] = useState("")
+  const [selected, setSelected] = useState(0)
+  const results = useRef<HTMLDivElement>(null)
 
   const query = term.trim().toLowerCase()
   const rows = (threads.data?.threads ?? [])
     .map((thread) => ({ thread, label: threadTitle(thread.title, thread.updated_at) }))
     .filter((row) => query === "" || row.label.toLowerCase().includes(query))
 
+  const active = Math.min(selected, Math.max(0, rows.length - 1))
+
+  useEffect(() => {
+    results.current?.querySelector(`[data-position="${active}"]`)?.scrollIntoView?.({ block: "nearest" })
+  }, [active])
+
   function open(id: string) {
     desk.openThread(id)
     dispatch({ type: "view", view: "chat" })
     dispatch({ type: "overlay", overlay: null })
+    if (sidebarFloats(state)) dispatch({ type: "toggle-sidebar" })
   }
 
   return (
-    <Scrim align="top" label="Tìm hội thoại">
+    <Scrim align="top" label="Search conversations">
       <div
         onClick={(event) => event.stopPropagation()}
         className="w-full max-w-[620px] animate-vg-message-in overflow-hidden rounded-2xl border border-border bg-surface-sunken shadow-modal"
@@ -154,36 +163,56 @@ function CommandPalette() {
           <Search className="size-[18px] shrink-0 text-ink-5" strokeWidth={1.6} />
           <input
             value={term}
-            onChange={(event) => setTerm(event.target.value)}
+            onChange={(event) => {
+              setTerm(event.target.value)
+              setSelected(0)
+            }}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && rows[0]) {
+              if (event.nativeEvent.isComposing) return
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault()
-                open(rows[0].thread.id)
+                const direction = event.key === "ArrowDown" ? 1 : -1
+                setSelected(Math.max(0, Math.min(rows.length - 1, active + direction)))
+              }
+              if (event.key === "Enter" && rows[active]) {
+                event.preventDefault()
+                open(rows[active].thread.id)
               }
             }}
             autoFocus
-            aria-label="Tìm hội thoại"
-            placeholder="Tìm hội thoại…"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="conversation-search-results"
+            aria-autocomplete="list"
+            aria-activedescendant={rows[active] ? `conversation-result-${rows[active].thread.id}` : undefined}
+            aria-label="Search conversations"
+            placeholder="Search conversations…"
             className="min-w-0 flex-1 border-0 bg-transparent text-[0.98rem] text-foreground outline-none placeholder:text-ink-6"
           />
           <IconButton
-            label="Đóng"
+            label="Close"
             size="sm"
+            className="max-md:size-11"
             onClick={() => dispatch({ type: "overlay", overlay: null })}
           >
             <X className="size-3.5" strokeWidth={1.8} />
           </IconButton>
         </div>
 
-        <div className="scrollbar-thin max-h-[52vh] overflow-y-auto p-1.5">
+        <div ref={results} id="conversation-search-results" role="listbox" aria-label="Conversation results" className="scrollbar-thin max-h-[52vh] overflow-y-auto p-1.5">
           {rows.map((row, position) => (
             <button
               key={row.thread.id}
+              id={`conversation-result-${row.thread.id}`}
+              role="option"
+              aria-selected={position === active}
+              data-position={position}
+              tabIndex={-1}
               type="button"
               onClick={() => open(row.thread.id)}
               className={cn(
-                "flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2.5 text-left text-row transition-colors hover:bg-foreground/[0.05]",
-                position === 0 && "bg-surface-raised",
+                "flex min-h-11 w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2.5 text-left text-row transition-colors hover:bg-foreground/[0.05]",
+                position === active && "bg-surface-raised",
               )}
             >
               <MessageSquare className="size-[17px] shrink-0 text-ink-5" strokeWidth={1.5} />
@@ -191,23 +220,33 @@ function CommandPalette() {
             </button>
           ))}
 
-          {rows.length === 0 &&
-            (threads.isError ? (
-              // "Không có hội thoại nào khớp" over a list that never loaded
-              // tells the reader their search failed when their connection did.
-              <div className="px-2.5 py-4">
-                <FailureState
-                  failure={describeFailure(threads.error)}
-                  density="inline"
-                  onRetry={() => void threads.refetch()}
-                />
-              </div>
-            ) : (
-              <p className="px-2.5 py-6 text-center text-row text-ink-6">
-                {threads.isPending ? "Đang tải…" : "Không có hội thoại nào khớp."}
-              </p>
-            ))}
         </div>
+        {rows.length === 0 && (
+          <div className="px-4 py-5" role="status">
+            {threads.isError ? (
+              <FailureState failure={describeFailure(threads.error)} density="inline" onRetry={() => void threads.refetch()} />
+            ) : threads.isPending ? (
+              <p className="text-row text-ink-4">Loading…</p>
+            ) : (
+              <>
+                <p className="text-row text-ink-4">
+                  {query ? "No conversation matches this name. Try another keyword." : "No conversations yet. Start your first one."}
+                </p>
+                <div className="mt-3 flex gap-2">
+                  {query && <Button variant="outline" onClick={() => { setTerm(""); setSelected(0) }}>Clear search</Button>}
+                  <Button variant="outline" onClick={() => {
+                    desk.newThread()
+                    dispatch({ type: "overlay", overlay: null })
+                    if (sidebarFloats(state)) dispatch({ type: "toggle-sidebar" })
+                  }}>New conversation</Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        <p className="hidden border-t border-border px-4 py-2 text-micro text-ink-5 md:block">
+          ↑↓ Select conversation · Enter Open · Esc Close
+        </p>
       </div>
     </Scrim>
   )
@@ -227,7 +266,7 @@ function ShareDialog() {
   const [scope, setScope] = useState<"private" | "team">("private")
 
   return (
-    <Scrim label="Chia sẻ hội thoại">
+    <Scrim label="Share conversation">
       <div
         onClick={(event) => event.stopPropagation()}
         className="w-full max-w-[520px] animate-vg-message-in rounded-[18px] border border-border bg-surface-sunken p-6 shadow-modal"
@@ -235,14 +274,14 @@ function ShareDialog() {
         <div className="flex items-start gap-4">
           <div>
             <h2 className="text-[1.28rem] font-normal tracking-[-0.015em] text-foreground">
-              Chia sẻ hội thoại
+              Share conversation
             </h2>
             <p className="mt-1.5 text-row text-ink-4">
-              Chỉ các tin nhắn đến thời điểm này được chia sẻ.
+              Only messages up to this point are shared.
             </p>
           </div>
           <IconButton
-            label="Đóng"
+            label="Close"
             onClick={() => dispatch({ type: "overlay", overlay: null })}
             className="ml-auto"
           >
@@ -253,16 +292,16 @@ function ShareDialog() {
         <div className="mt-4 overflow-hidden rounded-card border border-border">
           <ScopeRow
             icon={<Lock className="size-[19px] shrink-0 text-ink-4" strokeWidth={1.6} />}
-            title="Giữ riêng tư"
-            description="Chỉ bạn truy cập được"
+            title="Keep private"
+            description="Only you can access it"
             selected={scope === "private"}
             onSelect={() => setScope("private")}
           />
           <span className="block h-px bg-border" />
           <ScopeRow
             icon={<Building2 className="size-[19px] shrink-0 text-ink-4" strokeWidth={1.6} />}
-            title="Chia sẻ nội bộ"
-            description="Mọi người trong tổ chức của bạn đều xem được"
+            title="Share internally"
+            description="Everyone in your organization can view it"
             selected={scope === "team"}
             onSelect={() => setScope("team")}
           />
@@ -270,7 +309,7 @@ function ShareDialog() {
 
         <div className="mt-4">
           <UnavailableNote>
-            Chưa tạo được liên kết — API chưa có endpoint chia sẻ hội thoại.
+            Couldn't create a link yet — the API has no endpoint for sharing a conversation.
           </UnavailableNote>
         </div>
 
@@ -281,7 +320,7 @@ function ShareDialog() {
             disabled
             className="px-4 text-row"
           >
-            Tạo liên kết chia sẻ · Sắp ra mắt
+            Create share link · Coming soon
           </Button>
         </div>
       </div>

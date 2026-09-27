@@ -21,6 +21,7 @@ import type {
   Capabilities,
   CreatedTurn,
   FlagReason,
+  MemoryFactPage,
   MessageFlag,
   MessageHelpful,
   ResolvedQuestion,
@@ -75,6 +76,31 @@ export function updateThread(
  */
 export function deleteThread(threadId: string): Promise<void> {
   return alphaSend(`/threads/${encodeURIComponent(threadId)}`, { method: "DELETE" })
+}
+
+/**
+ * Delete every Thread this account has, with its transcripts.
+ *
+ * The same irreversibility as {@link deleteThread}, for all of them at once.
+ */
+export function deleteAllThreads(): Promise<{ deleted: number }> {
+  return alphaFetch<{ deleted: number }>("/threads", { method: "DELETE" })
+}
+
+/** One page of this account's remembered notes, newest first. */
+export function listMemoryFacts(offset = 0, limit = 50): Promise<MemoryFactPage> {
+  const query = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  return alphaFetch<MemoryFactPage>(`/memory/facts?${query}`)
+}
+
+/** Forget one note. The Turns that already cited it keep their own record. */
+export function deleteMemoryFact(factId: number): Promise<void> {
+  return alphaSend(`/memory/facts/${encodeURIComponent(String(factId))}`, { method: "DELETE" })
+}
+
+/** Forget every note this account has. */
+export function deleteAllMemoryFacts(): Promise<{ deleted: number }> {
+  return alphaFetch<{ deleted: number }>("/memory/facts", { method: "DELETE" })
 }
 
 export interface CreateTurnInput {

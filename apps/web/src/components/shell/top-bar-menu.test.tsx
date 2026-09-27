@@ -97,7 +97,7 @@ describe("pin", () => {
   it("sends the flag and nothing else", () => {
     openMenu()
 
-    fireEvent.click(screen.getByRole("menuitem", { name: /Ghim/ }))
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Pin/ }))
 
     expect(update.mutate).toHaveBeenCalledWith({ threadId: THREAD_ID, pinned: true })
   })
@@ -106,7 +106,7 @@ describe("pin", () => {
     threads.data = { threads: [thread({ pinned_at: "2026-08-16T03:00:00Z" })] }
     openMenu()
 
-    fireEvent.click(screen.getByRole("menuitem", { name: /Bỏ ghim/ }))
+    fireEvent.click(screen.getByRole("menuitem", { name: /Unpin/ }))
 
     expect(update.mutate).toHaveBeenCalledWith({ threadId: THREAD_ID, pinned: false })
   })
@@ -116,7 +116,7 @@ describe("rename", () => {
   it("puts a field where the name was and writes what was typed", () => {
     openMenu()
 
-    fireEvent.click(screen.getByRole("menuitem", { name: /Đổi tên/ }))
+    fireEvent.click(screen.getByRole("menuitem", { name: /Rename/ }))
     const field = screen.getByRole("textbox")
     fireEvent.change(field, { target: { value: "Định giá STB" } })
     fireEvent.blur(field)
@@ -128,7 +128,7 @@ describe("rename", () => {
   it("writes nothing when the field is abandoned with Escape", () => {
     openMenu()
 
-    fireEvent.click(screen.getByRole("menuitem", { name: /Đổi tên/ }))
+    fireEvent.click(screen.getByRole("menuitem", { name: /Rename/ }))
     const field = screen.getByRole("textbox")
     fireEvent.change(field, { target: { value: "Bỏ đi" } })
     fireEvent.keyDown(field, { key: "Escape" })
@@ -142,7 +142,7 @@ describe("delete", () => {
   it("takes the Thread on the press and leaves an empty composer behind", () => {
     openMenu()
 
-    fireEvent.click(screen.getByRole("menuitem", { name: /Xoá/ }))
+    fireEvent.click(screen.getByRole("menuitem", { name: /Delete/ }))
 
     expect(remove.mutate).toHaveBeenCalledTimes(1)
     const [id, options] = remove.mutate.mock.calls[0]
@@ -174,17 +174,16 @@ describe("what the menu cannot do", () => {
   it("badges the read flag as unavailable rather than pretending to keep one", () => {
     openMenu()
 
-    expect(screen.getByRole("menuitem", { name: /Đánh dấu chưa đọc/ })).toBeDisabled()
+    expect(screen.getByRole("menuitem", { name: /Mark as unread/ })).toBeDisabled()
   })
 
-  it("deadens every write while the bar names a Thread the server has not seen", () => {
+  it("names nothing and offers no menu before the first question opens a Thread", () => {
     desk.threadId = null
     threads.data = { threads: [] }
-    openMenu()
+    render(<TopBar />)
 
-    for (const name of [/Ghim/, /Đổi tên/, /Xoá/]) {
-      expect(screen.getByRole("menuitem", { name })).toBeDisabled()
-    }
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Conversation options" })).not.toBeInTheDocument()
     fireEvent.keyDown(window, { key: "d" })
     expect(remove.mutate).not.toHaveBeenCalled()
   })

@@ -23,7 +23,7 @@ export default function GlobalError({
   reset: () => void
 }) {
   return (
-    <html lang="vi">
+    <html lang="en">
       <body
         style={{
           margin: 0,
@@ -42,7 +42,7 @@ export default function GlobalError({
         }}
       >
         <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 500 }}>
-          VisgniteAI không khởi động được
+          VisgniteAI failed to start
         </h1>
         <p
           style={{
@@ -53,8 +53,8 @@ export default function GlobalError({
             color: "#a1a4a8",
           }}
         >
-          Giao diện gặp lỗi ngay ở lớp ngoài cùng nên không dựng được màn hình
-          nào. Thử lại thường là đủ; nếu vẫn vậy, hãy tải lại trang.
+          The interface hit an error at its outermost layer, so no screen could
+          be built. Trying again is usually enough; if it still fails, reload the page.
         </p>
         <button
           type="button"
@@ -72,11 +72,11 @@ export default function GlobalError({
             fontWeight: 500,
           }}
         >
-          Thử lại
+          Try again
         </button>
         {error.digest !== undefined && (
           <p style={{ margin: 0, fontSize: "0.75rem", color: "#8c8f93" }}>
-            Mã lỗi: {error.digest}
+            Error code: {error.digest}
           </p>
         )}
       </body>

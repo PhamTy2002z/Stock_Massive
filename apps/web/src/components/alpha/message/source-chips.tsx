@@ -19,7 +19,7 @@ export function SourceChips({
   max = 3,
   className,
 }: {
-  sources: string[]
+  sources: { mark: string; favicon: boolean }[]
   max?: number
   className?: string
 }) {
@@ -30,8 +30,9 @@ export function SourceChips({
     <span className={cn("flex items-center pl-[5px]", className)}>
       {shown.map((source, index) => (
         <SourceIcon
-          key={`${source}-${index}`}
-          source={source}
+          key={`${source.mark}-${index}`}
+          source={source.mark}
+          favicon={source.favicon}
           className="-ml-[5px] ring-[1.5px] ring-background"
         />
       ))}

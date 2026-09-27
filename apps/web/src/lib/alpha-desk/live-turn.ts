@@ -179,8 +179,13 @@ export type LiveTurnAction =
   // answer arriving *because* the stream stopped giving one, and holding it to
   // a contract about stream ordering would leave the surface spinning on a
   // Turn that has already finished.
+  //
+  // Named by Turn, like every event, because the answer arrives on its own
+  // schedule: a probe or a cancel response that lands after the reader has
+  // started another Turn must not end that one.
   | {
       type: "settled"
+      turnId: string
       status: "complete" | "incomplete" | "cancelled"
       terminalReason: string | null
       messageId: number | null
@@ -232,7 +237,7 @@ export function liveTurnReducer(state: LiveTurn, action: LiveTurnAction): LiveTu
       return state.turnId === null ? state : { ...state, needsResync: true }
 
     case "settled":
-      return isSettled(state)
+      return isSettled(state) || action.turnId !== state.turnId
         ? state
         : {
             ...state,

@@ -29,6 +29,7 @@ import { useEffect, useRef, useState } from "react"
 import { ErrorBoundary } from "react-error-boundary"
 
 import { SIGNAL_DESK_COPY } from "@/lib/alpha-desk/copy"
+import { motionReduced } from "@/lib/alpha-desk/preferences"
 import type { DeskView } from "@/lib/alpha-desk/desk-visual"
 import type { CompiledPart, CompiledVisual } from "@/lib/flint/compile-visual"
 import type { VisualPart } from "@/lib/alpha-desk/types"
@@ -152,9 +153,7 @@ function Canvas({ chart }: { chart: CompiledVisual }) {
     void import("echarts")
       .then((echarts) => {
         if (disposed || box.current === null) return
-        const still =
-          typeof window !== "undefined" &&
-          (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false)
+        const still = motionReduced()
         if (still) echarts.registerTheme(STILL_THEME, { animation: false })
         instance = echarts.init(element, still ? STILL_THEME : undefined, {
           renderer: "canvas",

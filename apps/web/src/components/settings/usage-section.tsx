@@ -43,49 +43,48 @@ export function UsageSection() {
 
   return (
     <SettingsSection
-      title="Hạn mức"
-      description="Mức sử dụng của tài khoản này so với hạn mức đang áp dụng. Đây là giới hạn vận hành cho việc tạo câu trả lời, không phải khoản phải trả."
-      footer="Hạn mức ngày đặt lại vào 0h giờ Việt Nam. Cửa sổ 30 ngày nhả dần theo từng câu hỏi cũ."
+      title="Usage"
+      description="Operating limits on generating answers, not an amount owed."
     >
       {isError ? (
         <SettingsRow
-          label="Không đọc được hạn mức"
-          description="Số liệu nằm ở máy chủ; lần thử tiếp theo có thể đọc được."
+          label="Couldn't load usage"
+          description="The figures live on the server; the next try may be able to read them."
         >
           <PillAction onClick={() => refetch()} disabled={isFetching}>
-            {isFetching ? "Đang thử lại…" : "Thử lại"}
+            {isFetching ? "Retrying…" : "Retry"}
           </PillAction>
         </SettingsRow>
       ) : (
         <>
           <SettingsRow
-            label="Câu hỏi hôm nay"
-            description="Số câu hỏi đã gửi tới trợ lý trong ngày giao dịch hiện tại."
+            label="Questions today"
+            description="Resets at midnight Vietnam time."
           >
             <AllowanceCell
-              label="Câu hỏi hôm nay"
+              label="Questions today"
               allowance={data?.turns_today}
               pending={isPending}
               format={(value) => `${value}`}
             />
           </SettingsRow>
           <SettingsRow
-            label="Chi phí xử lý hôm nay"
-            description="Chi phí tính toán đã dùng trong ngày, quy về đô-la Mỹ."
+            label="Processing cost today"
+            description="Today's compute cost, in US dollars."
           >
             <AllowanceCell
-              label="Chi phí xử lý hôm nay"
+              label="Processing cost today"
               allowance={data?.spend_today_micro_usd}
               pending={isPending}
               format={usd}
             />
           </SettingsRow>
           <SettingsRow
-            label="Chi phí xử lý 30 ngày"
-            description="Cửa sổ lăn 30 ngày, tính từ thời điểm hiện tại."
+            label="Processing cost, 30 days"
+            description="A rolling window, releasing older questions as it goes."
           >
             <AllowanceCell
-              label="Chi phí xử lý 30 ngày"
+              label="Processing cost, 30 days"
               allowance={data?.spend_rolling_30d_micro_usd}
               pending={isPending}
               format={usd}
@@ -118,11 +117,11 @@ function AllowanceCell({
   format: (value: number) => string
 }) {
   if (pending || allowance === undefined) {
-    return <ReadOnlyField value="Đang tải…" />
+    return <ReadOnlyField value="Loading…" />
   }
 
   if (allowance.limit === null) {
-    return <ReadOnlyField value={`${format(allowance.used)} · không giới hạn`} />
+    return <ReadOnlyField value={`${format(allowance.used)} · unlimited`} />
   }
 
   return (
@@ -147,8 +146,8 @@ function AllowanceCell({
 function usd(microUsd: number): string {
   if (microUsd === 0) return "$0"
   const dollars = microUsd / 1_000_000
-  if (dollars < 0.01) return "<$0,01"
-  return `$${dollars.toFixed(2).replace(".", ",")}`
+  if (dollars < 0.01) return "<$0.01"
+  return `$${dollars.toFixed(2)}`
 }
 
 function toneOf(allowance: Allowance): MeterTone {
@@ -171,18 +170,18 @@ function remaining(allowance: Allowance, format: (value: number) => string): str
 
   if (left <= 0) {
     const at = resetLabel(allowance.resets_at)
-    return at === null ? "Đã dùng hết hạn mức" : `Đã dùng hết · mở lại ${at}`
+    return at === null ? "Allowance used up" : `Used up · opens again ${at}`
   }
-  return `Còn ${format(left)}`
+  return `${format(left)} left`
 }
 
 /**
- * A reset moment in Vietnamese time, or null when there is nothing to say.
+ * A reset moment in Vietnam time, or null when there is nothing to say.
  *
  * The two halves are formatted separately and joined here rather than left to
- * one `Intl` call: asked for both, `vi-VN` returns the clock before the date
- * and separates the date with a dash — "11:00 12-09" — which is neither the
- * order nor the separator a Vietnamese reader expects for a moment.
+ * one `Intl` call, so the clock and the day always come out in the dd/mm,
+ * 24-hour order this product uses, regardless of what a single combined
+ * formatter would choose.
  */
 function resetLabel(isoMoment: string | null): string | null {
   if (isoMoment === null) return null
@@ -190,16 +189,16 @@ function resetLabel(isoMoment: string | null): string | null {
   if (Number.isNaN(moment.getTime())) return null
 
   const options = { timeZone: "Asia/Ho_Chi_Minh" } as const
-  const clock = new Intl.DateTimeFormat("vi-VN", {
+  const clock = new Intl.DateTimeFormat("en-GB", {
     ...options,
     hour: "2-digit",
     minute: "2-digit",
   }).format(moment)
-  const day = new Intl.DateTimeFormat("vi-VN", {
+  const day = new Intl.DateTimeFormat("en-GB", {
     ...options,
     day: "2-digit",
     month: "2-digit",
   }).format(moment)
 
-  return `${clock} ngày ${day}`
+  return `${clock} on ${day}`
 }

@@ -44,25 +44,25 @@ function vietnamWeekday(now: Date): string {
   }).format(now)
 }
 
-const CLOSED: MarketSession = { phase: "closed", label: "Đã đóng cửa", isLive: false }
+const CLOSED: MarketSession = { phase: "closed", label: "Closed", isLive: false }
 
 /** Boundaries in minutes from midnight, in session order. */
 const PHASES: { until: number; session: MarketSession }[] = [
-  { until: 9 * 60, session: { phase: "pre-open", label: "Chưa mở cửa", isLive: false } },
-  { until: 9 * 60 + 15, session: { phase: "ato", label: "Phiên ATO", isLive: true } },
+  { until: 9 * 60, session: { phase: "pre-open", label: "Pre-open", isLive: false } },
+  { until: 9 * 60 + 15, session: { phase: "ato", label: "ATO session", isLive: true } },
   {
     until: 11 * 60 + 30,
-    session: { phase: "continuous", label: "Đang khớp lệnh", isLive: true },
+    session: { phase: "continuous", label: "Continuous matching", isLive: true },
   },
-  { until: 13 * 60, session: { phase: "lunch", label: "Nghỉ trưa", isLive: false } },
+  { until: 13 * 60, session: { phase: "lunch", label: "Lunch break", isLive: false } },
   {
     until: 14 * 60 + 30,
-    session: { phase: "continuous", label: "Đang khớp lệnh", isLive: true },
+    session: { phase: "continuous", label: "Continuous matching", isLive: true },
   },
-  { until: 14 * 60 + 45, session: { phase: "atc", label: "Phiên ATC", isLive: true } },
+  { until: 14 * 60 + 45, session: { phase: "atc", label: "ATC session", isLive: true } },
   {
     until: 15 * 60,
-    session: { phase: "put-through", label: "Giao dịch thoả thuận", isLive: false },
+    session: { phase: "put-through", label: "Put-through", isLive: false },
   },
 ]
 
@@ -88,7 +88,7 @@ export function formatVietnamDate(
   if (value === null || value === undefined || value === "") return ""
   const moment = value instanceof Date ? value : new Date(value)
   if (Number.isNaN(moment.getTime())) return ""
-  return new Intl.DateTimeFormat("vi-VN", {
+  return new Intl.DateTimeFormat("en-GB", {
     timeZone: VN_TIME_ZONE,
     day: "2-digit",
     month: "2-digit",
@@ -112,7 +112,7 @@ export function recentWindow(days: number): { start: string; end: string } {
 
 /** Clock time in Vietnam, for stamping when a quote was last read. */
 export function formatVietnamTime(value: Date | number): string {
-  return new Intl.DateTimeFormat("vi-VN", {
+  return new Intl.DateTimeFormat("en-GB", {
     timeZone: VN_TIME_ZONE,
     hour: "2-digit",
     minute: "2-digit",

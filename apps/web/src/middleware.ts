@@ -51,6 +51,8 @@ export const config = {
     /*
      * Match all request paths except for the ones starting with:
      * - api/auth (session endpoints must stay reachable while signed out)
+     * - api/health (the connection probe; a redirect to the login page would
+     *   answer 200 and read as a healthy API)
      * - api/alpha-desk (a fetch cannot follow a login redirect; the handler
      *   authenticates and answers 401 instead)
      * - _next/static (static files)
@@ -58,6 +60,6 @@ export const config = {
      * - favicon.ico (favicon file)
      * - public folder
      */
-    "/((?!api/auth|api/alpha-desk|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!api/auth|api/alpha-desk|api/health|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 }
