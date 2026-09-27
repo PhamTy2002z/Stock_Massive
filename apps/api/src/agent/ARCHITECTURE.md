@@ -127,6 +127,7 @@ Giữ nguyên, đã có từ Phase 4:
 | Tool timeout | Timeout từng call (20–25 s) thành kết quả lỗi; cả round quá 30 s thì settle `tool_timeout` | `executor.py`, `loop.py` |
 | Output rỗng sau tool | Nhắc một lần (`EMPTY_AFTER_TOOLS_NOTE`), rồi `empty_answer` | `loop.py` |
 | Tham số sai schema | `INVALID_ARGUMENTS` trả về model, không dispatch | `executor.py` |
+| Tham số tìm năm cũ mà câu hỏi không nhắc (`web_search` có ngày/tháng của năm trước hoặc năm ≤ hai năm trước; `end` của `get_market_data` rơi vào năm cũ) | `BLOCKED_CALL` kèm ngày hôm nay, không dispatch; cùng call gửi lại lần hai thì chạy | `executor.py`, `evidence/source_policy.py` |
 | JSON tham số hỏng | Nhắc model gửi lại một lần, giữ note của stage đang chờ; lần hai thì settle `route_error` với câu trả lời dở | `loop.py` |
 | Call đọc lặp y hệt | Dùng lại kết quả đã có (cả bản hiển thị và verdict quét), không dispatch, không trừ ngân sách external, kèm lời nhắc đừng lặp | `loop.py` |
 | Không tiến triển | Kết quả y hệt lần trước ở lần thứ 2 → cảnh báo | `guardrails.py` |
@@ -134,6 +135,7 @@ Giữ nguyên, đã có từ Phase 4:
 | Dữ liệu mâu thuẫn | Prompt: nêu cả hai nguồn kèm thời điểm, ưu tiên nguồn sơ cấp, không tự chọn một số mà không nói; lane deep có counterevidence và verifier | `prompt/`, `evidence/` |
 | Yêu cầu mơ hồ | Xem mục 8 | `prompt/` |
 | Context quá dài | Ladder và recovery ở mục 5 | `messages.py`, `loop.py` |
+| Process chết giữa Turn, hoặc ghi settle lỗi | Turn đang chạy cập nhật `heartbeat_at` mỗi 20 s; sweep lúc khởi động và reaper 60 s chỉ settle Turn active có heartbeat cũ hơn 90 s (process khác dùng chung DB giữ được Turn của nó); ghi settle thử lại 3 lần rồi vẫn phát sự kiện kết thúc để stream đóng | `turns.py`, `persistence.py`, `alpha/models.py` |
 
 Nguyên tắc chung, lấy từ Hermes và từ hướng dẫn của Anthropic về tool error:
 lỗi mà model tự sửa được thì trả về model như một kết quả; lỗi mà model không
@@ -203,6 +205,7 @@ là request/response theo Turn, và một pause giữa Turn cần một hợp đ
 | Tool `clarify` giữa Turn | Không lấy | Cần hợp đồng SSE mới; hỏi = settle Turn là đủ |
 | Tràn kết quả ra file | Không lấy | Không có filesystem cho model; ladder cắt giảm đã xử lý |
 | Xoay vòng credential, 7 route fallback | Không lấy | Một route, một credential |
+| Ngày hiện tại là việc phải tra, không phải việc phải nhớ | Có (2026-09-27), không lấy tool terminal | Host giữ đồng hồ: chặn tham số tìm năm cũ ở executor, kiểm thứ trong tuần và "phiên hôm nay" trong câu trả lời |
 
 ## 10. Rủi ro còn lại
 

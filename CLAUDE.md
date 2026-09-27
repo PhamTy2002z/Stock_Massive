@@ -4,8 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-VisgniteAI / Stock_Massive: a Vietnamese-language, authenticated research desk
-for Vietnamese listed equities (HOSE, HNX, UPCOM). It is an **agent harness for
+VisgniteAI / Stock_Massive: an authenticated research desk for Vietnamese
+listed equities (HOSE, HNX, UPCOM). The web interface is English; an answer is
+written in the language of the user's question, and the labels the host writes
+into it follow that answer's language. It is an **agent harness for
 financial research** — tool calling, durable Turn state, context management,
 permissions, guardrails, an evidence/claim ledger and memory — not a
 market-data terminal and not a local analysis engine. Answers must stay
@@ -60,8 +62,11 @@ pnpm --dir apps/web test:e2e                    # playwright; boots tests.e2e.se
 `next build` writes into `.next` and breaks a running `next dev`; build into
 another dir instead: `E2E_NEXT_DIST_DIR=.next-verify pnpm --dir apps/web build`.
 
-A local Homebrew Postgres shadows the Docker one on `localhost`; a host-side run
-that touches the DB must point `DATABASE_URL` at the container explicitly.
+A local Homebrew Postgres holds `127.0.0.1:5432`, so a host-side run (`make test`
+included) talks to *it*, not to Docker, unless `DATABASE_URL` says otherwise; its
+schema is kept by the tests' `create_all`, not by alembic. Dev compose binds db,
+api and web to `127.0.0.1` only — set `POSTGRES_PORT=5433` in `.env` before the db
+container is recreated, or the bind collides with Homebrew.
 
 ## Architecture
 
@@ -72,7 +77,9 @@ Vietnamese). The big picture:
   `POST` creates a durable `agent_turn` row idempotently, then runs the agent in a
   background task detached from the request. Progress streams over SSE with
   replay; the Turn settles atomically (message + status + `terminal_reason`) in
-  one transaction. Interrupted Turns are swept on startup.
+  one transaction. A running Turn heartbeats every 20s (`agent_turn.heartbeat_at`);
+  the startup sweep and a 60s reaper settle only active Turns whose heartbeat is
+  older than 90s, so a second process sharing the DB keeps its Turns.
 - **Loop** (`agent/loop.py`): model ↔ tool rounds bounded by a **lane**
   (`lanes.py`: max rounds, external-call budget, deadline). The model plans the
   order; the host owns budget, permission and stop reason. The deep lane runs
@@ -108,11 +115,15 @@ Vietnamese). The big picture:
   dev only), `get_company_events`, `get_company_news`, `screen_stocks` and
   `calculate` (fixed operations, formula printed). Every vnstock call goes
   through `agent/tools/vnstock_provider.py`: guest quota is 20 req/min and
-  `vnai` calls `sys.exit` on breach, so the gate stops at 16 and turns a
-  `SystemExit` into a `rate_limited` refusal.
-- Every answer's figures are checked by `agent/evidence/grounding.py` against
-  that Turn's tool data, dated and labelled in place (`chưa kiểm chứng`,
-  `nguồn cũ`), with one repair round; each answered Turn writes a claim ledger. Adding a
+  `vnai` calls `sys.exit` on breach, so the gate stops at 16 (48 when
+  `VNSTOCK_API_KEY` holds a community key) and turns a `SystemExit` into a
+  `rate_limited` refusal. Provider reads are memoised in process
+  (`vnstock_provider.cached`); `retrieved_at` is when the data was fetched.
+- Every answer's figures and full dates (`dd/mm/yyyy`) are checked by
+  `agent/evidence/grounding.py` against that Turn's tool data, dated and labelled in place (`chưa kiểm chứng`,
+  `nguồn cũ` — or `unverified`, `stale source` in an English answer, chosen by
+  `evidence/numbers.answer_language`; `apps/web/src/lib/alpha-desk/figure-markers.ts`
+  reads both sets), with one repair round; each answered Turn writes a claim ledger. Adding a
   tool, MCP, multi-agent, code execution or side-effect tool is a scope decision
   for the product owner, not an implementation detail.
 - Signal Desk is a composer mode (`Chat | Signal Desk` pill), a right-hand pane

@@ -29,26 +29,26 @@ typography:
     letterSpacing: "-0.01em"
   body:
     fontFamily: "Inter, Helvetica Neue, Arial, system-ui, sans-serif"
-    fontSize: 0.9375rem
+    fontSize: 0.875rem
     fontWeight: 400
   row:
     fontFamily: "Inter, Helvetica Neue, Arial, system-ui, sans-serif"
-    fontSize: 0.9rem
+    fontSize: 0.875rem
     fontWeight: 400
-    lineHeight: 1.3rem
+    lineHeight: 1.25rem
   control:
     fontFamily: "Inter, Helvetica Neue, Arial, system-ui, sans-serif"
-    fontSize: 0.86rem
+    fontSize: 0.8125rem
     fontWeight: 500
     lineHeight: 1.25rem
   metadata:
     fontFamily: "Inter, Helvetica Neue, Arial, system-ui, sans-serif"
-    fontSize: 0.8rem
+    fontSize: 0.75rem
     fontWeight: 400
-    lineHeight: 1.15rem
+    lineHeight: 1.1rem
   eyebrow:
     fontFamily: "Inter, Helvetica Neue, Arial, system-ui, sans-serif"
-    fontSize: 0.7rem
+    fontSize: 0.66rem
     fontWeight: 600
     lineHeight: 1rem
     letterSpacing: "0.08em"
@@ -212,7 +212,8 @@ and never rely on color alone to communicate the state.
 **Body Font:** Inter (with Helvetica Neue, Arial, and system fallbacks)
 **Label/Mono Font:** JetBrains Mono (with `ui-monospace` fallback)
 
-**Character:** Inter keeps Vietnamese interface copy compact and neutral;
+**Character:** Inter keeps English interface copy and Vietnamese answer prose
+compact and neutral;
 JetBrains Mono makes figures stable down a column. Newsreader is a deliberately
 rare human note used when the system greets or addresses the reader.
 
@@ -221,13 +222,13 @@ rare human note used when the system greets or addresses the reader.
 - **Display** (400, `clamp(1.6rem, 2.7vw, 2.15rem)`, 1.1): greetings and select
   editorial headlines only; auth headings may reach 2.3rem and news headlines
   46px.
-- **Title** (400–500, 0.95–1.02rem, tight leading): surface titles, card titles,
+- **Title** (400–500, 0.9–1rem, tight leading): surface titles, card titles,
   and the wordmark.
-- **Body** (400, 15px): default prose and interface copy.
-- **Row** (400, 0.9rem/1.3rem): navigation rows, table labels, and list content.
-- **Control** (500, 0.86rem/1.25rem): buttons, tabs, and field labels.
-- **Metadata** (400, 0.8rem/1.15rem): timestamps, hints, and supporting labels.
-- **Eyebrow** (600, 0.7rem/1rem, 0.08em, uppercase): the quietest category label.
+- **Body** (400, 14px; answer prose 0.9rem/1.62): default prose and interface copy.
+- **Row** (400, 0.875rem/1.25rem): navigation rows, table labels, and list content.
+- **Control** (500, 0.8125rem/1.25rem): buttons, tabs, and field labels.
+- **Metadata** (400, 0.75rem/1.1rem): timestamps, hints, and supporting labels.
+- **Eyebrow** (600, 0.66rem/1rem, 0.08em, uppercase): the quietest category label.
 - **Figure** (JetBrains Mono with tabular numerals): prices, percentages,
   timestamps, codes, and any number intended for comparison.
 - **Figure Small / Medium / Large** (JetBrains Mono Semibold, 1.05rem / 1.22rem /
@@ -243,8 +244,14 @@ rare human note used when the system greets or addresses the reader.
 **The Three Jobs Rule.** Newsreader addresses, Inter operates, and JetBrains Mono
 compares. Do not trade roles for novelty.
 
-**The Vietnamese Is Native Rule.** Every loaded face must include the Vietnamese
-subset; mid-sentence fallback is a broken design, not a harmless optimization.
+**The English Chrome Rule.** Every interface string — controls, narration,
+errors, empty states — is English, with `en-US` number grouping and `en-GB`
+dates (dd/mm/yyyy, 24-hour clock). Only the answer text keeps the language the
+reader asked in.
+
+**The Vietnamese Is Native Rule.** Answers are often Vietnamese, so every loaded
+face must include the Vietnamese subset; mid-sentence fallback is a broken
+design, not a harmless optimization.
 
 ## Layout
 
@@ -340,6 +347,15 @@ segmented controls use a raised neutral surface; sidebar selection may use the
 single accent stroke. On compact widths, secondary labels disappear before
 icons or core controls.
 
+The sidebar offers new chat and a labeled conversation search with the platform
+keyboard shortcut. It shows pinned conversations only when present and up to
+20 recent unpinned conversations. When more exist, **Xem tất cả** opens the
+complete searchable list. Search supports arrow-key selection and Enter to
+open the selected conversation. Empty results offer clearing the query or
+starting a new chat. Unavailable screener, saved-report, and watchlist entries
+are omitted. Conversation menu controls remain visible on touch devices, and
+opening or creating a conversation dismisses a floating sidebar.
+
 ### Figures and Evidence
 
 Comparable figures always use JetBrains Mono and tabular numerals. Positive,
@@ -353,6 +369,17 @@ The composer is one 18px rounded, sunken card containing the text field and all
 message controls. It can float above the transcript with the composer shadow.
 The field grows to 150px before scrolling, preserves a draft across view changes,
 and remains available while an answer arrives.
+
+Send, admission, Stop, and cancellation share one 36px transparent control.
+Send uses a 24px seven-bar waveform, with a subtle surface on hover. Keep
+the size stable; change the icon and accessible label. Enter must
+not submit during admission or cancellation. Reserve the question action row
+before admission so server confirmation does not shift the answer.
+
+The research timeline numbers the actual rounds as steps. Show running work,
+completed calls, and failures distinctly, with counts while a group is running.
+Transcript scrolling follows rendered height, including timeline transitions,
+and respects readers who scroll away from the latest answer.
 
 ## Do's and Don'ts
 
