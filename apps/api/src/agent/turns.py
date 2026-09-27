@@ -183,6 +183,38 @@ class RunningTurn:
         return self.cancel_requested or self.shutting_down
 
 
+async def _connector_surface(
+    *, user_id: int, running: RunningTurn, client_capabilities: Sequence[str]
+) -> tuple[tuple[Any, ...], tuple[Any, ...], Any]:
+    """One user's connector tools and the approver for this Turn, or nothing.
+
+    Imported here rather than at module scope: ``connectors`` depends on this
+    package's registry, and the lifecycle must not pay for it when connectors
+    are off.
+    """
+    from src.connectors.approvals import make_approver
+    from src.connectors.overlay import build_overlay
+    from src.connectors.service import connectors
+
+    service = connectors()
+    overlay = await build_overlay(
+        user_id,
+        approvals_supported="approvals" in client_capabilities,
+        service=service,
+    )
+    if overlay.empty:
+        return (), (), None
+    approver = make_approver(
+        overlay=overlay,
+        publisher=running.publisher,
+        turn_id=running.turn.id,
+        user_id=user_id,
+        cancel_event=running.cancel_event,
+        service=service,
+    )
+    return overlay.offered, overlay.hidden, approver
+
+
 class Checkpointer:
     """At most one write a second, and always one at a boundary.
 
@@ -467,6 +499,7 @@ class TurnService:
         retry_of_turn_id: uuid.UUID | str | None = None,
         mode: str = CHAT_MODE,
         attachments: Sequence[TurnAttachment] = (),
+        client_capabilities: Sequence[str] = (),
     ) -> TurnHandle:
         """Commit the Turn, then start it. Never the other way round.
 
@@ -529,6 +562,13 @@ class TurnService:
             mode=mode,
         )
         self._running[record.id] = running
+        # Read once, here, like the lane: a connector switched on mid-Turn
+        # belongs to the next one.
+        connector_tools, connector_hidden, approver = await _connector_surface(
+            user_id=user_id,
+            running=running,
+            client_capabilities=client_capabilities,
+        )
         request = TurnRequest(
             thread_id=record.thread_id,
             turn_id=record.id,
@@ -544,6 +584,9 @@ class TurnService:
             # says why it was allowed to, and the loop's first progress part is
             # where it is reported.
             lane_reason=lane_reason,
+            connector_tools=connector_tools,
+            connector_hidden_tools=connector_hidden,
+            approver=approver,
         )
         running.task = asyncio.create_task(
             self._execute(running, request),

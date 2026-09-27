@@ -17,6 +17,7 @@ from src.agent.turns import sweep_interrupted_turns
 from src.alpha.favicons import router as favicons_router
 from src.alpha.refusals import AlphaRefusal
 from src.auth.router import router as auth_router
+from src.connectors.router import router as connectors_router
 from src.core.cache import CacheRefreshUnavailable
 from src.core.config import get_settings
 from src.core.database import engine
@@ -109,6 +110,7 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(alpha_desk_router, prefix="/api/v1")
 app.include_router(message_flag_router, prefix="/api/v1")
 app.include_router(favicons_router, prefix="/api/v1")
+app.include_router(connectors_router, prefix="/api/v1")
 
 
 @app.exception_handler(AlphaRefusal)

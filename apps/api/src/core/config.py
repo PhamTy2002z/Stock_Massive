@@ -144,6 +144,25 @@ class Settings(BaseSettings):
     # says the capability is permitted here and the flag says it is wanted.
     market_data_enabled: bool = False
 
+    # User connectors (src/connectors/): remote MCP servers a user attaches.
+    # Off by default, and refused without an encryption key, because a
+    # connector is a credential the database must never hold in the clear.
+    # The key list is comma-separated: the first encrypts, every one decrypts,
+    # which is how a key is rotated without stranding the tokens under the old.
+    connectors_enabled: bool = False
+    connectors_encryption_keys: str = ""
+    # Custom URLs (anything outside the reviewed catalog) need this flag, the
+    # internal profile and a user id on the allowlist — all three.
+    connectors_custom_url: bool = False
+    connectors_custom_url_users: str = ""
+    connectors_call_timeout_seconds: float = 20.0
+    connectors_max_result_chars: int = 20_000
+    # Where an OAuth provider sends the browser back. The API's own public
+    # address, because the callback is an API route.
+    connectors_oauth_redirect_url: str = "http://localhost:8000/api/v1/connectors/oauth/callback"
+    # Where the callback page sends the browser afterwards: the web app.
+    connectors_web_return_url: str = "http://localhost:3000/"
+
     # Khối giá mà Budget Validation đọc lúc khởi động. Đơn vị USD trên một
     # triệu token, khai riêng cho từng workload: batch và interactive là hai
     # model khác nhau với giá khác nhau, một khối dùng chung sẽ định sai giá

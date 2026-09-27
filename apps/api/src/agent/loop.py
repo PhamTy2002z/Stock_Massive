@@ -138,7 +138,7 @@ from src.core.config import get_settings
 
 from . import registry
 from .budget import Reshaper, TurnBudget, thresholds_for_context, trim_text
-from .definitions import resolve_tool_surface
+from .definitions import resolve_tool_surface, with_overlay
 from .executor import (
     HALTED_TURN,
     PERMISSION_DENIED,
@@ -146,6 +146,7 @@ from .executor import (
     ExecutionOutcome,
     ToolExecutor,
 )
+from .executor import Approver
 from .executor import ToolCall as ExecutorToolCall
 from .executor import ToolResult as ExecutorToolResult
 from .evidence import ClaimLedger, render_claim_ledger, validate_claim_ledger
@@ -886,6 +887,15 @@ class TurnRequest:
     #: got and on what grounds, so an operator reading a Turn that was allowed
     #: ten rounds of evidence can see why without re-running the router.
     lane_reason: str = DEFAULT_REASON
+    #: One user's connector tools for this Turn, resolved when it was created
+    #: (``connectors/overlay.py``): offered in the schema, and dispatchable but
+    #: not offered (the on-demand pair's inner tools). Empty for almost every
+    #: Turn, and then the surface is exactly the base one.
+    connector_tools: tuple[registry.ResolvedTool, ...] = ()
+    connector_hidden_tools: tuple[registry.ResolvedTool, ...] = ()
+    #: Where a call whose policy is ``ask`` is put to the reader. ``None`` keeps
+    #: the refusal every ``ask`` got before approvals existed.
+    approver: Approver | None = None
 
 
 @dataclass(frozen=True)
@@ -1086,6 +1096,11 @@ class _TurnState:
     #: next Turn, and deliberately unchanged by the split below: how a surface
     #: chooses to draw a sentence must not change what the model saw.
     started: float = field(default_factory=time.monotonic)
+    #: Seconds this Turn spent waiting for a person to approve a call. Not
+    #: charged to the lane's wall clock: the Turn was not working, it was
+    #: waiting on the reader, and a reader who takes a minute to decide must not
+    #: find the answer cut short for it.
+    paused: float = 0.0
     #: Which surface asked, copied from the request so every terminal path can
     #: read it: :meth:`AgentLoop._ended` is reached from a dozen call sites and
     #: threading the request through all of them to answer one question is how
@@ -1414,7 +1429,13 @@ class AgentLoop:
             cancel_event=cancel_event,
             user_text=request.user_text,
         )
-        surface = resolve_tool_surface(self._toolsets)
+        # The base surface is resolved and cached exactly as before; one user's
+        # connector tools, when there are any, go after it (``with_overlay``).
+        surface = with_overlay(
+            resolve_tool_surface(self._toolsets),
+            request.connector_tools,
+            request.connector_hidden_tools,
+        )
         tools = surface.offered_schemas
         turn_budget = TurnBudget(
             thresholds_for_context(self._context_tokens),
@@ -1439,6 +1460,7 @@ class AgentLoop:
             guardrails=TurnGuardrails(),
             trace=self._trace_writer(request, turn_budget),
             surface=surface,
+            approver=request.approver,
             # The same stop the model call races. What the executor does with it
             # is its own rule: reads in flight are given up on, and a write that
             # has started is allowed to finish.
@@ -2988,6 +3010,11 @@ class AgentLoop:
         outcome: ExecutionOutcome | None = None
         timed_out = False
         if runnable:
+            # Asked before the round's timeout starts, and not charged to the
+            # Turn's wall clock: the wait is the reader's, not the tools'.
+            waiting = time.monotonic()
+            await executor.approve(runnable)
+            state.paused += time.monotonic() - waiting
             try:
                 outcome = await asyncio.wait_for(
                     executor.run(runnable), self._tool_timeout
@@ -3442,13 +3469,13 @@ class AgentLoop:
         if state.figure_repairs >= MAX_FIGURE_REPAIRS or not state.answer:
             return
         report = self._figure_report(state)
-        if not report.unverified:
+        if not report.repairable:
             return
         state.figure_repairs += 1
         logger.info(
             "Turn %s draft states %d unsupported figure(s); asking once for a rewrite",
             request.request_message_id,
-            len(report.unverified),
+            len(report.repairable),
         )
         state.note = grounding.repair_note(report)
         state.note_tokens = estimate_tokens(
@@ -3482,7 +3509,7 @@ class AgentLoop:
             return
         previous = state.answer
         self._replace_answer(state, rewrite)
-        if len(self._figure_report(state).unverified) > len(report.unverified):
+        if len(self._figure_report(state).repairable) > len(report.repairable):
             self._replace_answer(state, previous or "")
         await self._save(state)
 
@@ -3536,7 +3563,7 @@ class AgentLoop:
         There is always a wall clock: every lane names one, so a Turn that runs
         forever is not a state this loop can be configured into.
         """
-        return time.monotonic() - state.started >= self._deadline
+        return time.monotonic() - state.started - state.paused >= self._deadline
 
 
 #: How much of a question is kept in the record below, in development. Long
