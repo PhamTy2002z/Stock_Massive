@@ -3,7 +3,7 @@
 # ========================================
 # Usage: docker compose -f docker-compose.prod.yml up -d
 #
-# By default only api + web run here and DATABASE_URL must point at a Postgres
+# By default only redis + api + web run here and DATABASE_URL must point at a Postgres
 # you manage elsewhere. To self-host Postgres on the same machine, add the `db`
 # profile: `docker compose -f docker-compose.prod.yml --profile db up -d`.
 
@@ -35,6 +35,23 @@ services:
     networks:
       - stockmassive-network
 
+  # Rate limits, the LLM route breaker and the cache. No published port: only
+  # the api reaches it, over the internal network.
+  redis:
+    image: redis:7-alpine
+    container_name: stockmassive-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - stockmassive-network
+
   api:
     build:
       context: ./apps/api
@@ -56,13 +73,23 @@ services:
     stop_grace_period: 60s
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      # Anything but development/test makes the API refuse a weak or known
+      # default AUTH_SECRET at boot, so production says so rather than
+      # inheriting the settings class's development default.
+      ENVIRONMENT: ${ENVIRONMENT:-production}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
-      # A self-hosted Redis is not part of this file; a deployment either points
-      # this at one it runs or uses the Upstash pair below. Empty is handled:
-      # the cache degrades and the LLM route breaker fails open.
-      CACHE_REDIS_URL: ${CACHE_REDIS_URL:-}
+      # The rate limits, the route breaker and the cache all live in Redis, and
+      # with no Redis the rate limits are simply off — so the stack brings its
+      # own. Override to point at a managed one.
+      CACHE_REDIS_URL: ${CACHE_REDIS_URL:-redis://redis:6379/0}
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
       UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+      # Peers whose X-Forwarded-For the rate limiter believes. Only Caddy and the
+      # web container reach the api, both on `stockmassive-network`, so trust is
+      # narrowed to that network's pinned subnet (below) rather than the code's
+      # default of every private range, which would believe any container or
+      # LAN host that can reach the port. Keep the two in step if either moves.
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-172.28.0.0/16}
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
       # Alpha Desk's LLM route (docs/adr/0014). Off unless the environment says
       # otherwise; with it on, Budget Validation refuses to boot on a price
@@ -123,11 +150,19 @@ services:
       # ngày, 1 Turn đang chạy mỗi account, 3 Turn toàn hệ thống). `0` = không
       # giới hạn từng cái một. LLM_SYSTEM_ACTIVE_TURNS cấu hình cả semaphore
       # trong process lẫn trần trong ledger — hai mặt của cùng một con số.
-      LLM_USER_TURN_STARTS_PER_DAY: ${LLM_USER_TURN_STARTS_PER_DAY:-0}
-      LLM_USER_ACTIVE_TURNS: ${LLM_USER_ACTIVE_TURNS:-0}
-      LLM_SYSTEM_ACTIVE_TURNS: ${LLM_SYSTEM_ACTIVE_TURNS:-0}
-      LLM_USER_DAILY_USD: ${LLM_USER_DAILY_USD:-0}
-      LLM_USER_ROLLING_30D_USD: ${LLM_USER_ROLLING_30D_USD:-0}
+      #
+      # No value on purpose: a key left empty here is forwarded only when the
+      # environment sets it, so an unset one falls through to the code's
+      # defaults above instead of to `0`. A `:-0` fallback silently turned every
+      # ceiling off for a deployment that never mentioned them — and with open
+      # registration that is a budget any new account can spend. `${VAR:-}`
+      # would not do either: it forwards an empty string, which the integer and
+      # float fields refuse at startup.
+      LLM_USER_TURN_STARTS_PER_DAY:
+      LLM_USER_ACTIVE_TURNS:
+      LLM_SYSTEM_ACTIVE_TURNS:
+      LLM_USER_DAILY_USD:
+      LLM_USER_ROLLING_30D_USD:
       # The open-web lane (docs/adr/0020). Off without a key, and the denylist
       # and byte ceiling are the two bounds a deployment may want its own values
       # for.
@@ -135,8 +170,14 @@ services:
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       WEB_FETCH_MAX_BYTES: ${WEB_FETCH_MAX_BYTES:-524288}
       WEB_DOMAIN_DENYLIST: ${WEB_DOMAIN_DENYLIST:-}
-    ports:
-      - "8000:8000"
+    # Internal only. A published port would reach FastAPI without TLS and
+    # without the proxy that sets `X-Forwarded-For`, so a caller could name its
+    # own address to the rate limiter. The public way in is the proxy's API site.
+    expose:
+      - "8000"
+    depends_on:
+      redis:
+        condition: service_healthy
     networks:
       - stockmassive-network
 
@@ -161,8 +202,10 @@ services:
       # makes every Alpha Desk request depend on the public hostname resolving
       # from inside the host.
       INTERNAL_API_URL: http://api:8000/api/v1
-    ports:
-      - "3000:3000"
+    # Internal only, for the reason the api service gives: the auth actions
+    # forward the first `X-Forwarded-For` entry, which only the proxy may write.
+    expose:
+      - "3000"
     depends_on:
       - api
     networks:
@@ -204,9 +247,16 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   caddy_data:
   caddy_config:
 
 networks:
   stockmassive-network:
     driver: bridge
+    # Pinned so TRUSTED_PROXY_CIDRS can name it. An existing network created
+    # without this subnet has to be removed (`docker compose down`) before the
+    # next `up` will apply it; pick another /16 if this one collides locally.
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

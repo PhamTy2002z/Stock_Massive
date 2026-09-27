@@ -7,6 +7,11 @@ PYTHON := $(shell if [ -d ".venv" ]; then echo ".venv/bin/python"; else echo "py
 UVICORN := $(shell if [ -d ".venv" ]; then echo ".venv/bin/uvicorn"; else echo "uvicorn"; fi)
 PYTEST := $(shell if [ -d ".venv" ]; then echo ".venv/bin/pytest"; else echo "pytest"; fi)
 
+# Settings default to ENVIRONMENT=production; these local targets run as
+# development unless the caller says otherwise. `run` is left out on purpose:
+# it is the production-like one and must be told explicitly.
+dev test test-file test-one probe-vision probe-prompt-cache: export ENVIRONMENT ?= development
+
 # Development server with hot reload (recommended)
 dev:
 	$(UVICORN) src.main:app --reload --reload-dir src --host 0.0.0.0 --port 8000

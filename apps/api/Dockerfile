@@ -9,17 +9,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     python3-dev \
     netcat-openbsd \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 1000 --shell /bin/bash app
 
 # Install dependencies first (cache optimization)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY --chown=app:app . .
 
 # Make entrypoint executable
 RUN chmod +x entrypoint.sh
+
+# Not root, like the production image. The bind-mounted `src` and `alembic` only
+# need to be readable; vnstock's device files and the matplotlib cache land in
+# this user's home. uid 1000 is the usual first user on a Linux host, so
+# `__pycache__` in the mount stays writable there too (Docker Desktop maps any
+# uid). A one-off `pip install` inside the container falls back to a user
+# install; use `docker compose exec -u root api ...` for anything else.
+USER app
 
 # Health check.
 #

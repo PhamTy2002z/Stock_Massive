@@ -30,8 +30,15 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      # Host port is configurable — 5432 is often taken by another local stack
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Loopback only: with the default password, a port on every interface is
+      # a database anyone on the same network can read.
+      #
+      # The host port is configurable because 5432 is often taken — a Homebrew
+      # Postgres on `127.0.0.1:5432` makes this bind fail outright. Set
+      # POSTGRES_PORT (e.g. 5433) in `.env` and point host-side tools at
+      # `localhost:<port>`; that also replaces reaching this database through
+      # the machine's LAN address, which stops working under this bind.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-stockmassive}"]
       interval: 5s
@@ -49,6 +56,11 @@ services:
     stop_grace_period: 45s
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/stockmassive}
+      # Development is the one environment that tolerates the fallback secret
+      # below; any other value makes the API refuse a weak AUTH_SECRET at boot.
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      # A published fallback, tolerable only because the port above is bound to
+      # loopback. Set AUTH_SECRET in `.env` to make it required here.
       AUTH_SECRET: ${AUTH_SECRET:-dev-secret-change-in-production}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
@@ -94,6 +106,10 @@ services:
       # accidental licence breach.
       DEPLOYMENT_PROFILE: ${DEPLOYMENT_PROFILE:-production}
       MARKET_DATA_ENABLED: ${MARKET_DATA_ENABLED:-false}
+      # The provider's community key (60 requests/min instead of 20). The
+      # package reads it from the environment itself, and its presence lifts the
+      # host's own request gate to match (`agent/tools/vnstock_provider.py`).
+      VNSTOCK_API_KEY: ${VNSTOCK_API_KEY:-}
       # The startup Capability Probe spends real provider tokens and refuses to
       # boot the whole API when the route cannot answer it. Forwarded so an
       # operator on a constrained route (expired plan, drained credits) can
@@ -125,11 +141,19 @@ services:
       # ngày, 1 Turn đang chạy mỗi account, 3 Turn toàn hệ thống). `0` = không
       # giới hạn từng cái một. LLM_SYSTEM_ACTIVE_TURNS cấu hình cả semaphore
       # trong process lẫn trần trong ledger — hai mặt của cùng một con số.
-      LLM_USER_TURN_STARTS_PER_DAY: ${LLM_USER_TURN_STARTS_PER_DAY:-0}
-      LLM_USER_ACTIVE_TURNS: ${LLM_USER_ACTIVE_TURNS:-0}
-      LLM_SYSTEM_ACTIVE_TURNS: ${LLM_SYSTEM_ACTIVE_TURNS:-0}
-      LLM_USER_DAILY_USD: ${LLM_USER_DAILY_USD:-0}
-      LLM_USER_ROLLING_30D_USD: ${LLM_USER_ROLLING_30D_USD:-0}
+      #
+      # No value on purpose: a key left empty here is forwarded only when the
+      # environment sets it, so an unset one falls through to the code's
+      # defaults above instead of to `0`. A `:-0` fallback silently turned every
+      # ceiling off for a deployment that never mentioned them — and with open
+      # registration that is a budget any new account can spend. `${VAR:-}`
+      # would not do either: it forwards an empty string, which the integer and
+      # float fields refuse at startup.
+      LLM_USER_TURN_STARTS_PER_DAY:
+      LLM_USER_ACTIVE_TURNS:
+      LLM_SYSTEM_ACTIVE_TURNS:
+      LLM_USER_DAILY_USD:
+      LLM_USER_ROLLING_30D_USD:
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       WEB_TOOLS_ENABLED: ${WEB_TOOLS_ENABLED:-false}
       WEB_FETCH_MAX_BYTES: ${WEB_FETCH_MAX_BYTES:-524288}
@@ -138,8 +162,10 @@ services:
       - ./apps/api/src:/code/src
       - ./apps/api/alembic:/code/alembic
     ports:
+      # Loopback only, like the database: this stack signs tokens with a dev
+      # secret, so a port on the LAN is an account anyone nearby can mint.
       # Host port is configurable so a second worktree stack can run alongside
-      - "${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -160,13 +186,18 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
       INTERNAL_API_URL: http://api:8000/api/v1
       WATCHPACK_POLLING: "true"
+    # `pnpm dev` binds loopback so a host-side dev server is not on the LAN.
+    # Inside the container loopback is unreachable from the published port, so
+    # this one binds every interface; the port below is published on the
+    # host's loopback only.
+    command: ["pnpm", "exec", "next", "dev", "-H", "0.0.0.0"]
     volumes:
       - ./apps/web/src:/app/src
       - ./apps/web/public:/app/public
     ports:
       # Host port is configurable so a second worktree stack can run alongside.
       # Changing this also means updating CORS_ORIGINS to match the new origin.
-      - "${WEB_PORT:-3000}:3000"
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
     depends_on:
       - api
     networks:

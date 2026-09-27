@@ -18,7 +18,28 @@
 	email {$ACME_EMAIL:ops@example.com}
 }
 
+# Shared by both sites. HSTS belongs here rather than in Next because only this
+# hop knows the connection is TLS. `includeSubDomains` is left out: the domains
+# are the operator's, and pinning every sibling host to HTTPS is their call.
+# `-Server` stops advertising the proxy and its version.
+#
+# The body cap sits above the API's 4 MiB upload limit with room for multipart
+# framing, so an oversized or endless chunked upload is cut off here instead of
+# being spooled by the two hops behind.
+(hardening) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+	request_body {
+		max_size 6MB
+	}
+}
+
 {$WEB_DOMAIN} {
+	import hardening
+
 	# The stream is excluded from compression by a matcher on `encode` itself.
 	# `handle` scopes only what is inside it, so a site-level `encode` would
 	# still compress the stream — and a compressor that buffers to fill its
@@ -52,11 +73,15 @@
 	}
 }
 
-# The API is reachable publicly because the browser calls it directly for
-# everything outside Alpha Desk (`NEXT_PUBLIC_API_URL`). Alpha Desk itself never
-# arrives here: it goes through the Next handler, which reaches FastAPI over the
-# internal network.
+# The API is reachable publicly only through this site: the containers publish
+# no ports. The browser makes no direct API call — the connection gate probes
+# the same-origin `/api/health`, and everything carrying a session (Alpha Desk,
+# the auth actions) goes through Next, which reaches FastAPI over the internal
+# network with the token from an httpOnly cookie. This site remains for
+# operators and tools that call the API directly.
 {$API_DOMAIN} {
+	import hardening
+
 	# Same exclusion, for the same reason: the transport endpoints answer with an
 	# event stream even when they are reached directly.
 	@compressible not path /api/v1/turns/*/events
