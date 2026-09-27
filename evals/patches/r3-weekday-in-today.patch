@@ -1,0 +1,41 @@
+diff --git a/apps/api/src/agent/prompt/contract.py b/apps/api/src/agent/prompt/contract.py
+index 8b02fff..08bfb61 100644
+--- a/apps/api/src/agent/prompt/contract.py
++++ b/apps/api/src/agent/prompt/contract.py
+@@ -210,6 +210,12 @@ def prefix() -> str:
+     return _STATIC_TEXT
+ 
+ 
++#: Vietnamese weekday names, Monday first as ``date.weekday()`` counts. The date
++#: alone left the model to work out the day of the week, and on 2026-09-27 it
++#: called that Sunday "thứ Bảy" in three answers.
++_WEEKDAYS = ("Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ nhật")
++
++
+ def render(context: RuntimeContext) -> str:
+     """The whole system prompt: the stable prefix, then the Turn's values.
+ 
+@@ -223,7 +229,7 @@ def render(context: RuntimeContext) -> str:
+     if market.holiday:
+         phase = f"{phase} ({market.holiday})"
+     lines = [
+-        f"- today: {context.today.isoformat()}",
++        f"- today: {context.today.isoformat()} ({_WEEKDAYS[context.today.weekday()]})",
+         f"- market_today: {phase}",
+     ]
+     if market.previous_trading_day is not None:
+diff --git a/apps/api/tests/test_agent_prompt.py b/apps/api/tests/test_agent_prompt.py
+index d6cb95e..b8fd01d 100644
+--- a/apps/api/tests/test_agent_prompt.py
++++ b/apps/api/tests/test_agent_prompt.py
+@@ -128,3 +128,10 @@ def test_runtime_values_are_rendered_only_in_the_dynamic_tail():
+ def test_runtime_values_cannot_turn_into_formatting_holes(value: str):
+     rendered = render(RuntimeContext(today=date(2026, 8, 31), user_name=value))
+     assert "{" not in rendered and "}" not in rendered
++
++
++def test_today_is_rendered_with_its_weekday():
++    """Measured 2026-09-27: told only "today: 2026-09-27", the model called a Sunday "thứ Bảy"."""
++    rendered = render(RuntimeContext(today=date(2026, 9, 27)))
++    assert "- today: 2026-09-27 (Chủ nhật)" in rendered
++    assert "- today: 2026-09-28 (Thứ Hai)" in render(RuntimeContext(today=date(2026, 9, 28)))

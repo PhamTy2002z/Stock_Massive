@@ -1,0 +1,70 @@
+diff --git a/apps/api/src/agent/tools/calculator.py b/apps/api/src/agent/tools/calculator.py
+index f64ff0d..7a32fae 100644
+--- a/apps/api/src/agent/tools/calculator.py
++++ b/apps/api/src/agent/tools/calculator.py
+@@ -35,7 +35,10 @@ from ..registry import (
+ 
+ TOOLSET = "market_data"
+ TOOL_NAME = "calculate"
+-MAX_INPUTS = 12
++#: Enough for an average over three months of sessions. The grounding check admits a
++#: calculation only when each input is printed in a source, so an average has to
++#: take the rows themselves: a sum the model added up first is not printed anywhere.
++MAX_INPUTS = 66
+ 
+ #: operation → (how many inputs, the result's default unit, the formula shape).
+ OPERATIONS: Mapping[str, tuple[int | None, str | None, str]] = {
+@@ -44,6 +47,7 @@ OPERATIONS: Mapping[str, tuple[int | None, str | None, str]] = {
+     "percent_change": (2, "%", "({a} − {b}) / {b} × 100"),
+     "difference": (2, None, "{a} − {b}"),
+     "sum": (None, None, " + "),
++    "average": (None, None, " + "),
+     "multiply": (None, None, " × "),
+ }
+ 
+@@ -115,6 +119,9 @@ def compute(operation: str, inputs: Sequence[Mapping[str, Any]], *, decimals: in
+     elif operation == "sum":
+         result = sum(values, Decimal(0))
+         formula = shape.join(shown)
++    elif operation == "average":
++        result = sum(values, Decimal(0)) / len(values)
++        formula = f"({shape.join(shown)}) / {len(values)}"
+     else:
+         result = Decimal(1)
+         for number in values:
+@@ -144,7 +151,8 @@ class CalculatorTools:
+                     "Compute a number the answer states but no source prints: a "
+                     "ratio (divide), a share (percent_of), a growth or change "
+                     "(percent_change: first input is the new value, second the old), "
+-                    "a difference, a sum or a product. Use it for every derived "
++                    "a difference, a sum, an average (average: pass every value itself, e.g. each "
++                    "session's volume — never a total you added up) or a product. Use it for every derived "
+                     "figure instead of computing in your head. Each input must be a "
+                     "figure you read from a tool in this turn, with its label and "
+                     "unit; the result comes back with its formula, and a result built "
+--- a/apps/api/tests/test_agent_grounding.py
++++ b/apps/api/tests/test_agent_grounding.py
+@@ -713,3 +713,23 @@
+         ("0,19", FigureStatus.GROUNDED),
+     ]
+ 
++
++def test_a_twenty_session_average_through_the_calculator_is_grounded():
++    """Measured 2026-09-27: asked for volume against its 20-session average, the model
++    summed twenty rows in its head and divided the sum — no operation took the rows
++    themselves, and the ceiling of twelve inputs could not hold them."""
++    from src.agent.registry import ToolContext
++    from src.agent.tools import calculator
++
++    rows = [(f"2026-08-{day:02d}", 76_000, 1_000_000 + day * 10_000) for day in range(3, 23)]
++    market = market_call(rows, call_id="m20")
++    inputs = [{"label": f"KL {day}", "value": volume, "unit": "cổ phiếu"} for day, _, volume in rows]
++    payload = calculator.CalculatorTools().calculate(ToolContext(user_id=1), {"operation": "average", "inputs": inputs})
++    calc = TurnToolCall(
++        id="c20", name="calculate", status=ToolCallStatus.OK, result_text=json.dumps(dict(payload), ensure_ascii=False)
++    )
++
++    assert payload["result_text"] == "1.125.000,00 cổ phiếu"
++    report = check("Khối lượng trung bình 20 phiên là 1.125.000 cổ phiếu.", [market, calc])
++    [figure] = report.figures
++    assert figure.status is FigureStatus.GROUNDED

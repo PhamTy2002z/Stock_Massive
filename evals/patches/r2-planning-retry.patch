@@ -1,0 +1,143 @@
+--- a/apps/api/src/agent/loop.py
++++ b/apps/api/src/agent/loop.py
+@@ -527,6 +527,18 @@
+ # for this note to point at, and spending a call to ask it to try again would be
+ # the apology call this loop does not make.
+ MAX_EMPTY_NUDGES = 1
++# The deep planning pass is asked for tools with ``tool_choice="required"``, and
++# a route may ignore it: on 2026-09-27 the kiro route answered a Signal Desk
++# chart request and a long pasted-news question in prose on the planning pass,
++# and both Turns settled with an empty ledger and no chart. One more asking,
++# saying why the prose was not taken, is what a route that will not be forced
++# gets; a second prose reply still fails closed.
++MAX_PLANNING_RETRIES = 1
++PLANNING_RETRY_NOTE = (
++    "Your last reply on the planning pass contained no tool call, so it was not "
++    "used and the reader has not seen it. This pass accepts only the tool calls "
++    "the note below asks for, in one batch, and no text."
++)
+ EMPTY_AFTER_TOOLS_NOTE = (
+     "Your last message contained no answer for the reader — only the sentence "
+     "introducing the tool calls. The results of those calls are above. Write the "
+@@ -1134,6 +1146,7 @@
+     # without a reply once has been asked again already, and rediscovering that in
+     # a later round costs another call.
+     empty_nudges: int = 0
++    planning_retries: int = 0
+     # Per-Turn for the same reason: a route that could not write a call's
+     # arguments twice will not learn to on the third asking.
+     argument_repairs: int = 0
+@@ -1675,6 +1688,7 @@
+                     state=state,
+                     completion=completion,
+                     last_iteration=round_index + 1 == loop_iterations,
++                    market=market,
+                 )
+                 if finished is not None:
+                     return finished
+@@ -1841,11 +1855,22 @@
+         state: _TurnState,
+         completion: Completion,
+         last_iteration: bool,
++        market: bool,
+     ) -> TurnOutcome | None:
+         """Advance only after a pass actually returned its typed draft."""
+ 
+         assert state.as_of is not None
+         if state.pipeline_stage is PipelineStage.PLANNING:
++            if state.planning_retries < MAX_PLANNING_RETRIES and not last_iteration:
++                state.planning_retries += 1
++                logger.warning(
++                    "Turn %s planning pass answered in prose with no tool call "
++                    "(model=%s); asking once more for the batch",
++                    request.request_message_id,
++                    completion.model,
++                )
++                state.note = f"{PLANNING_RETRY_NOTE}\n\n{planner_note(market=market)}"
++                return None
+             return await self._fail_deep_pipeline(
+                 request, state, "planner_returned_no_search_batch"
+             )
+--- a/apps/api/tests/test_agent_evidence_pipeline.py
++++ b/apps/api/tests/test_agent_evidence_pipeline.py
+@@ -815,4 +815,53 @@
+ 
+     assert outcome.claim_ledger["claims"][0]["verdict"] == "single_source"
+     assert outcome.visual is not None
++
++
++class ProsePlannerClient(PipelineClient):
++    """The planning pass answers in prose before it plans.
++
++    Measured on 2026-09-27: the kiro route ignores ``tool_choice="required"``
++    (and a named function), so a model that decides to answer at once returns
++    text on the planning pass and nothing the gate can dispatch.
++    """
++
++    def __init__(self, *, prose_replies: int = 1) -> None:
++        super().__init__()
++        self.prose_left = prose_replies
+ 
++    async def complete(self, request, spend=None):
++        if self.prose_left:
++            self.prose_left -= 1
++            self.requests.append(request)
++            return completion(text="HPG đang giao dịch quanh 28.000 đồng.")
++        return await super().complete(request, spend)
++
++
++def _notes(request) -> str:
++    return "\n".join(str(message.content) for message in request.messages)
++
++
++@pytest.mark.asyncio
++async def test_a_planning_pass_answered_in_prose_is_asked_once_more_for_the_batch():
++    client = ProsePlannerClient()
++
++    outcome = await AgentLoop(client=client, config=config(), lane=DEEP, clock=lambda: NOW).run(request())
++
++    assert outcome.status is TurnStatus.COMPLETE
++    assert outcome.claim_ledger["verifierOutcome"] != "verifier_failed"
++    assert "planner_returned_no_search_batch" not in outcome.answer
++    # The prose is not the answer, and the retry says why it was not taken.
++    assert "28.000" not in outcome.answer
++    assert "PLANNING PASS" in _notes(client.requests[1])
++    assert "no tool call" in _notes(client.requests[1])
++
++
++@pytest.mark.asyncio
++async def test_a_planning_pass_that_answers_in_prose_twice_still_fails_closed():
++    client = ProsePlannerClient(prose_replies=2)
++
++    outcome = await AgentLoop(client=client, config=config(), lane=DEEP, clock=lambda: NOW).run(request())
++
++    assert outcome.claim_ledger["verifierOutcome"] == "verifier_failed"
++    assert "planner_returned_no_search_batch" in outcome.answer
++    assert len(client.requests) == 2
+--- a/apps/api/tests/test_agent_loop.py
++++ b/apps/api/tests/test_agent_loop.py
+@@ -2774,7 +2774,9 @@
+ 
+     await loop(client, lane=DEEP).run(turn_request(user_text="Bạn là ai?"))
+ 
+-    assert _bodies(client) == [1]
++    # Prose on the planning pass is asked for the batch once more, and that call
++    # carries the playbook exactly as the first did.
++    assert _bodies(client) == [1, 1]
+ 
+ 
+ @pytest.mark.asyncio
+--- a/apps/api/tests/test_agent_turn_lifecycle.py
++++ b/apps/api/tests/test_agent_turn_lifecycle.py
+@@ -841,8 +841,11 @@
+         for part in trail[1:]
+         if part["kind"] == "model_attempt"
+     ] == [
++        # Prose on the planning pass, then the one retry that asks for the batch.
+         "running",
+         "completed",
++        "running",
++        "completed",
+     ]
+     assert trail[-1]["kind"] == "pipeline_pass"
+     assert trail[-1]["payload"]["outcome"] == "failed"

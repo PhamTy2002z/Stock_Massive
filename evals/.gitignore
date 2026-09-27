@@ -1,0 +1,4 @@
+# Raw Turn logs and tool outputs from selftest rounds: large, regenerable, and full of provider data.
+runs/
+runs-*.log
+__pycache__/

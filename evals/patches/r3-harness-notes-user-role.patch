@@ -1,0 +1,94 @@
+--- a/apps/api/src/agent/loop.py
++++ b/apps/api/src/agent/loop.py
+@@ -527,6 +527,14 @@
+ # for this note to point at, and spending a call to ask it to try again would be
+ # the apology call this loop does not make.
+ MAX_EMPTY_NUDGES = 1
++#: What opens every note the harness adds after the conversation. The notes go in
++#: the user role, not the system one: on 2026-09-27 the kiro route, given the deep
++#: planning note as a system message after the question, answered in prose with
++#: its tool call written out as text, 2 times out of 2; the same note as a user
++#: message got the batch it asked for, 2 out of 2. A system message anywhere but
++#: first is also what several OpenAI-compatible routes merge or drop. The prefix
++#: says whose words these are, so the model does not answer them as the reader's.
++HARNESS_NOTE_PREFIX = "[Ghi chú của hệ thống, không phải người dùng viết]\n"
+ EMPTY_AFTER_TOOLS_NOTE = (
+     "Your last message contained no answer for the reader — only the sentence "
+     "introducing the tool calls. The results of those calls are above. Write the "
+@@ -2241,7 +2249,7 @@
+     def _appended(
+         self, request: TurnRequest, state: _TurnState, exhausted: bool
+     ) -> tuple[tuple[Message, str, int], ...]:
+-        """The system messages added after the context was constructed.
++        """The harness notes added after the context was constructed.
+ 
+         Each one comes with the layer it is charged to and what it is charged,
+         so the caller has one list to send and one list to account for. The
+@@ -2259,8 +2267,9 @@
+             appended.append(
+                 (
+                     Message(
+-                        role=Role.SYSTEM,
+-                        content=rounds_exhausted_note(self._lane.max_tool_rounds),
++                        role=Role.USER,
++                        content=HARNESS_NOTE_PREFIX
++                        + rounds_exhausted_note(self._lane.max_tool_rounds),
+                     ),
+                     SYSTEM_DYNAMIC,
+                     SYSTEM_NOTE_TOKENS,
+@@ -2269,7 +2278,7 @@
+         if state.note:
+             appended.append(
+                 (
+-                    Message(role=Role.SYSTEM, content=state.note),
++                    Message(role=Role.USER, content=HARNESS_NOTE_PREFIX + state.note),
+                     SYSTEM_DYNAMIC,
+                     max(SYSTEM_NOTE_TOKENS, state.note_tokens or 0),
+                 )
+@@ -3446,7 +3455,7 @@
+         )
+         state.note = grounding.repair_note(report)
+         state.note_tokens = estimate_tokens(
+-            Message(role=Role.SYSTEM, content=state.note)
++            Message(role=Role.USER, content=HARNESS_NOTE_PREFIX + state.note)
+         )
+         self._attempt(state, ATTEMPT_RUNNING)
+         try:
+@@ -3610,6 +3619,7 @@
+     "SCHEMA_REJECTED",
+     "SESSION_CONCURRENCY",
+     "SUMMARY_LABEL",
++    "HARNESS_NOTE_PREFIX",
+     "SYSTEM_NOTE_TOKENS",
+     "TOOL_TIMEOUT",
+     "TOOL_TIMEOUT_SECONDS",
+--- a/apps/api/tests/test_agent_evidence_pipeline.py
++++ b/apps/api/tests/test_agent_evidence_pipeline.py
+@@ -12,7 +12,7 @@
+ import pytest
+ 
+ from src.agent import registry
+-from src.agent.loop import AgentLoop, TurnRequest, TurnStatus
++from src.agent.loop import HARNESS_NOTE_PREFIX, AgentLoop, TurnRequest, TurnStatus
+ from src.agent.lanes import DEEP
+ from src.agent.messages import ANSWER, THOUGHT
+ from src.agent.prompt import RuntimeContext
+@@ -817,3 +817,18 @@
+     assert outcome.visual is not None
+ 
+ 
++
++@pytest.mark.asyncio
++async def test_the_planning_note_travels_as_the_last_user_message():
++    """Measured 2026-09-27 on the kiro route, 2/2 each way: the same planning note
++    sent as a system message after the question got prose and no tool call; sent
++    in the user role it got the three searches and the market read it asked for."""
++    client = PipelineClient()
++
++    await AgentLoop(client=client, config=config(), lane=DEEP, clock=lambda: NOW).run(request())
++
++    last = client.requests[0].messages[-1]
++    assert last.role.value == "user"
++    assert "PLANNING PASS" in str(last.content)
++    assert str(last.content).startswith(HARNESS_NOTE_PREFIX)
++    assert [m.role.value for m in client.requests[0].messages].count("system") == 1
