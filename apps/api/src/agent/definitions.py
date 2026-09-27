@@ -84,7 +84,14 @@ class ResolvedToolSurface:
                 tool.schema
                 for tool in self.tools
                 if tool.available
-                and PermissionPolicy(tool.permission_rules).may_allow(tool.name)
+                and (
+                    PermissionPolicy(tool.permission_rules).may_allow(tool.name)
+                    # A connector tool is in the overlay only if its policy is
+                    # allow or ask — deny is left out when the overlay is built —
+                    # and an ``ask`` one is useful to offer, because this Turn
+                    # has somewhere to ask.
+                    or tool.name in self.overlay_names
+                )
             ),
         )
         object.__setattr__(self, "by_name", MappingProxyType(lookup))

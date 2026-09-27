@@ -180,6 +180,12 @@ async def test_policy_shapes_what_is_offered(world):
         assert [rule.action.value for rule in rules] == ["ask"]
         with pytest.raises(ConnectorRefused):
             await service.set_policy(world.alice, row.id, name, "allow")
+    # And what the model is actually sent: ask tools are offered, deny is not.
+    sent = {schema.name for schema in with_overlay(
+        ResolvedToolSurface(tools=(), registry_generation=0, expanded_names=(), expires_at=math.inf),
+        overlay.offered,
+    ).offered_schemas}
+    assert sent == {_wire(row, "save_note"), _wire(row, "wipe_notes")}
     await service.set_enabled(world.alice, row.id, False)
     assert (await build_overlay(world.alice, service=service)).empty
     await service.delete(world.alice, row.id)

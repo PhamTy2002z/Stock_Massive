@@ -86,7 +86,10 @@ async def test_preloaded_offers_the_connector_schema_and_runs_it(world):
             Completion(model=SESSION_MODEL, text="Xong.", usage=_usage()),
         ],
     )
-    assert wire in {tool.name for tool in client.requests[0].tools}
+    sent = {tool.name for tool in client.requests[0].tools}
+    assert wire in sent
+    # A tool that needs approval is offered too; it is asked about when called.
+    assert next(tool["wire"] for tool in row.tools if tool["name"] == "save_note") in sent
     assert [call.status.value for call in outcome.tool_calls] == ["ok"]
     await service.delete(world.alice, row.id)
 
