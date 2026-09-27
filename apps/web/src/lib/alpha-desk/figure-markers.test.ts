@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { readMarker, readSources, splitMarkers } from "./figure-markers"
+import { readMarker, readSources, rehypeFigureMarkers, splitMarkers, splitSources } from "./figure-markers"
 
 describe("readMarker", () => {
   it("reads the three labels the host writes", () => {
@@ -58,5 +58,50 @@ describe("readSources", () => {
         [2, "cafef.vn — Sacombank — đăng 20/08/2026"],
       ]),
     )
+  })
+})
+
+describe("splitSources", () => {
+  const answer = [
+    "Đóng cửa 76.900đ [1 · phiên 24/09/2026], P/E 45,17 lần [2].",
+    "",
+    "Nguồn:",
+    "",
+    "[1] KB Securities — STB · nến ngày · phiên 24/09/2026",
+    "[2] KB Securities — STB · chỉ số tài chính · Quý 2/2026",
+    "",
+    "---",
+    "",
+    "**Nguồn số liệu**",
+    "",
+    "- [1] KB Securities — STB · nến ngày · phiên 24/09/2026",
+    "- [2] cafef.vn — Sacombank — đăng 20/08/2026 — <https://cafef.vn/stb.chn>",
+  ].join("\n")
+
+  it("cuts both closing lists and keeps the host's lines", () => {
+    const { body, sources } = splitSources(answer)
+    expect(body).toBe("Đóng cửa 76.900đ [1 · phiên 24/09/2026], P/E 45,17 lần [2].")
+    expect(sources).toEqual([
+      { label: "KB Securities — STB · nến ngày · phiên 24/09/2026", url: null },
+      { label: "cafef.vn — Sacombank — đăng 20/08/2026", url: "https://cafef.vn/stb.chn" },
+    ])
+  })
+
+  it("reads the model's list when the host wrote none", () => {
+    const { sources } = splitSources("Giá 76.900đ [1].\n\nNguồn:\n\n[1] Vietcap — STB · tin doanh nghiệp")
+    expect(sources).toEqual([{ label: "Vietcap — STB · tin doanh nghiệp", url: null }])
+  })
+
+  it("leaves a Nguồn heading followed by prose alone", () => {
+    const text = "Nguồn:\n\nTheo báo cáo quý."
+    expect(splitSources(text)).toEqual({ body: text, sources: [] })
+  })
+})
+
+describe("bare citations", () => {
+  it("drops the model's own [n] numbers from the prose", () => {
+    const tree = { type: "root", children: [{ type: "text", value: "P/E 45,17 lần [2], ROE 4,99% [2, 3]." }] }
+    rehypeFigureMarkers()(tree)
+    expect(tree.children).toEqual([{ type: "text", value: "P/E 45,17 lần, ROE 4,99%." }])
   })
 })

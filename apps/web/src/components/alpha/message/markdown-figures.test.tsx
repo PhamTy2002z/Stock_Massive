@@ -38,11 +38,10 @@ describe("figure labels in an answer", () => {
     expect(container.textContent).not.toContain("[1 · phiên")
   })
 
-  it("renders the source list as a list, one source per item", () => {
+  it("leaves the source list to the sources pill", () => {
     const { container } = render(<Markdown text={ANSWER} />)
 
-    const items = Array.from(container.querySelectorAll("li")).map((item) => item.textContent)
-    expect(items).toHaveLength(2)
-    expect(items[1]).toContain("cafef.vn — Sacombank — đăng 07/01/2026")
+    expect(container.querySelectorAll("li")).toHaveLength(0)
+    expect(container.textContent).not.toContain("Nguồn số liệu")
   })
 })

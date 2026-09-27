@@ -126,6 +126,7 @@ export function AssistantMessage({
       {actionable && onOpenSources !== undefined && (
         <SourcePill
           toolCalls={view.toolCalls}
+          text={view.text}
           onOpen={() => onOpenSources(messageId)}
         />
       )}

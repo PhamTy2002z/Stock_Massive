@@ -76,6 +76,67 @@ export function readSources(text: string): Map<number, string> {
   return sources
 }
 
+/** One source an answer lists at its end, as the sources pill shows it. */
+export interface CitedSource {
+  label: string
+  /** The page, when the line carried one. */
+  url: string | null
+}
+
+/** A heading above a source list: the host's `**Nguồn số liệu**` or the model's own `Nguồn:`. */
+const SOURCES_LINE = /^(?:#{1,4} *)?(?:\*\*)?Nguồn(?: số liệu| tham khảo)?:?(?:\*\*)?:? *$/i
+const SOURCE_ENTRY = /^(?:[-*] )?\[(\d{1,3})\] (.+)$/
+/** The host's notes about its labels, which sit among the closing lists. */
+const LABEL_NOTE = /^Số có nhãn /
+
+/**
+ * The answer without the source lists it ends with, and those lists' lines.
+ *
+ * Every source belongs in the sources pill beside the answer, not in a numbered
+ * list under it (owner decision, 2026-09-27). Only a tail that is nothing but
+ * headings, `[n]` lines, rules and the host's label notes is cut, so a `Nguồn:`
+ * that starts a paragraph of prose stays prose. The host's list and one the
+ * model wrote itself say the same sources twice, so the host's wins.
+ */
+export function splitSources(text: string): { body: string; sources: CitedSource[] } {
+  const lines = text.split("\n")
+  let cut = lines.length
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const line = lines[index].trim()
+    if (SOURCES_LINE.test(line)) cut = index
+    else if (line !== "" && line !== "---" && !SOURCE_ENTRY.test(line) && !LABEL_NOTE.test(line)) break
+  }
+  if (cut === lines.length) return { body: text, sources: [] }
+
+  // The host's list is built from the evidence itself; one the model wrote says
+  // the same sources in other words, so it is read only when the host wrote none.
+  let tail = lines.slice(cut)
+  const host = tail.findIndex((line) => line.trim() === SOURCES_HEADING)
+  if (host !== -1) tail = tail.slice(host)
+
+  const seen = new Set<string>()
+  const sources: CitedSource[] = []
+  for (const line of tail) {
+    const match = SOURCE_ENTRY.exec(line.trim())
+    if (!match) continue
+    const link = /\s*—\s*<([^>]+)>\s*$/.exec(match[2])
+    const label = (link ? match[2].slice(0, link.index) : match[2]).trim()
+    if (seen.has(label)) continue
+    seen.add(label)
+    sources.push({ label, url: link ? link[1] : null })
+  }
+  const body = lines.slice(0, cut).join("\n").replace(/(?:\s*\n---)?\s*$/, "")
+  return { body, sources }
+}
+
+/**
+ * A bare citation the model wrote itself: `[1]`, `[2, 3]`, `[1–4]`.
+ *
+ * Its list is in the sources pill, so the number points at nothing on screen.
+ * Not a link (`[1](…)` is an anchor by the time the tree is walked).
+ */
+const BARE_CITATION = / ?\[\d{1,3}(?: *[,;–-] *\d{1,3})*\]/g
+
 /** The classes the chips carry. Declared here so the renderer and tests agree. */
 export const MARKER_CLASS: Record<FigureKind, string> = {
   cited: "vg-figure vg-figure-cited",
@@ -124,7 +185,7 @@ function walk(node: Node, sources: Map<number, string>): void {
   const next: Node[] = []
   for (const child of children) {
     if (isText(child)) {
-      next.push(...splitMarkers(child.value, sources))
+      next.push(...splitMarkers(child.value.replace(BARE_CITATION, ""), sources))
       continue
     }
     if (!isElement(child) || !VERBATIM.has(child.tagName)) walk(child, sources)

@@ -1,6 +1,7 @@
 "use client"
 
-import { distinctDomains, type ToolCall } from "@/lib/alpha-desk/types"
+import { answerSources } from "@/lib/alpha-desk/answer-sources"
+import type { ToolCall } from "@/lib/alpha-desk/types"
 import { cn } from "@/lib/utils"
 import { SourceChips } from "./source-chips"
 
@@ -12,10 +13,10 @@ import { SourceChips } from "./source-chips"
  * waiting, folded away once the answer arrives. This is *what it rested on* —
  * read after, by somebody deciding whether to believe it.
  *
- * The count is of distinct pages and not of calls: three searches that all
- * returned the same newspaper rested on one source, and saying "3" there would
- * overstate how much the answer was corroborated by. That is the whole reason
- * this counts rather than summing `result_count`.
+ * The count is the rows of the sources panel (`answerSources`): each source
+ * once, not each call — three searches that returned the same page rested on
+ * one source. The sources the answer lists at its end count too: that list is
+ * not drawn under the answer, so this is where a reader finds it.
  *
  * Absent when there is nothing behind the answer. A pill reading *0 nguồn* is a
  * claim about an answer that never went looking, and it invites a click onto an
@@ -23,15 +24,19 @@ import { SourceChips } from "./source-chips"
  */
 export function SourcePill({
   toolCalls,
+  text,
   onOpen,
   className,
 }: {
   toolCalls: ToolCall[]
+  /** The answer, whose closing source list this counts. */
+  text: string
   onOpen: () => void
   className?: string
 }) {
-  const domains = distinctDomains(toolCalls)
-  if (domains.length === 0) return null
+  const sources = answerSources(text, toolCalls)
+  if (sources.length === 0) return null
+  const marks = [...new Set(sources.map((source) => source.mark))]
 
   return (
     <div className={cn("flex", className)}>
@@ -40,9 +45,10 @@ export function SourcePill({
         onClick={onOpen}
         className="flex items-center gap-2 rounded-full border border-border bg-surface-raised py-1.5 pl-[0.55rem] pr-3.5 text-meta text-ink-3 transition-colors hover:bg-accent hover:text-foreground"
       >
-        <SourceChips sources={domains} />
-        {domains.length} nguồn
+        <SourceChips sources={marks} />
+        {sources.length} nguồn
       </button>
     </div>
   )
 }
+
