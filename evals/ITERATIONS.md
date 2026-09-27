@@ -167,3 +167,13 @@ lịch, và suy sai hoặc né. Đây là sự thật của harness, không nên
 tiếp Thứ Hai 28/09/2026` (lễ: `nghỉ lễ <tên>`), ngày giao dịch chưa đóng cửa giữ nguyên câu cũ; `WEEKDAYS` public
 trong `prompt/contract.py`. Ngày phiên kế tiếp nằm trong output tool nên kiểm tra ngày của grounding nhận nó.
 3 test (lịch: CN→T2, qua kỳ nghỉ Quốc khánh, năm chưa có lịch → None; tool: dòng ngày nghỉ, dòng ngày giao dịch).
+
+**Hỏi lại (vòng 6, container tạo lại 16:43):** 4/4 câu nhắm bản sửa nói đúng "Chủ nhật … nghỉ, phiên kế tiếp Thứ Hai
+28/09/2026" (A2, A4, N6, N7); A2 và A4 lần đầu đạt ở cả 6 vòng. Câu neo 5/5 tiêu chí tự động. Câu mới tụt Số/Ngày
+7→4 và 6→4 ở các câu không liên quan tới dòng ngày nghỉ (một số lẻ tự tính mỗi câu) — không phải hồi quy của bản
+sửa. **Quyết định: giữ.**
+
+## Dừng
+
+Hết ngân sách tự đặt (6 vòng). Điều kiện ĐẠT (2 vòng liên tiếp câu mới 100% tự động và ≥90% định tính) chưa đạt;
+BÃO HOÀ không xảy ra (mỗi vòng đều có tiêu chí tăng). Báo cáo: `plans/reports/selftest-260927-1657-agent-improvement-loop.md`.

@@ -556,6 +556,35 @@ def test_the_planning_gate_accepts_one_market_read_for_a_chart_only_request():
     assert Loop._valid_planner_calls(mixed_partial, market=True) is False
 
 
+def test_the_planning_gate_accepts_one_market_read_per_ticker_of_a_comparison():
+    """Turn 49b5a89d (2026-09-27): "MSN và VNM 3 tháng qua" asked for two reads and was refused."""
+    from src.agent.loop import AgentLoop as Loop
+    from src.agent.visual import MAX_SERIES
+
+    searches = (
+        call("plan-1", "web_search", query="MSN tin tức"),
+        call("plan-2", "web_search", query="VNM tin tức"),
+        call("plan-3", "web_search", query="MSN VNM rủi ro"),
+    )
+    two = (
+        call("plan-msn", "get_market_data", symbol="MSN"),
+        call("plan-vnm", "get_market_data", symbol="VNM"),
+    )
+    same_twice = (
+        call("plan-a", "get_market_data", symbol="MSN"),
+        call("plan-b", "get_market_data", symbol="msn"),
+    )
+    too_many = tuple(
+        call(f"plan-{index}", "get_market_data", symbol=f"S{index}") for index in range(MAX_SERIES + 1)
+    )
+
+    assert Loop._valid_planner_calls(searches + two, market=True) is True
+    assert Loop._valid_planner_calls(two, market=True) is True
+    # One symbol read twice is one series, and a chart draws at most MAX_SERIES.
+    assert Loop._valid_planner_calls(searches + same_twice, market=True) is False
+    assert Loop._valid_planner_calls(too_many, market=True) is False
+
+
 def test_the_planning_gate_still_refuses_one_query_asked_three_ways():
     from src.agent.loop import AgentLoop as Loop
 

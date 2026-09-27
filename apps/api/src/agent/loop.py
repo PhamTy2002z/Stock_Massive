@@ -152,7 +152,7 @@ from .executor import ToolResult as ExecutorToolResult
 from .evidence import ClaimLedger, render_claim_ledger, validate_claim_ledger
 from .evidence.ledger import SOURCES_SECTION_HEADING
 from .evidence import grounding
-from .visual import build_visual
+from .visual import MAX_SERIES, build_visual
 from .evidence.source_policy import ICT, as_of_from_text, years_in_scope
 from .evidence.pipeline import (
     COUNTER_TOOL_ROUND_LIMIT,
@@ -1860,20 +1860,33 @@ class AgentLoop:
         that learned nothing. The market read is not a query and has nothing to
         be distinct from.
 
-        One market read on its own is the other accepted batch: a request for a
+        Market reads on their own are the other accepted batch: a request for a
         chart has nothing for three searches to plan, and refusing it for not
         searching made the gate stricter than the job.
+
+        One read per symbol, up to as many series as one chart draws: a
+        comparison of MSN and VNM asks for two, and a gate counting exactly one
+        refused every such Turn (measured 2026-09-27, Turn 49b5a89d).
         """
-        if market and len(calls) == 1 and calls[0].name == MARKET_TOOL:
-            return True
-        if len(calls) != 4:
-            return False
         searches = [call for call in calls if call.name == "web_search"]
         reads = [call for call in calls if call.name == MARKET_TOOL]
+        if len(searches) + len(reads) != len(calls):
+            return False
+        if market:
+            symbols = [
+                str(call.arguments.get("symbol") or "").strip().upper()
+                if isinstance(call.arguments, Mapping)
+                else ""
+                for call in reads
+            ]
+            if not 1 <= len(reads) <= MAX_SERIES or len(set(symbols)) != len(reads):
+                return False
+            if not searches:
+                return True
+        elif reads:
+            return False
         wanted_searches = 3 if market else 4
         if len(searches) != wanted_searches:
-            return False
-        if len(reads) != (1 if market else 0):
             return False
         queries = [
             str(call.arguments.get("query") or "").strip().casefold()
