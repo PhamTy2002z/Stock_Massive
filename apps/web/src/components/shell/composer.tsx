@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, type FormEvent, type KeyboardEvent } from "react"
+import { useEffect, useRef, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
 import {
   Camera,
   Loader2,
@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react"
 
+import { ConnectorsMenu } from "@/components/connectors/connectors-menu"
 import { attachmentUrl } from "@/lib/alpha-desk/api"
 import {
   ATTACHMENT_COPY,
@@ -281,6 +282,7 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
                 desk.startCapture()
               }}
               supported={desk.captureSupported}
+              connectors={<ConnectorsMenu />}
             />
           )}
           <IconButton
@@ -444,11 +446,14 @@ export function AttachMenu({
   onPickFile,
   onCapture,
   supported,
+  connectors,
 }: {
   onPickFile: () => void
   onCapture: () => void
   /** Whether this browser can capture a screen. */
   supported: boolean
+  /** The Kết nối row and its flyout; it draws nothing while the feature is off. */
+  connectors?: ReactNode
 }) {
   return (
     <Menu className="absolute bottom-[44px] left-0 min-w-[250px]">
@@ -470,6 +475,7 @@ export function AttachMenu({
       >
         {CAPTURE_COPY.row}
       </MenuItem>
+      {connectors}
       <MenuSeparator />
       <MenuItem
         icon={<Wallet className="size-[17px] text-ink-4" strokeWidth={1.6} />}

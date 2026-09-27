@@ -6,6 +6,7 @@ import {
   Database,
   Gauge,
   MessagesSquare,
+  Plug,
   Search,
   ShieldCheck,
   SlidersHorizontal,
@@ -13,6 +14,7 @@ import {
   X,
 } from "lucide-react"
 
+import { ConnectorsPane } from "@/components/connectors/connectors-pane"
 import { AppearanceSection } from "@/components/settings/appearance-section"
 import { ConversationSection } from "@/components/settings/conversation-section"
 import { DataSection } from "@/components/settings/data-section"
@@ -21,6 +23,7 @@ import { ProfileSection } from "@/components/settings/profile-section"
 import { SecuritySection } from "@/components/settings/security-section"
 import { UsageSection } from "@/components/settings/usage-section"
 import { useAuth } from "@/hooks/use-auth"
+import { peekConnectorsPane } from "@/lib/connectors/open-pane"
 import { cn } from "@/lib/utils"
 
 import { Avatar, IconButton } from "./primitives"
@@ -58,6 +61,7 @@ import { useShell } from "./shell-state"
 type PaneId =
   | "appearance"
   | "conversation"
+  | "connectors"
   | "notifications"
   | "profile"
   | "usage"
@@ -86,6 +90,14 @@ const PANES: Pane[] = [
     group: "Cấu hình",
     icon: MessagesSquare,
     render: () => <ConversationSection />,
+  },
+  // connectors pane: re-register in the new Settings modal shape when it lands
+  {
+    id: "connectors",
+    label: "Kết nối",
+    group: "Cấu hình",
+    icon: Plug,
+    render: () => <ConnectorsPane />,
   },
   {
     id: "notifications",
@@ -126,7 +138,11 @@ const PANES: Pane[] = [
 
 export function SettingsDialog() {
   const { dispatch } = useShell()
-  const [selected, setSelected] = useState<PaneId>("appearance")
+  // connectors pane: re-register in the new Settings modal shape when it lands
+  // (the composer and the OAuth return open Settings straight on this pane).
+  const [selected, setSelected] = useState<PaneId>(() =>
+    peekConnectorsPane() ? "connectors" : "appearance",
+  )
   const [term, setTerm] = useState("")
 
   const query = term.trim().toLowerCase()

@@ -18,4 +18,8 @@ export const queryKeys = {
   // What the route can do. The opposite of `usage`: constant until a deploy, so
   // it is fetched once and never refetched.
   capabilities: ["capabilities"] as const,
+
+  // This account's connectors, the catalog and the tool access mode: one
+  // resource, because every write answers with the connector it changed.
+  connectors: ["connectors"] as const,
 }

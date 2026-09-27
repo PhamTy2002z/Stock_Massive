@@ -17,6 +17,7 @@
 import { alphaFetch, alphaSend } from "@/lib/alpha"
 
 import type {
+  ApprovalDecision,
   Attachment,
   Capabilities,
   CreatedTurn,
@@ -127,6 +128,9 @@ export function createTurn(input: CreateTurnInput): Promise<CreatedTurn> {
       mode: input.signalDesk ? "signal_desk" : "chat",
       attachments: input.attachments ?? [],
       retry_of_turn_id: input.retryOfTurnId ?? null,
+      // This client draws approval cards, so a connector tool that needs one
+      // waits for the reader instead of being refused at once.
+      client_capabilities: ["approvals"],
     }),
   })
 }
@@ -247,6 +251,20 @@ export function skipQuestion(questionId: string): Promise<ResolvedQuestion> {
   return alphaFetch<ResolvedQuestion>(
     `/questions/${encodeURIComponent(questionId)}/skip`,
     { method: "POST" },
+  )
+}
+
+/**
+ * The reader's answer to one approval card.
+ *
+ * `204` on success; the card leaves when `approval.resolved` arrives on the
+ * stream, not when this returns. `404` means nothing waits any more (expired,
+ * cancelled, answered elsewhere) and `409` that `always` is refused for this tool.
+ */
+export function answerApproval(turnId: string, callId: string, decision: ApprovalDecision): Promise<void> {
+  return alphaSend(
+    `/turns/${encodeURIComponent(turnId)}/approvals/${encodeURIComponent(callId)}`,
+    { method: "POST", body: JSON.stringify({ decision }) },
   )
 }
 
