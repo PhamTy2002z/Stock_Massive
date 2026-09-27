@@ -1,6 +1,6 @@
 # User connectors (remote MCP)
 
-Status: in progress · Branch: `feat/user-connectors` (worktree
+Status: done except one make-up trial question (see report.md) · Branch: `feat/user-connectors` (worktree
 `/Users/typham/Dev/worktrees/Stock_Massive-user-connectors`) · Proposal and owner
 decisions: [proposal.md](proposal.md).
 
