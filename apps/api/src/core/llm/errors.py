@@ -587,6 +587,13 @@ def _classify_refused_request(status_code: int, body: str) -> LLMError:
     return LLMError(f"the route refused the request ({status_code}): {body}")
 
 
+#: A 5xx whose body says it is a rate-limit cooldown. The kiro proxy throttles
+#: this way (measured 2026-09-27): ``500 … token is in cooldown for 36.5s
+#: (reason: rate_limit_exceeded)``. It means what a 429 means, and the seconds
+#: it names are the hold.
+_COOLDOWN = re.compile(r"cooldown for ([\d.]+)\s*s\b.*rate_limit", re.IGNORECASE | re.DOTALL)
+
+
 def classify_status(
     status_code: int,
     body: str,
@@ -606,6 +613,12 @@ def classify_status(
             f"the route is out of allowance ({status_code}): {body}",
             retry_after=retry_after,
             reset_at=reset_at,
+        )
+    cooldown = _COOLDOWN.search(body) if 500 <= status_code < 600 else None
+    if cooldown:
+        return RouteRateLimited(
+            f"the route is throttling ({status_code}): {body}",
+            retry_after=float(cooldown.group(1)),
         )
     if status_code in (408, 502, 503, 504):
         return GatewayTimeout(f"the route did not answer ({status_code}): {body}")

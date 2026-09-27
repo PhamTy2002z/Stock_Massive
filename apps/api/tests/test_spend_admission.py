@@ -41,6 +41,7 @@ from src.alpha.models import LlmCallUsage
 from src.core.llm.admission import (
     ANALYSIS_INPUT_PER_CALL,
     ANALYSIS_OUTPUT_PER_CALL,
+    TURN_CONTEXT_PER_CALL,
     TURN_OUTPUT_TOTAL_MAX,
 )
 
@@ -391,7 +392,9 @@ class TestTurnCeilings:
         admission, _ = ledger
 
         with pytest.raises(BudgetRefusal) as refused:
-            admission.reserve(replace(spend(), input_tokens=32_001), "session-model")
+            admission.reserve(
+                replace(spend(), input_tokens=TURN_CONTEXT_PER_CALL + 1), "session-model"
+            )
 
         assert refused.value.reason == "turn_context_per_call"
 
@@ -471,10 +474,15 @@ class TestTurnCeilings:
 
         assert reservation.reserved_micro_usd > 0
 
-    def test_a_total_above_the_ledgers_own_ceiling_is_clamped_not_granted(
-        self, ledger
-    ):
-        admission, _ = ledger
+    def test_a_total_above_the_ledgers_own_ceiling_is_clamped_not_granted(self):
+        # Unmetered, so the Turn's money ceiling is lifted and the token bound is
+        # the one this test reaches: at the ceiling's size the metered route's
+        # $0.50 would bind first.
+        config = replace(
+            llm_config(),
+            lanes=BudgetLanes(monthly_envelope_usd=0, analysis_usd=0, turn_usd=0, emergency_usd=0),
+        )
+        admission, _ = admission_with(config)
         greedy = dict(owner_output_total=TURN_OUTPUT_TOTAL_MAX * 10)
         reconcile_call(
             admission,

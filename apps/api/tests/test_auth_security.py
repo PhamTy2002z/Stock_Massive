@@ -105,6 +105,16 @@ class TestAccessToken:
         with pytest.raises(TokenError):
             decode_access_token("not-a-jwt")
 
+    def test_rejects_token_without_expiry(self):
+        """A correctly signed token that never expires must not authenticate."""
+        eternal = jwt.encode(
+            {"sub": "1", "type": "access"},
+            settings.auth_secret,
+            algorithm=settings.jwt_algorithm,
+        )
+        with pytest.raises(TokenError):
+            decode_access_token(eternal)
+
 
 class TestRefreshToken:
     """Opaque refresh token generation and hashing."""

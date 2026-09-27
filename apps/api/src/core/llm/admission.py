@@ -19,6 +19,7 @@ from src.alpha.models import (
     AgentThread,
     AgentTurn,
     LlmCallUsage,
+    turn_is_live,
 )
 
 from .config import LLMConfig, TokenPrices, UserCeilings, Workload
@@ -45,7 +46,9 @@ ANALYSIS_OUTPUT_PER_CALL = 3_000
 # ``budget.ANALYSIS_COST_CEILING_USD`` in the ledger's own unit. One number in
 # two places, and the test suite compares them rather than trusting the comment.
 ANALYSIS_COST_MICRO_USD = 15_000
-TURN_CONTEXT_PER_CALL = 32_000
+# 120k of a measured ~137k-token window on the internal route (2026-09-27),
+# counted at 3 chars/token, which over-counts Vietnamese against the provider.
+TURN_CONTEXT_PER_CALL = 120_000
 TURN_INPUT_TOTAL = 100_000
 TURN_OUTPUT_TOTAL = 20_000
 TURN_COST_MICRO_USD = 500_000
@@ -63,8 +66,8 @@ TURN_COST_MICRO_USD = 500_000
 # Three times today's figures, which is the widest lane anyone has proposed plus
 # room to be wrong about it. The money is bounded separately and always was:
 # ``TURN_COST_MICRO_USD`` does not move with these.
-TURN_OUTPUT_TOTAL_MAX = 60_000
-TURN_INPUT_TOTAL_MAX = 300_000
+TURN_OUTPUT_TOTAL_MAX = 448_000
+TURN_INPUT_TOTAL_MAX = 3_360_000
 # The five per-user ceilings live in ``UserCeilings`` (``config.py``) rather
 # than here. They are the one group of ceilings a deployment legitimately
 # changes without changing what the product promises, and each of them may be
@@ -278,8 +281,7 @@ class SpendAdmission:
                             [
                                 f"user-day:{candidate.owner.user_id}:{day_start.isoformat()}",
                                 f"user-rolling:{candidate.owner.user_id}",
-                                f"turn-active-user:{candidate.owner.user_id}",
-                                "turn-active-system",
+                                *_active_turn_scopes(candidate.owner.user_id),
                             ]
                         )
                     if candidate.owner.type is OwnerType.CAPABILITY_PROBE:
@@ -621,24 +623,12 @@ def _assert_user_ceilings(
             "Your daily Turn allowance has been exhausted.",
             reset_at=day_reset,
         )
-    if (
-        ceilings.active_turns_per_user is not None
-        and state.active_for_user + pending > ceilings.active_turns_per_user
-    ):
-        raise BudgetRefusal(
-            "user_active_turn",
-            "Another Turn is already active for this account.",
-            state="capacity_exhausted",
-        )
-    if (
-        ceilings.active_turns_system is not None
-        and state.active_system + pending > ceilings.active_turns_system
-    ):
-        raise BudgetRefusal(
-            "system_active_turns",
-            "The service is at its active Turn capacity.",
-            state="capacity_exhausted",
-        )
+    _assert_active_ceilings(
+        active_for_user=state.active_for_user,
+        active_system=state.active_system,
+        ceilings=ceilings,
+        pending=pending,
+    )
 
     daily_ceiling = _micro_usd_ceiling(ceilings.daily_usd)
     if daily_ceiling is not None:
@@ -686,6 +676,90 @@ def _assert_user_ceilings(
                     f"and this request needs {reserved}"
                 ),
             )
+
+
+def _assert_active_ceilings(
+    *,
+    active_for_user: int,
+    active_system: int,
+    ceilings: UserCeilings,
+    pending: int,
+) -> None:
+    """The two active-Turn ceilings, for every path that asks them.
+
+    Preflight and dispatch reach it through :func:`_assert_user_ceilings`; the
+    create transaction reaches it through :func:`assert_turn_capacity`. One
+    copy, so the refusal a racing ``POST`` gets at creation is the same refusal,
+    word for word, that it would have got at preflight.
+    """
+    if (
+        ceilings.active_turns_per_user is not None
+        and active_for_user + pending > ceilings.active_turns_per_user
+    ):
+        raise BudgetRefusal(
+            "user_active_turn",
+            "Another Turn is already active for this account.",
+            state="capacity_exhausted",
+        )
+    if (
+        ceilings.active_turns_system is not None
+        and active_system + pending > ceilings.active_turns_system
+    ):
+        raise BudgetRefusal(
+            "system_active_turns",
+            "The service is at its active Turn capacity.",
+            state="capacity_exhausted",
+        )
+
+
+def assert_turn_capacity(
+    session: Session, *, user_id: int, ceilings: UserCeilings
+) -> None:
+    """Re-count active Turns under the admission locks, inside the create transaction.
+
+    Preflight takes no lock, so two ``POST``s arriving together both pass it and
+    both commit a row; the first :meth:`SpendAdmission.reserve` of each then
+    counts two active Turns against a ceiling of one and refuses *both*. Taking
+    the same two advisory locks here and counting again before the row is
+    inserted serialises the creates: the second waits for the first to commit,
+    sees its row, and is refused with the reason preflight would have given.
+
+    The locks are transaction-scoped, so the caller's commit releases them. A
+    deployment with both ceilings unlimited takes no lock at all, because there
+    is nothing to serialise.
+    """
+    if ceilings.active_turns_per_user is None and ceilings.active_turns_system is None:
+        return
+    _lock_scopes(session, list(_active_turn_scopes(user_id)))
+    active_for_user, active_system = _active_turn_counts(session, user_id)
+    _assert_active_ceilings(
+        active_for_user=active_for_user,
+        active_system=active_system,
+        ceilings=ceilings,
+        pending=1,
+    )
+
+
+def _active_turn_scopes(user_id: int) -> tuple[str, str]:
+    """The advisory lock scopes every writer that changes the active counts takes."""
+    return (f"turn-active-user:{user_id}", "turn-active-system")
+
+
+def _active_turn_counts(session: Session, user_id: int) -> tuple[int, int]:
+    """Active Turns for this user and across the deployment, live ones only.
+
+    A Turn whose process stopped beating (``turn_is_live``) is not counted even
+    before the reaper settles it: a row a crash left behind must not lock its
+    user out, or the whole service, for as long as nobody sweeps it.
+    """
+    active = (AgentTurn.status.in_(ACTIVE_TURN_STATUSES), turn_is_live())
+    active_for_user = session.scalar(
+        select(func.count(AgentTurn.id))
+        .join(AgentThread, AgentThread.id == AgentTurn.thread_id)
+        .where(AgentThread.user_id == user_id, *active)
+    )
+    active_system = session.scalar(select(func.count(AgentTurn.id)).where(*active))
+    return int(active_for_user or 0), int(active_system or 0)
 
 
 def _micro_usd(
@@ -987,28 +1061,17 @@ def _read_turn_state(
         )
     )
     starts = int(dispatched or 0) + 1
-    active_for_user = session.scalar(
-        select(func.count(AgentTurn.id))
-        .join(AgentThread, AgentThread.id == AgentTurn.thread_id)
-        .where(
-            AgentThread.user_id == user_id,
-            AgentTurn.status.in_(ACTIVE_TURN_STATUSES),
-        )
-    )
-    active_system = session.scalar(
-        select(func.count(AgentTurn.id)).where(
-            AgentTurn.status.in_(ACTIVE_TURN_STATUSES)
-        )
-    )
+    active_for_user, active_system = _active_turn_counts(session, user_id)
     return TurnState(
         starts_today=int(starts or 0),
-        active_for_user=int(active_for_user or 0),
-        active_system=int(active_system or 0),
+        active_for_user=active_for_user,
+        active_system=active_system,
     )
 
 
 __all__ = [
     "BUDGET_REFUSAL_REASONS",
+    "assert_turn_capacity",
     "check_candidate_shape",
     "AdmissionLedger",
     "BudgetLane",

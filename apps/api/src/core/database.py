@@ -1,9 +1,10 @@
 """Async database configuration using SQLAlchemy 2.0."""
 import asyncio
 from contextlib import contextmanager
-from typing import AsyncGenerator, Callable, Generator, TypeVar
+from typing import Annotated, AsyncGenerator, Callable, Generator, TypeVar
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from fastapi import Depends
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -167,7 +168,13 @@ class Base(DeclarativeBase):
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency for getting async database session."""
+    """Dependency for getting async database session.
+
+    Depend on it through ``DbSession`` (or ``Depends(get_db, scope="function")``),
+    never a bare ``Depends(get_db)``. With FastAPI's default "request" scope the
+    code after ``yield`` runs once the response has already been sent, so a
+    commit that fails there is a 2xx for a write that was rolled back.
+    """
     async with async_session_factory() as session:
         try:
             yield session
@@ -175,3 +182,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+
+# The commit runs when the endpoint returns (after response serialisation) and
+# before the first byte is sent, so a failed commit surfaces as a 500. Every
+# dependant in one request must use the same scope: FastAPI caches a dependency
+# per (callable, scope), and mixing the two opens two sessions.
+DbSession = Annotated[AsyncSession, Depends(get_db, scope="function")]

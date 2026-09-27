@@ -1,5 +1,6 @@
 """SQLAlchemy models for auth module."""
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 
 from src.core.database import Base
@@ -17,6 +18,14 @@ class User(Base):
     # Gates the operational endpoints (data collection, cache clearing, job
     # triggers). Off by default: registration must never grant them.
     is_admin = Column(Boolean, nullable=False, server_default="false")
+    # What the Settings screen writes. Parsed through
+    # ``schemas.UserPreferences.from_stored`` and never read raw: the row may
+    # predate a key, or carry one a later version dropped. The Python default
+    # beside the server one keeps a freshly inserted row from expiring the
+    # attribute, which an async session would then have to lazy-load.
+    preferences = Column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

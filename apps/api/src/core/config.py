@@ -1,9 +1,31 @@
 """Application configuration using pydantic-settings."""
 from datetime import date
 from functools import lru_cache
+import ipaddress
+import logging
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+# Secrets that ship in this repository's own files (config default,
+# `.env.example`, compose fallbacks) or are obvious stand-ins. Anyone who can
+# read the repo can sign a token with one of them.
+_KNOWN_WEAK_AUTH_SECRETS = frozenset(
+    {
+        "",
+        "dev-secret-change-in-production",
+        "generate-with-openssl-rand-base64-32",
+        "change-me",
+        "changeme",
+        "secret",
+    }
+)
+_AUTH_SECRET_MIN_BYTES = 32
+# Deployments allowed to run on a weak secret, with a warning. Everything else,
+# a misspelling included, is treated as reachable by strangers.
+_RELAXED_ENVIRONMENTS = frozenset({"development", "dev", "test", "testing", "local"})
 
 
 class Settings(BaseSettings):
@@ -15,6 +37,13 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",  # Ignore extra env vars
     )
+
+    # Which kind of deployment this is: `development`/`test` run on a weak
+    # AUTH_SECRET with a warning, anything else refuses to start with one.
+    # Production unless told otherwise, so a deployment that forgot to say
+    # cannot quietly get the relaxed checks and the public /docs; the dev
+    # stack, the Makefile and the test suite each say `development`/`test`.
+    environment: str = "production"
 
     # API
     api_host: str = "0.0.0.0"
@@ -193,6 +222,12 @@ class Settings(BaseSettings):
     rate_limit_standard_window: int = 60  # seconds
     rate_limit_heavy_max: int = 20  # requests per window
     rate_limit_heavy_window: int = 60  # seconds
+    # Direct peers whose X-Forwarded-For is believed. Only Caddy and the Next
+    # proxy reach the API in production, both on the private Docker network, so
+    # loopback + RFC 1918 + ULA covers them; a public peer's header is ignored.
+    trusted_proxy_cidrs: str = (
+        "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
+    )
 
     # Đăng ký và kết nối lại một Turn có bộ đếm riêng, tính theo user và theo
     # Turn chứ không theo IP. Sau proxy Next mọi user chung một
@@ -217,6 +252,43 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @field_validator("trusted_proxy_cidrs")
+    @classmethod
+    def _cidrs_parse(cls, value: str) -> str:
+        """A typo here would silently trust nobody (or everybody); fail at boot."""
+        for cidr in value.split(","):
+            if cidr.strip():
+                ipaddress.ip_network(cidr.strip())
+        return value
+
+    @property
+    def is_development(self) -> bool:
+        """A developer's machine or a test run, never a deployment strangers reach."""
+        return self.environment.strip().lower() in _RELAXED_ENVIRONMENTS
+
+    @model_validator(mode="after")
+    def _auth_secret_is_not_a_placeholder(self) -> "Settings":
+        """Refuse a guessable JWT secret anywhere but a developer's machine."""
+        secret = self.auth_secret.strip()
+        if secret.lower() in _KNOWN_WEAK_AUTH_SECRETS:
+            problem = "is a known placeholder"
+        elif len(secret.encode("utf-8")) < _AUTH_SECRET_MIN_BYTES:
+            problem = f"is shorter than {_AUTH_SECRET_MIN_BYTES} bytes"
+        else:
+            return self
+        if self.is_development:
+            logger.warning(
+                "AUTH_SECRET %s; acceptable only because ENVIRONMENT=%s",
+                problem,
+                self.environment,
+            )
+            return self
+        raise ValueError(
+            f"AUTH_SECRET {problem}. Generate one with `openssl rand -base64 32` "
+            f"(ENVIRONMENT={self.environment!r} does not allow a weak secret; "
+            "for a local run set ENVIRONMENT=development)."
+        )
 
 @lru_cache
 def get_settings() -> Settings:

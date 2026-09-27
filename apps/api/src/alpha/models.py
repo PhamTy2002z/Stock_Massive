@@ -1,5 +1,7 @@
 """Persistence models for the retained chat agent and its spend ledger."""
 
+from datetime import timedelta
+
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -314,6 +316,14 @@ TURN_CANCELLED = "cancelled"
 # exactly these.
 ACTIVE_TURN_STATUSES = (TURN_ADMITTED, TURN_RUNNING)
 
+# How long an active Turn may go without a heartbeat before it is presumed dead.
+# The process running a Turn touches ``heartbeat_at`` every 20 seconds
+# (``agent.turns``), so this is several missed beats rather than one slow one.
+# Admission stops counting a Turn past it and the sweep and the reaper settle it,
+# which is what lets a second process share the table: its Turns keep beating and
+# are left alone, where a sweep of *every* active row would freeze them.
+TURN_STALE_SECONDS = 90
+
 
 class AgentTurn(Base):
     """The lifecycle of one **Turn**, and the draft checkpointed inside it.
@@ -356,13 +366,43 @@ class AgentTurn(Base):
     # Where the SSE stream got to, so a reconnect resumes rather than replays.
     last_event_seq = Column(Integer, nullable=False, server_default="0")
     draft_content = Column(JSONB, nullable=True)
+    # When the process running this Turn last said it still is. Null until the
+    # Turn starts running, and on every row written before the column existed;
+    # ``started_at`` stands in for it then (``turn_is_live``).
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_agent_turn_thread_started", "thread_id", started_at.desc()),
+        # Admission counts active Turns inside a system-wide advisory lock, so
+        # that count must not grow with history. Partial, because active rows
+        # are a handful and terminal ones are every Turn ever asked.
+        Index(
+            "ix_agent_turn_active",
+            "thread_id",
+            postgresql_where=text("status IN ('admitted', 'running')"),
+        ),
+        # Both message FKs, so deleting a Thread's messages does not scan
+        # every Turn to find the rows the cascade and the SET NULL touch.
+        Index("ix_agent_turn_request_message_id", "request_message_id"),
+        Index("ix_agent_turn_response_message_id", "response_message_id"),
     )
 
     def __repr__(self) -> str:
         return f"<AgentTurn {self.id} {self.status}>"
+
+
+def turn_is_live():
+    """SQL: this active Turn's process has beaten within the staleness window.
+
+    Read against the database clock on both sides, because the rows are written
+    by more than one process and ``started_at`` already defaults to ``now()``
+    there. A Turn that has never beaten is judged by when it was admitted, so a
+    Turn committed a moment ago and not yet running is live, and a row left by a
+    build that predates the heartbeat ages out like any other.
+    """
+    return func.coalesce(AgentTurn.heartbeat_at, AgentTurn.started_at) >= (
+        func.now() - timedelta(seconds=TURN_STALE_SECONDS)
+    )
 
 
 class AgentQuestion(Base):

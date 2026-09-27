@@ -2,12 +2,14 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import get_settings
 
 from .models import RefreshToken, User
+from .schemas import UpdateMeRequest, UserPreferences
 from .security import (
     create_access_token,
     generate_refresh_token,
@@ -17,6 +19,14 @@ from .security import (
 )
 
 settings = get_settings()
+
+# What an unknown email is checked against, so it pays the same bcrypt cost as a
+# wrong password without a hash of its own. Computed once, at import.
+_DUMMY_HASH = hash_password("dummy-password-for-timing")
+
+# A token row is kept past its expiry so a replay is still recognised as reuse;
+# past this long after expiry it is pruned when its user is next issued one.
+_PRUNE_EXPIRED_AFTER = timedelta(days=7)
 
 
 class AuthError(Exception):
@@ -33,6 +43,10 @@ class InvalidCredentials(AuthError):
 
 class InvalidRefreshToken(AuthError):
     """Refresh token is unknown, expired, or already used."""
+
+
+class IncorrectPassword(AuthError):
+    """A signed-in user's password change named the wrong current password."""
 
 
 def _normalize_email(email: str) -> str:
@@ -71,7 +85,12 @@ async def register_user(
         full_name=full_name,
     )
     session.add(user)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        # Two signups for one email raced past the lookup above; the unique
+        # index decided, and the loser is told what a later signup is told.
+        raise EmailAlreadyRegistered(email) from exc
     return user
 
 
@@ -79,10 +98,10 @@ async def authenticate_user(session: AsyncSession, email: str, password: str) ->
     """Verify credentials, or raise `InvalidCredentials`."""
     user = await get_user_by_email(session, email)
 
-    # Hash even when the user is missing, so a wrong email and a wrong password
-    # take comparable time and cannot be distinguished by response latency.
+    # Check against a dummy hash when the user is missing, so a wrong email and
+    # a wrong password take comparable time and fail the same way.
     if user is None:
-        hash_password(password)
+        verify_password(password, _DUMMY_HASH)
         raise InvalidCredentials(email)
 
     if not verify_password(password, user.hashed_password):
@@ -93,20 +112,33 @@ async def authenticate_user(session: AsyncSession, email: str, password: str) ->
 
 
 async def issue_refresh_token(session: AsyncSession, user_id: int) -> str:
-    """Mint and persist a refresh token, returning the plaintext value."""
+    """Mint and persist a refresh token, returning the plaintext value.
+
+    Also prunes this user's rows long past expiry, so the table does not grow
+    with every sign-in forever. Bounded by the user and served by the
+    ``(user_id, expires_at)`` index.
+    """
+    now = _utcnow()
+    await session.execute(
+        delete(RefreshToken).where(
+            RefreshToken.user_id == user_id,
+            RefreshToken.expires_at < now - _PRUNE_EXPIRED_AFTER,
+        )
+    )
     token = generate_refresh_token()
     session.add(
         RefreshToken(
             user_id=user_id,
             token_hash=hash_refresh_token(token),
-            expires_at=_utcnow() + timedelta(days=settings.refresh_token_expire_days),
+            expires_at=now + timedelta(days=settings.refresh_token_expire_days),
         )
     )
     await session.flush()
     return token
 
 
-async def _revoke_all_for_user(session: AsyncSession, user_id: int) -> None:
+async def revoke_all_refresh_tokens(session: AsyncSession, user_id: int) -> None:
+    """Revoke every live refresh token of one user: each session they have."""
     await session.execute(
         update(RefreshToken)
         .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
@@ -119,30 +151,48 @@ async def rotate_refresh_token(session: AsyncSession, token: str) -> tuple[User,
 
     Presenting an already-revoked token means the token leaked and is being
     replayed, so every session for that user is revoked rather than just this one.
+
+    The token is consumed by one conditional ``UPDATE``, so of two requests
+    presenting the same live token exactly one wins; the row lock makes the
+    other re-read it as revoked, and it is answered as a replay.
     """
-    result = await session.execute(
-        select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(token))
+    token_hash = hash_refresh_token(token)
+    now = _utcnow()
+    consumed = await session.execute(
+        update(RefreshToken)
+        .where(
+            RefreshToken.token_hash == token_hash,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.expires_at > now,
+        )
+        .values(revoked_at=now)
+        .returning(RefreshToken.user_id)
     )
-    stored = result.scalar_one_or_none()
+    user_id = consumed.scalar_one_or_none()
 
-    if stored is None:
-        raise InvalidRefreshToken("unknown token")
-
-    if stored.revoked_at is not None:
-        await _revoke_all_for_user(session, stored.user_id)
-        # Commit before raising: get_db rolls back on exception, which would
-        # otherwise discard the revocation we just performed.
-        await session.commit()
-        raise InvalidRefreshToken("token reuse detected")
-
-    if stored.expires_at <= _utcnow():
+    if user_id is None:
+        stored = (
+            await session.execute(
+                select(RefreshToken.user_id, RefreshToken.revoked_at).where(
+                    RefreshToken.token_hash == token_hash
+                )
+            )
+        ).one_or_none()
+        if stored is None:
+            raise InvalidRefreshToken("unknown token")
+        if stored.revoked_at is not None:
+            await revoke_all_refresh_tokens(session, stored.user_id)
+            # Commit before raising: get_db rolls back on exception, which would
+            # otherwise discard the revocation we just performed.
+            await session.commit()
+            raise InvalidRefreshToken("token reuse detected")
         raise InvalidRefreshToken("expired token")
 
-    user = await get_user_by_id(session, stored.user_id)
+    user = await get_user_by_id(session, user_id)
     if user is None or not user.is_active:
+        # Raising rolls the consumption back with the rest of the transaction.
         raise InvalidRefreshToken("inactive user")
 
-    stored.revoked_at = _utcnow()
     new_token = await issue_refresh_token(session, user.id)
     return user, new_token
 
@@ -157,6 +207,52 @@ async def revoke_refresh_token(session: AsyncSession, token: str) -> None:
         )
         .values(revoked_at=_utcnow())
     )
+
+
+async def change_password(
+    session: AsyncSession, user: User, current_password: str, new_password: str
+) -> str:
+    """Replace the password, end every other session, and return a fresh token.
+
+    Every refresh token is revoked, the caller's own included, because a
+    password change is what a reader does when they think somebody else is
+    signed in. The replacement issued afterwards keeps the browser that made the
+    change signed in. Access tokens already issued live out their few minutes:
+    they are self-contained and there is nothing to revoke.
+    """
+    if not verify_password(current_password, user.hashed_password):
+        raise IncorrectPassword(user.id)
+    user.hashed_password = hash_password(new_password)
+    await revoke_all_refresh_tokens(session, user.id)
+    return await issue_refresh_token(session, user.id)
+
+
+async def update_me(session: AsyncSession, user: User, payload: UpdateMeRequest) -> User:
+    """Write what the request sent, and only that.
+
+    Presence decides, not value: a key the client left out keeps its stored
+    value, and a key sent as null clears it. Preferences are merged onto the
+    stored document read leniently, and written back whole as a new object —
+    the column is plain JSONB with no mutation tracking, so an in-place edit of
+    the dict would never be flushed.
+    """
+    sent = payload.model_fields_set
+    if "full_name" in sent:
+        user.full_name = payload.full_name
+    patch = payload.preferences
+    if "preferences" in sent and patch is not None:
+        merged = UserPreferences.from_stored(user.preferences).model_dump()
+        for key in patch.model_fields_set:
+            value = getattr(patch, key)
+            if key == "memory_enabled" and value is None:
+                continue
+            merged[key] = value
+        user.preferences = UserPreferences.model_validate(merged).model_dump()
+    await session.flush()
+    # ``updated_at`` is set by the database on flush, which expires it; an
+    # async session cannot lazy-load it later, so the row is re-read here.
+    await session.refresh(user)
+    return user
 
 
 def access_token_for(user: User) -> tuple[str, int]:

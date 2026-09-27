@@ -301,3 +301,68 @@ def test_an_icon_larger_than_a_hundred_kilobytes_is_still_served():
 
     assert response.status_code == 200
     assert len(response.content) == len(body)
+
+
+def test_one_lookup_shares_one_deadline_across_every_candidate_and_hop(monkeypatch):
+    """Three candidates of three hops each must not each get a fresh allowance."""
+    import time
+
+    from src.alpha import favicons
+
+    monkeypatch.setattr(favicons, "FAVICON_TOTAL_SECONDS", 0.5)
+    budgets: list[float] = []
+
+    def slow_redirect(url: str, max_bytes: int, budget: float):
+        budgets.append(budget)
+        time.sleep(0.15)
+        return 302, {"location": url + "x"}, b""
+
+    tools = FaviconTools(
+        redis_factory=lambda: None,
+        resolver=resolver_for("93.184.216.34"),
+        download=slow_redirect,
+    )
+    started = time.monotonic()
+
+    response = tools.serve("slow.example")
+
+    assert response.status_code == 404
+    assert time.monotonic() - started < 0.9
+    assert len(budgets) < 9
+    assert budgets == sorted(budgets, reverse=True)
+    assert all(budget <= 0.5 for budget in budgets)
+
+
+def test_the_favicon_endpoint_is_rate_limited_per_reader(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from src.alpha import favicons
+
+    enabled = MagicMock(rate_limit_enabled=True)
+    monkeypatch.setattr("src.core.ratelimit.get_settings", lambda: enabled)
+    monkeypatch.setattr("src.core.ratelimit.get_redis", lambda: None)
+    # Fail-closed only so this test has a window without Redis; the real
+    # scope fails open.
+    monkeypatch.setattr(
+        favicons,
+        "_favicon_reader_limit",
+        favicons._ReaderRateLimiter(max_requests=1, window=60, prefix="t", fail_closed=True),
+    )
+    calls: list[str] = []
+    _use(
+        FaviconTools(
+            redis_factory=lambda: None,
+            resolver=resolver_for("93.184.216.34"),
+            download=download_returning(200, {"content-type": "image/png"}, b"\x89PNG", calls=calls),
+        )
+    )
+
+    first = _client().get("/api/v1/assets/favicon", params={"domain": "a.example"})
+    second = _client().get("/api/v1/assets/favicon", params={"domain": "b.example"})
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=2, is_active=True)
+    other_reader = _client().get("/api/v1/assets/favicon", params={"domain": "b.example"})
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert other_reader.status_code == 200
+    assert calls == ["https://a.example/favicon.ico", "https://b.example/favicon.ico"]

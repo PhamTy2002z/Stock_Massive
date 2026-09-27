@@ -3,9 +3,8 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.database import get_db
+from src.core.database import DbSession
 
 from .models import User
 from .security import TokenError, decode_access_token
@@ -22,7 +21,7 @@ _UNAUTHORIZED = HTTPException(
 
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: DbSession,
 ) -> User:
     """Resolve the bearer token to an active user, or raise 401."""
     if credentials is None:
@@ -54,7 +53,7 @@ async def require_admin(current_user: CurrentUser) -> User:
     if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Endpoint này yêu cầu quyền quản trị.",
+            detail="This endpoint requires admin privileges.",
         )
     return current_user
 

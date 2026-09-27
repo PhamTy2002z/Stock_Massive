@@ -21,6 +21,13 @@ SEARCH_STALE_SECONDS = 24 * 60 * 60
 URL_FRESH_SECONDS = 24 * 60 * 60
 URL_STALE_SECONDS = 7 * 24 * 60 * 60
 SINGLE_FLIGHT_TTL_SECONDS = 30
+#: How long a read that finds another request refreshing the same key waits for
+#: that refresh to land, and how often it looks. Bounded well inside the tools'
+#: own timeouts: the wait is spent on a worker thread, not on the event loop.
+SINGLE_FLIGHT_WAIT_SECONDS = 10.0
+SINGLE_FLIGHT_POLL_SECONDS = 0.25
+#: A failure reason is upstream text, which can be long and can carry CRLF.
+LOGGED_REASON_CHARS = 300
 REQUESTS_PER_MINUTE = 30
 REQUESTS_PER_DOMAIN_PER_MINUTE = 30
 
@@ -49,6 +56,8 @@ class WebLane:
         redis_factory: Callable[[], Any] | None = None,
         *,
         clock: Callable[[], float] = time.time,
+        sleep: Callable[[float], None] = time.sleep,
+        monotonic: Callable[[], float] = time.monotonic,
         requests_per_minute: int = REQUESTS_PER_MINUTE,
         requests_per_domain_per_minute: int = REQUESTS_PER_DOMAIN_PER_MINUTE,
     ) -> None:
@@ -60,6 +69,8 @@ class WebLane:
             redis_factory = get_redis
         self._redis_factory = redis_factory
         self._clock = clock
+        self._sleep = sleep
+        self._monotonic = monotonic
         self._requests_per_minute = requests_per_minute
         self._requests_per_domain_per_minute = requests_per_domain_per_minute
 
@@ -71,7 +82,11 @@ class WebLane:
         *,
         domain: str = "unknown",
     ) -> WebRead:
-        """Read through the cache, serving labelled stale data on upstream failure."""
+        """Read through the cache, serving labelled stale data on upstream failure.
+
+        Blocking: it talks to Redis synchronously and may wait for another
+        request's refresh, so callers run it on a worker thread.
+        """
         redis = self._client()
         digest = hashlib.sha256(key.strip().encode("utf-8")).hexdigest()
         stored = self._stored(redis, kind, digest)
@@ -81,16 +96,48 @@ class WebLane:
 
         token = self._claim(redis, kind, digest)
         if token is None:
+            # A labelled stale value is an answer now; waiting is only for a
+            # read that would otherwise have nothing to serve.
+            if stored is None or stored.age_seconds > stale_seconds:
+                refreshed = self._await_refresh(redis, kind, digest, fresh_seconds)
+                if refreshed is not None:
+                    return refreshed
             return self._fallback(stored, stale_seconds, "another request is refreshing")
         try:
             self._take_allowance(redis, domain)
             payload = fetch()
         except Exception as exc:  # noqa: BLE001 - stale service is the contract
-            logger.warning("Open-web %s read failed: %s", kind, exc)
+            logger.warning("Open-web %s read failed: %s", kind, _bounded(exc))
             return self._fallback(stored, stale_seconds, str(exc))
         finally:
             self._release(redis, kind, digest, token)
         return self._store(redis, kind, digest, payload, stale_seconds)
+
+    def _await_refresh(
+        self, redis: Any, kind: WebKind, digest: str, fresh_seconds: int
+    ) -> WebRead | None:
+        """The value another request is fetching, once it lands, or ``None``.
+
+        The same cold key read twice at once used to fail the second read
+        outright, while the timeout sentence tells the model to repeat the call
+        — so the repeat failed too. Waiting a bounded time for the first
+        request's value is what single-flight is for. It stops early when the
+        refresh lock is released with nothing fresh behind it: the refresh
+        failed, and fetching again at once would hit a source that just did.
+        """
+        deadline = self._monotonic() + SINGLE_FLIGHT_WAIT_SECONDS
+        while self._monotonic() < deadline:
+            self._sleep(SINGLE_FLIGHT_POLL_SECONDS)
+            stored = self._stored(redis, kind, digest)
+            if stored is not None and stored.age_seconds <= fresh_seconds:
+                return stored
+            try:
+                refreshing = redis.get(self._lock_key(kind, digest))
+            except Exception as exc:  # noqa: BLE001
+                raise WebUnavailable(f"the web cache is unreachable: {exc}") from exc
+            if not refreshing:
+                return None
+        return None
 
     def _stored(self, redis: Any, kind: WebKind, digest: str) -> WebRead | None:
         try:
@@ -128,7 +175,7 @@ class WebLane:
     @staticmethod
     def _fallback(stored: WebRead | None, stale_seconds: int, reason: str) -> WebRead:
         if stored is not None and stored.age_seconds <= stale_seconds:
-            logger.info("Serving stale open-web data: %s", reason)
+            logger.info("Serving stale open-web data: %s", _bounded(reason))
             return WebRead(stored.payload, stored.fetched_at, stored.age_seconds, True)
         raise WebUnavailable(f"no open-web data is available: {reason}")
 
@@ -189,7 +236,7 @@ class WebLane:
         try:
             eval_script(redis, RELEASE_IF_OWNED_SCRIPT, [self._lock_key(kind, digest)], [token])
         except Exception as exc:  # noqa: BLE001 - the lock has its own TTL
-            logger.warning("Could not release the web refresh lock: %s", exc)
+            logger.warning("Could not release the web refresh lock: %s", _bounded(exc))
 
     def _client(self) -> Any:
         redis = self._redis_factory()
@@ -212,6 +259,14 @@ class WebLane:
     @staticmethod
     def _lock_key(kind: WebKind, digest: str) -> str:
         return f"{KEY_PREFIX}:{kind}:{digest}:refreshing"
+
+
+def _bounded(value: object) -> str:
+    """A value as a log-safe line: ``repr`` escapes CRLF, and it is cut."""
+    text = repr(value)
+    if len(text) <= LOGGED_REASON_CHARS:
+        return text
+    return f"{text[:LOGGED_REASON_CHARS]}..."
 
 
 __all__ = [

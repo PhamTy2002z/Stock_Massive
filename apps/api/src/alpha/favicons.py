@@ -19,24 +19,26 @@ without the server re-fetching on every render.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
 import json
 import logging
 import re
 import socket
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urljoin
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from src.agent.tools.web import Resolver, _http_download, validate_public_url
 from src.auth.dependencies import CurrentUser
+from src.core.blocking_pool import run_blocking
 from src.core.config import Settings, get_settings
+from src.core.ratelimit import RateLimiter
 from src.core.redis import get_redis
 
 logger = logging.getLogger(__name__)
@@ -44,6 +46,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/assets", tags=["assets"])
 
 FAVICON_TIMEOUT_SECONDS = 3.0
+#: One favicon request, every candidate URL and redirect hop included, ends
+#: inside this. Without a shared deadline three candidates of three hops each
+#: could hold a worker for the better part of a minute.
+FAVICON_TOTAL_SECONDS = 2 * FAVICON_TIMEOUT_SECONDS
 #: How large an icon may be before it is refused.
 #:
 #: Measured rather than guessed: a real Vietnamese news site was found serving a
@@ -129,6 +135,8 @@ class _IconLinkParser(HTMLParser):
         if tag.lower() == "head":
             self._done = True
 
+#: ``(url, max_bytes, budget_seconds)``: the budget is what this one request may
+#: take in total, so the caller can carry one deadline across a redirect loop.
 Download = Callable[[str, int, float], tuple[int, Mapping[str, str], bytes]]
 
 
@@ -186,9 +194,15 @@ class FaviconTools:
         return self._injected_settings or get_settings()
 
     def _default_download(
-        self, url: str, max_bytes: int, timeout: float
+        self, url: str, max_bytes: int, budget: float
     ) -> tuple[int, Mapping[str, str], bytes]:
-        return _http_download(url, max_bytes, timeout, resolver=self._resolver)
+        return _http_download(
+            url,
+            max_bytes,
+            min(FAVICON_TIMEOUT_SECONDS, budget),
+            resolver=self._resolver,
+            total_seconds=budget,
+        )
 
     def _denylist(self) -> tuple[str, ...]:
         return tuple(self._settings.web_domain_denylist.split(","))
@@ -227,17 +241,18 @@ class FaviconTools:
         ordinary domain still costs one request, and a domain with no icon at
         all costs two — once a week, because the failure is cached too.
         """
-        direct = self._download_icon(f"https://{domain}/favicon.ico")
+        deadline = time.monotonic() + FAVICON_TOTAL_SECONDS
+        direct = self._download_icon(f"https://{domain}/favicon.ico", deadline)
         if direct.found:
             return direct
-        declared = self._declared_icon_url(domain)
+        declared = self._declared_icon_url(domain, deadline)
         if declared is None:
             return FaviconResult(found=False)
-        return self._download_icon(declared)
+        return self._download_icon(declared, deadline)
 
-    def _declared_icon_url(self, domain: str) -> str | None:
+    def _declared_icon_url(self, domain: str, deadline: float) -> str | None:
         """The icon a home page declares in its markup, as an absolute URL."""
-        page = self._read(f"https://{domain}/", FAVICON_PAGE_MAX_BYTES)
+        page = self._read(f"https://{domain}/", FAVICON_PAGE_MAX_BYTES, deadline)
         if page is None:
             return None
         url, headers, body = page
@@ -258,9 +273,9 @@ class FaviconTools:
         # not the one asked for when a redirect moved it.
         return urljoin(url, parser.href) if parser.href else None
 
-    def _download_icon(self, url: str) -> FaviconResult:
+    def _download_icon(self, url: str, deadline: float) -> FaviconResult:
         """Fetch one candidate icon URL, and judge what came back."""
-        fetched = self._read(url, FAVICON_MAX_BYTES)
+        fetched = self._read(url, FAVICON_MAX_BYTES, deadline)
         if fetched is None:
             return FaviconResult(found=False)
         _, headers, body = fetched
@@ -270,9 +285,10 @@ class FaviconTools:
         return FaviconResult(found=True, content_type=content_type, body=body)
 
     def _read(
-        self, url: str, max_bytes: int
+        self, url: str, max_bytes: int, deadline: float
     ) -> tuple[str, Mapping[str, str], bytes] | None:
-        """One GET, re-validating every hop. ``None`` for anything but a 2xx."""
+        """One GET, re-validating every hop. ``None`` for anything but a 2xx,
+        and for a request that ran out of the lookup's shared ``deadline``."""
         denylist = self._denylist()
         current = url
         for redirect_count in range(FAVICON_MAX_REDIRECTS + 1):
@@ -283,10 +299,12 @@ class FaviconTools:
             except ValueError as exc:
                 logger.info("Favicon URL %s rejected: %s", current, exc)
                 return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.info("Favicon lookup ran out of time before %s", current)
+                return None
             try:
-                status, headers, body = self._download(
-                    current, max_bytes, FAVICON_TIMEOUT_SECONDS
-                )
+                status, headers, body = self._download(current, max_bytes, remaining)
             except (OSError, ValueError) as exc:
                 logger.info("Favicon download of %s failed: %s", current, exc)
                 return None
@@ -347,9 +365,29 @@ def get_favicon_tools() -> FaviconTools:
     return FaviconTools()
 
 
+class _ReaderRateLimiter(RateLimiter):
+    """Charged to the signed-in reader, not the address.
+
+    Behind the Next proxy every reader arrives from one address, so an address
+    key would make one reader's burst everybody's 429. The handler sets the key.
+    """
+
+    def _get_identifier(self, request: Request) -> str:
+        return request.state.favicon_reader
+
+
+_favicon_reader_limit = _ReaderRateLimiter(
+    max_requests=get_settings().rate_limit_standard_max,
+    window=get_settings().rate_limit_standard_window,
+    prefix="favicon-user",
+)
+
+
 @router.get("/favicon")
 async def get_favicon(
-    _current_user: CurrentUser,
+    current_user: CurrentUser,
+    request: Request,
+    response: Response,
     domain: str = Query(..., min_length=1, max_length=253),
     tools: FaviconTools = Depends(get_favicon_tools),
 ) -> Response:
@@ -364,7 +402,9 @@ async def get_favicon(
         clean_domain = validate_domain(domain)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return await asyncio.to_thread(tools.serve, clean_domain)
+    request.state.favicon_reader = str(current_user.id)
+    await _favicon_reader_limit(request, response)
+    return await run_blocking(tools.serve, clean_domain)
 
 
 __all__ = [

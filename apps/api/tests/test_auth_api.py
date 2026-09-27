@@ -7,14 +7,18 @@ These drive the app through an ASGI transport rather than TestClient: the async
 engine's pool binds to whichever event loop first used it, and TestClient opens
 a fresh loop per request, which strands pooled connections after the first call.
 """
+import asyncio
 import uuid
+from datetime import timedelta
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from src.auth.models import RefreshToken, User
+from src.auth.security import hash_refresh_token
+from src.auth.service import _utcnow
 from src.core.database import engine, get_sync_db
 from src.main import app
 
@@ -193,6 +197,67 @@ class TestRefresh:
     async def test_unknown_token_is_401(self, client):
         response = await client.post(f"{API}/refresh", json={"refresh_token": "no-such-token"})
         assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_two_concurrent_rotations_of_one_token_mint_one_replacement(
+        self, client, account
+    ):
+        tokens = await _register(client, account)
+        body = {"refresh_token": tokens["refresh_token"]}
+
+        first, second = await asyncio.gather(
+            client.post(f"{API}/refresh", json=body),
+            client.post(f"{API}/refresh", json=body),
+        )
+
+        assert sorted([first.status_code, second.status_code]) == [200, 401]
+
+    @pytest.mark.asyncio
+    async def test_an_expired_token_is_401_and_revokes_nothing(self, client, account):
+        tokens = await _register(client, account)
+        other = (await client.post(f"{API}/login", json=account)).json()
+        with get_sync_db() as session:
+            session.execute(
+                update(RefreshToken)
+                .where(RefreshToken.token_hash == hash_refresh_token(tokens["refresh_token"]))
+                .values(expires_at=_utcnow() - timedelta(minutes=1))
+            )
+
+        expired = await client.post(
+            f"{API}/refresh", json={"refresh_token": tokens["refresh_token"]}
+        )
+        still_live = await client.post(
+            f"{API}/refresh", json={"refresh_token": other["refresh_token"]}
+        )
+        assert expired.status_code == 401
+        assert still_live.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_issuing_a_token_prunes_rows_long_past_expiry(self, client, account):
+        await _register(client, account)
+        with get_sync_db() as session:
+            user = session.execute(
+                select(User).where(User.email == account["email"])
+            ).scalar_one()
+            session.add(
+                RefreshToken(
+                    user_id=user.id,
+                    token_hash=uuid.uuid4().hex * 2,
+                    expires_at=_utcnow() - timedelta(days=30),
+                )
+            )
+            user_id = user.id
+
+        await client.post(f"{API}/login", json=account)
+
+        with get_sync_db() as session:
+            stale = session.execute(
+                select(RefreshToken).where(
+                    RefreshToken.user_id == user_id,
+                    RefreshToken.expires_at < _utcnow() - timedelta(days=7),
+                )
+            ).all()
+        assert stale == []
 
 
 class TestLogout:

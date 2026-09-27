@@ -56,6 +56,21 @@ class TestTheFourStatusClassesStillAnswerFirst:
     def test_a_server_side_failure_is_a_gateway_timeout(self, status):
         assert isinstance(classify_status(status, "upstream"), GatewayTimeout)
 
+    def test_a_5xx_that_names_a_rate_limit_cooldown_is_a_rate_limit(self):
+        # Measured 2026-09-27: the kiro proxy throttles with a 500 whose body says
+        # so. Read as a gateway failure it opened the breaker and ended Turns in
+        # five seconds, where a 429 of the same meaning is waited out.
+        body = (
+            '{"error":{"message":"kiro: token is in cooldown for 36.500340792s '
+            '(reason: rate_limit_exceeded); attempted routes: [other:error]"}}'
+        )
+        error = classify_status(500, body)
+        assert isinstance(error, RouteRateLimited)
+        assert error.retry_after == pytest.approx(36.500340792)
+
+    def test_a_5xx_that_only_mentions_limits_is_still_a_gateway_failure(self):
+        assert isinstance(classify_status(500, "memory limit exceeded"), GatewayTimeout)
+
 
 class TestARefusedRequestGetsAClass:
     def test_an_oversized_output_ceiling_is_its_own_class(self):

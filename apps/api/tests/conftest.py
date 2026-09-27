@@ -12,11 +12,23 @@ os.environ["LLM_CAPABILITY_PROBE_ENABLED"] = "false"
 # say nothing about the code. The limiter's behaviour is tested against explicit
 # Settings in `tests/test_ratelimit.py`.
 os.environ["RATE_LIMIT_ENABLED"] = "false"
+# Settings default to production, which refuses the suite's weak AUTH_SECRET;
+# a test run says what it is rather than relying on a relaxed default.
+os.environ.setdefault("ENVIRONMENT", "test")
 
 import pytest
 from fastapi.testclient import TestClient
 
+from src.agent.tools import vnstock_provider
 from src.main import app
+
+
+@pytest.fixture(autouse=True)
+def _fresh_provider_reads():
+    """Provider reads are memoised process-wide; each test starts with none."""
+    vnstock_provider.READS.clear()
+    yield
+    vnstock_provider.READS.clear()
 @pytest.fixture(scope="session")
 def event_loop():
     """Create session-scoped event loop for async tests."""

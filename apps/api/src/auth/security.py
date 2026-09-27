@@ -58,7 +58,15 @@ def create_access_token(user_id: int) -> str:
 def decode_access_token(token: str) -> dict[str, Any]:
     """Decode and validate an access token, raising `TokenError` if unusable."""
     try:
-        payload = jwt.decode(token, settings.auth_secret, algorithms=[settings.jwt_algorithm])
+        # A token without an expiry would never stop working, so the claims
+        # every token this module mints carries are required, not merely checked
+        # when present.
+        payload = jwt.decode(
+            token,
+            settings.auth_secret,
+            algorithms=[settings.jwt_algorithm],
+            options={"require": ["exp", "sub", "type"]},
+        )
     except jwt.PyJWTError as exc:
         raise TokenError(str(exc)) from exc
 
