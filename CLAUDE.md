@@ -117,6 +117,15 @@ Vietnamese). The big picture:
   `nguồn cũ`), with one repair round; each answered Turn writes a claim ledger. Adding a
   tool, MCP, multi-agent, code execution or side-effect tool is a scope decision
   for the product owner, not an implementation detail.
+- User connectors (owner decision 27/09/2026, replacing phase-10's "no generic
+  marketplace"; `plans/260927-1302-user-connectors/`): users attach remote MCP
+  servers (Streamable HTTP only, never stdio) from an operator-reviewed catalog,
+  or by custom URL behind `CONNECTORS_CUSTOM_URL` (`personal_internal` + user
+  allowlist). Their tools are a per-Turn overlay on the surface (`src/connectors/`),
+  never entries in the global registry; results are always untrusted; annotations
+  only tighten; write tools are always "needs approval". A connector's figures
+  are verified evidence only when its catalog row has `trusted_data=true`, and
+  setting that flag or adding a real catalog entry is an owner decision.
 - Signal Desk is a composer mode (`Chat | Signal Desk` pill), a right-hand pane
   and one visual part. `mode` travels on the Turn body; `chat` never produces a
   visual part.
