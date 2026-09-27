@@ -37,8 +37,10 @@ import time
 import uuid
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
+from datetime import timedelta
 
 import pytest
+from sqlalchemy import func, update
 
 from src.agent.events import (
     ANSWER,
@@ -87,6 +89,8 @@ from src.agent.parts import (
     ProgressKind,
 )
 from src.agent.persistence import INTERRUPTED_REASON, TURN_COMPLETE, TURN_INCOMPLETE
+from src.alpha.models import TURN_STALE_SECONDS, AgentTurn
+from src.core.database import get_sync_db
 from src.core.llm import (
     Completion,
     ContextOverflow,
@@ -866,6 +870,14 @@ async def test_a_turn_a_restart_caught_mid_write_is_frozen_with_nothing_running(
     with suppress(asyncio.CancelledError):
         await running.task
     release.set()
+    # A dead process stops heartbeating; the sweep only freezes a Turn whose
+    # heartbeat has gone stale, so the row is aged the way the restart would.
+    with get_sync_db() as session:
+        session.execute(
+            update(AgentTurn)
+            .where(AgentTurn.id == turn_id)
+            .values(heartbeat_at=func.now() - timedelta(seconds=TURN_STALE_SECONDS + 60))
+        )
 
     frozen = await service(FakeClient([])).sweep()
 
@@ -979,3 +991,37 @@ async def test_a_card_survives_the_publisher_the_terminal_and_a_reopened_thread(
     for outcome in (answered, skipped, superseded):
         assert outcome["prompt"] == part.prompt
         assert len(outcome["options"]) == len(part.options)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("idempotency", "retry_advised"),
+    [("IDEMPOTENT", True), ("NON_IDEMPOTENT", False)],
+)
+async def test_a_timed_out_read_tells_the_model_a_repeat_is_safe(owner, idempotency, retry_advised):
+    """A slow read keeps running and fills its cache; a slow write may have landed."""
+    from src.agent import registry
+
+    thread_id = await thread_for(owner)
+
+    async def never_answers(_context, _arguments):
+        await asyncio.sleep(5)
+        return {"ok": True}
+
+    install(
+        entry(
+            "slow",
+            never_answers,
+            timeout_seconds=0.05,
+            effect=registry.ToolEffect.READ,
+            idempotency=getattr(registry.ToolIdempotency, idempotency),
+        )
+    )
+    client = FakeClient([narrating("slow", "Đang tra."), answer("Xong.")])
+    turns = service(client)
+
+    turn_id, _handle = await start(turns, owner, thread_id)
+    await turns.running(turn_id).task
+
+    told = " ".join(str(message.content or "") for message in client.requests[1].messages)
+    assert ("repeating this exact call once is safe" in told) is retry_advised

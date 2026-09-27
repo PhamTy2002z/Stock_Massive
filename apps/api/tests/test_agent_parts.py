@@ -284,7 +284,7 @@ def test_a_question_is_single_select_until_something_says_otherwise():
 def test_skipping_is_always_offered_and_says_what_it_costs():
     """No card is a door: the default label promises the work still runs."""
     assert question().skip_label == DEFAULT_SKIP_LABEL
-    assert "giả định" in DEFAULT_SKIP_LABEL
+    assert "assumption" in DEFAULT_SKIP_LABEL
 
 
 def test_the_wire_shape_is_what_the_row_and_the_client_both_read():

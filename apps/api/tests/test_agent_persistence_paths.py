@@ -876,7 +876,7 @@ async def test_the_freeze_settles_the_checkpoint_it_leaves_behind(owner):
                 request_message_id=message.id,
                 status=TURN_RUNNING,
                 last_event_seq=3,
-                started_at=datetime.now(timezone.utc),
+                started_at=_at(1),  # long past the staleness window
                 draft_content={
                     "text": "Một phần đã kịp nói.",
                     "tool_calls": [
@@ -930,7 +930,7 @@ async def test_a_freeze_with_nothing_outstanding_rewrites_no_checkpoint(owner):
                 thread_id=thread.id,
                 request_message_id=message.id,
                 status=TURN_RUNNING,
-                started_at=datetime.now(timezone.utc),
+                started_at=_at(1),  # long past the staleness window
                 draft_content=checkpoint,
             )
         )

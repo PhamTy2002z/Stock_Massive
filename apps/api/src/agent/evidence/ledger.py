@@ -350,12 +350,24 @@ def _public_locator(source: str) -> str | None:
 #: The sections the findings are grouped into, in the order a reader needs
 #: them: what stands, what rests on one feed, what the sources disagree about,
 #: what could not be placed in time, and what did not survive the check at all.
+#: One set per language the memo may be written in — the model composes the
+#: claims this renders in the language of the user's question, so the memo
+#: around them follows (owner decision, 2026-09-27).
 _VERDICT_SECTIONS = {
-    VerificationVerdict.VERIFIED: "Kết luận theo bằng chứng",
-    VerificationVerdict.SINGLE_SOURCE: "Mới có một nguồn",
-    VerificationVerdict.CONFLICTING: "Nguồn mâu thuẫn",
-    VerificationVerdict.TEMPORALLY_INVALID: "Sai mốc thời gian",
-    VerificationVerdict.UNSUPPORTED: "Chưa kiểm chứng",
+    "vi": {
+        VerificationVerdict.VERIFIED: "Kết luận theo bằng chứng",
+        VerificationVerdict.SINGLE_SOURCE: "Mới có một nguồn",
+        VerificationVerdict.CONFLICTING: "Nguồn mâu thuẫn",
+        VerificationVerdict.TEMPORALLY_INVALID: "Sai mốc thời gian",
+        VerificationVerdict.UNSUPPORTED: "Chưa kiểm chứng",
+    },
+    "en": {
+        VerificationVerdict.VERIFIED: "Conclusions backed by evidence",
+        VerificationVerdict.SINGLE_SOURCE: "Only one source",
+        VerificationVerdict.CONFLICTING: "Sources conflict",
+        VerificationVerdict.TEMPORALLY_INVALID: "Wrong time frame",
+        VerificationVerdict.UNSUPPORTED: "Unverified",
+    },
 }
 
 #: The outcome of the verification pass, in the language the answer is written
@@ -363,15 +375,67 @@ _VERDICT_SECTIONS = {
 #: to the person reading the answer — and a reader who has to decode the first
 #: line of a memo reads the rest of it as machinery too.
 _OUTCOME_LABELS = {
-    VerifierOutcome.VERIFIED: "đã kiểm chứng",
-    VerifierOutcome.INSUFFICIENT_EVIDENCE: "chưa đủ bằng chứng",
-    VerifierOutcome.VERIFIER_FAILED: "không kiểm chứng được",
-    VerifierOutcome.BUDGET_EXHAUSTED: "dừng vì hết ngân sách",
+    "vi": {
+        VerifierOutcome.VERIFIED: "đã kiểm chứng",
+        VerifierOutcome.INSUFFICIENT_EVIDENCE: "chưa đủ bằng chứng",
+        VerifierOutcome.VERIFIER_FAILED: "không kiểm chứng được",
+        VerifierOutcome.BUDGET_EXHAUSTED: "dừng vì hết ngân sách",
+    },
+    "en": {
+        VerifierOutcome.VERIFIED: "verified",
+        VerifierOutcome.INSUFFICIENT_EVIDENCE: "insufficient evidence",
+        VerifierOutcome.VERIFIER_FAILED: "verification failed",
+        VerifierOutcome.BUDGET_EXHAUSTED: "stopped: budget exhausted",
+    },
 }
+
+#: Every other fixed heading and phrase this memo writes, one set per language.
+_STRINGS = {
+    "vi": {
+        "no_claims_heading": "Kết luận theo bằng chứng",
+        "no_claims_body": "Chưa có tuyên bố nào đủ điều kiện để hiển thị.",
+        "invalidation_heading": "Điều gì có thể làm luận điểm sai",
+        "no_invalidation": "Chưa xác định được điều kiện vô hiệu hóa từ bằng chứng hiện có.",
+        "assumptions_heading": "Giả định",
+        "gaps_heading": "Khoảng trống bằng chứng",
+        "result_label": "Kết quả kiểm chứng",
+        "as_of_label": "dữ liệu tính đến",
+        "sources_heading": "Nguồn",
+        "publication_unknown": "không rõ ngày công bố",
+        "source_fallback": "Nguồn",
+    },
+    "en": {
+        "no_claims_heading": "Conclusions backed by evidence",
+        "no_claims_body": "No claim qualified to be shown.",
+        "invalidation_heading": "What would prove this wrong",
+        "no_invalidation": "No invalidating condition could be determined from the evidence gathered.",
+        "assumptions_heading": "Assumptions",
+        "gaps_heading": "Evidence gaps",
+        "result_label": "Verification result",
+        "as_of_label": "data as of",
+        "sources_heading": "Sources",
+        "publication_unknown": "publication date unknown",
+        "source_fallback": "Source",
+    },
+}
+
+#: The deep lane's own memo ends in this heading before its dated source list;
+#: ``loop.py`` stops the figure check there, in whichever language this memo
+#: rendered in — the bibliography's dates and counts are not claims.
+SOURCES_SECTION_HEADING = {lang: f"### {strings['sources_heading']}" for lang, strings in _STRINGS.items()}
 
 
 def render_claim_ledger(ledger: ClaimLedger) -> str:
-    """Render only checked ledger values; no model-authored URL is accepted."""
+    """Render only checked ledger values; no model-authored URL is accepted.
+
+    Rendered in the language the claims themselves are written in — read off
+    their combined text, since a memo has no answer of its own to read a
+    language from before it exists.
+    """
+    lang = numbers.answer_language(" ".join(claim.text for claim in ledger.claims))
+    verdict_sections = _VERDICT_SECTIONS[lang]
+    outcome_labels = _OUTCOME_LABELS[lang]
+    strings = _STRINGS[lang]
 
     evidence_by_id = {item.evidence_id: item for item in ledger.evidence}
     cited_ids: list[str] = []
@@ -392,7 +456,7 @@ def render_claim_ledger(ledger: ClaimLedger) -> str:
     # to read past it on each line to get to the sentence.
     lines: list[str] = []
     rendered = 0
-    for verdict, heading in _VERDICT_SECTIONS.items():
+    for verdict, heading in verdict_sections.items():
         claims = [item for item in ledger.claims if item.verdict is verdict]
         if not claims:
             continue
@@ -410,10 +474,10 @@ def render_claim_ledger(ledger: ClaimLedger) -> str:
             rendered += 1
     if not rendered:
         lines.extend(
-            ("", "### Kết luận theo bằng chứng", "- Chưa có tuyên bố nào đủ điều kiện để hiển thị.")
+            ("", f"### {strings['no_claims_heading']}", f"- {strings['no_claims_body']}")
         )
 
-    lines.extend(("", "### Điều gì có thể làm luận điểm sai"))
+    lines.extend(("", f"### {strings['invalidation_heading']}"))
     invalidations = [
         item.invalidation_text
         for item in ledger.claims
@@ -422,13 +486,13 @@ def render_claim_ledger(ledger: ClaimLedger) -> str:
     if invalidations:
         lines.extend(f"- {_clean_text(item)}" for item in invalidations)
     else:
-        lines.append("- Chưa xác định được điều kiện vô hiệu hóa từ bằng chứng hiện có.")
+        lines.append(f"- {strings['no_invalidation']}")
 
     if ledger.assumptions:
-        lines.extend(("", "### Giả định"))
+        lines.extend(("", f"### {strings['assumptions_heading']}"))
         lines.extend(f"- {_clean_text(item)}" for item in ledger.assumptions)
     if ledger.gaps:
-        lines.extend(("", "### Khoảng trống bằng chứng"))
+        lines.extend(("", f"### {strings['gaps_heading']}"))
         lines.extend(f"- {_clean_text(item)}" for item in ledger.gaps)
 
     # The state of the check itself, last. It is a fact about the answer rather
@@ -438,26 +502,26 @@ def render_claim_ledger(ledger: ClaimLedger) -> str:
     lines.extend(
         (
             "",
-            f"**Kết quả kiểm chứng:** {_OUTCOME_LABELS[ledger.verifier_outcome]}"
-            f" · dữ liệu tính đến {ledger.as_of.strftime('%H:%M %d/%m/%Y')}",
+            f"**{strings['result_label']}:** {outcome_labels[ledger.verifier_outcome]}"
+            f" · {strings['as_of_label']} {ledger.as_of.strftime('%H:%M %d/%m/%Y')}",
         )
     )
 
     if cited_ids:
-        lines.extend(("", "### Nguồn"))
+        lines.extend(("", SOURCES_SECTION_HEADING[lang]))
         for index, evidence_id in enumerate(cited_ids, start=1):
             item = evidence_by_id[evidence_id]
             target = _public_locator(item.canonical_url or item.source)
             publisher = _clean_text(
                 item.publisher
                 or (urlsplit(target).hostname if target else None)
-                or "Nguồn"
+                or strings["source_fallback"]
             )
             title = _clean_text(item.title)
             published = (
                 item.published_at.strftime("%H:%M %d/%m/%Y")
                 if item.published_at
-                else "không rõ ngày công bố"
+                else strings["publication_unknown"]
             )
             row = f"[{index}] {publisher} — {title} — {published}"
             lines.append(f"{row} — <{target}>" if target else row)
@@ -467,6 +531,7 @@ def render_claim_ledger(ledger: ClaimLedger) -> str:
 __all__ = [
     "ClaimLedgerValidationReport",
     "LedgerClaimAssessment",
+    "SOURCES_SECTION_HEADING",
     "render_claim_ledger",
     "validate_claim_ledger",
 ]

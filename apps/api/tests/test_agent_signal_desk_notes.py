@@ -61,9 +61,9 @@ def test_the_market_surface_buys_no_extra_capacity():
     from src.agent import toolsets
 
     assert (DEEP.max_tool_rounds, DEEP.max_external_calls, DEEP.deadline_seconds) == (
-        10,
-        20,
-        1_800.0,
+        25,
+        80,
+        3_600.0,
     )
     # And the selection is a tuple of names, holding no numbers of its own.
     assert toolsets.SIGNAL_DESK_TOOLSETS == (*toolsets.CORE_TOOLSETS, "market_data")

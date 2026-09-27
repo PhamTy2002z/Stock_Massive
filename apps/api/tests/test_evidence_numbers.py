@@ -305,3 +305,21 @@ def test_a_number_inside_a_longer_token_is_not_a_number_on_its_own():
     page = "Rổ VN30 và mã ABC123 trong phiên."
 
     assert numbers.contains(page, 30, "mã") is Verdict.NOT_ON_PAGE
+
+
+def test_answer_language_reads_a_share_of_diacritics_not_a_single_word():
+    """Vietnamese prose is called "vi"; English prose stays "en" even when it
+    quotes one Vietnamese name, because one accented phrase is a small share of
+    a much longer English answer."""
+    assert numbers.answer_language("STB đóng cửa 76.500 đồng hôm qua, tăng 1,2%.") == "vi"
+    assert numbers.answer_language("STB closed at 76,500 dong yesterday, up 1.2%.") == "en"
+    assert (
+        numbers.answer_language(
+            "Sacombank (Ngân hàng Sài Gòn Thương Tín, ticker STB) reported net income "
+            "of VND 2.4 trillion for the first half of the year, up from the prior "
+            "period as loan growth accelerated across its retail and corporate books."
+        )
+        == "en"
+    )
+    assert numbers.answer_language("76.500") == "vi"
+    assert numbers.answer_language("") == "vi"

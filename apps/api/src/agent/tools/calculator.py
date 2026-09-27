@@ -35,7 +35,10 @@ from ..registry import (
 
 TOOLSET = "market_data"
 TOOL_NAME = "calculate"
-MAX_INPUTS = 12
+#: Enough for an average over three months of sessions. The grounding check admits a
+#: calculation only when each input is printed in a source, so an average has to
+#: take the rows themselves: a sum the model added up first is not printed anywhere.
+MAX_INPUTS = 66
 
 #: operation → (how many inputs, the result's default unit, the formula shape).
 OPERATIONS: Mapping[str, tuple[int | None, str | None, str]] = {
@@ -44,6 +47,7 @@ OPERATIONS: Mapping[str, tuple[int | None, str | None, str]] = {
     "percent_change": (2, "%", "({a} − {b}) / {b} × 100"),
     "difference": (2, None, "{a} − {b}"),
     "sum": (None, None, " + "),
+    "average": (None, None, " + "),
     "multiply": (None, None, " × "),
 }
 
@@ -115,6 +119,9 @@ def compute(operation: str, inputs: Sequence[Mapping[str, Any]], *, decimals: in
     elif operation == "sum":
         result = sum(values, Decimal(0))
         formula = shape.join(shown)
+    elif operation == "average":
+        result = sum(values, Decimal(0)) / len(values)
+        formula = f"({shape.join(shown)}) / {len(values)}"
     else:
         result = Decimal(1)
         for number in values:
@@ -144,7 +151,8 @@ class CalculatorTools:
                     "Compute a number the answer states but no source prints: a "
                     "ratio (divide), a share (percent_of), a growth or change "
                     "(percent_change: first input is the new value, second the old), "
-                    "a difference, a sum or a product. Use it for every derived "
+                    "a difference, a sum, an average (average: pass every value itself, e.g. each "
+                    "session's volume — never a total you added up) or a product. Use it for every derived "
                     "figure instead of computing in your head. Each input must be a "
                     "figure you read from a tool in this turn, with its label and "
                     "unit; the result comes back with its formula, and a result built "
@@ -171,7 +179,7 @@ class CalculatorTools:
                     ("operation", "inputs"),
                 ),
                 handler=self.calculate,
-                display_name="Tính toán",
+                display_name="Calculate",
                 summarise=_summarise,
                 effect=ToolEffect.READ,
                 idempotency=ToolIdempotency.IDEMPOTENT,
@@ -207,7 +215,7 @@ class CalculatorTools:
 
 def _summarise(arguments: Mapping[str, Any]) -> str:
     labels = [str(item.get("label") or "") for item in arguments.get("inputs") or () if isinstance(item, Mapping)]
-    return f"Tính toán · {arguments.get('operation') or '?'} · {', '.join(label for label in labels if label)[:80]}"
+    return f"Calculate · {arguments.get('operation') or '?'} · {', '.join(label for label in labels if label)[:80]}"
 
 
 def register_calculator_tools() -> tuple[ToolEntry, ...]:

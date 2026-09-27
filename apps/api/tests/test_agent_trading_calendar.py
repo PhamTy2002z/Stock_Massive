@@ -133,3 +133,11 @@ def test_an_open_day_cannot_carry_a_previous_session():
 def test_only_a_holiday_closure_names_a_holiday():
     with pytest.raises(ValueError):
         MarketDay(phase=MarketPhase.CLOSED_WEEKEND, holiday="Quốc khánh")
+
+
+def test_the_next_session_skips_weekends_and_the_holiday_table():
+    from src.agent.domain.trading_calendar import next_trading_day
+
+    assert next_trading_day(date(2026, 9, 27)) == date(2026, 9, 28)  # Sunday → Monday
+    assert next_trading_day(date(2026, 8, 29)) == date(2026, 9, 3)  # past the National Day break
+    assert next_trading_day(date(2026, 12, 31)) is None  # the next session is in an uncovered year

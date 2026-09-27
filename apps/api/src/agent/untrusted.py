@@ -74,8 +74,13 @@ CLOSE_TAG = "</untrusted_tool_result>"
 ATTACHMENT_OPEN_TEMPLATE = '<user_attachment name="{name}">'
 ATTACHMENT_CLOSE_TAG = "</user_attachment>"
 
-_DELIMITER = re.compile(r"<\s*(/?)\s*untrusted_tool_result", re.IGNORECASE)
-_ATTACHMENT_DELIMITER = re.compile(r"<\s*(/?)\s*user_attachment", re.IGNORECASE)
+#: Every tag the harness wraps outside content in. One pattern for both origins:
+#: a page that forges an attachment's opening tag is making its own text read
+#: as something the reader handed over, which is the same attack as closing the
+#: page's wrapper early.
+_DELIMITER = re.compile(
+    r"<\s*(/?)\s*(untrusted_tool_result|user_attachment)", re.IGNORECASE
+)
 _SOURCE_UNSAFE = re.compile(r'[^0-9A-Za-z._:\-/ ]')
 
 
@@ -95,12 +100,14 @@ def is_untrusted(
 
 
 def defang(text: str) -> str:
-    """Neutralise the wrapper's own delimiter inside untrusted content.
+    """Neutralise every harness wrapper tag inside untrusted content.
 
     Escaped rather than deleted: the model should be able to see that a page
     tried this, and a silently deleted tag is a page that reads as innocent.
     """
-    return _DELIMITER.sub(lambda match: f"&lt;{match.group(1)}untrusted_tool_result", text)
+    return _DELIMITER.sub(
+        lambda match: f"&lt;{match.group(1)}{match.group(2).lower()}", text
+    )
 
 
 def _safe_source(source: str) -> str:
@@ -191,17 +198,14 @@ def scan_for_threats(text: str, *, scope: str = threat_patterns.SCOPE_CONTEXT) -
 
 
 def defang_attachment(text: str) -> str:
-    """Neutralise the attachment wrapper's delimiter inside attachment content.
+    """Neutralise the harness's wrapper tags inside attachment content.
 
-    Both delimiters, not just this one: a file can as easily forge an opening
-    ``untrusted_tool_result`` tag to make its own contents read like a page the
-    harness quoted, and defanging one tag while leaving the other is a boundary
-    with a door in it.
+    The same rule as :func:`defang`, kept under its own name for the attachment
+    path: a file can as easily forge an opening ``untrusted_tool_result`` tag to
+    make its own contents read like a page the harness quoted, and defanging one
+    tag while leaving the other is a boundary with a door in it.
     """
-    defanged = _ATTACHMENT_DELIMITER.sub(
-        lambda match: f"&lt;{match.group(1)}user_attachment", text
-    )
-    return defang(defanged)
+    return defang(text)
 
 
 def wrap_attachment(text: str, *, filename: str) -> str:

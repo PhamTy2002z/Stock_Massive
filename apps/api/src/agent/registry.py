@@ -197,6 +197,10 @@ class ToolContext:
     #: The caller's clock. Injected so a handler that stamps a row and a test
     #: that asserts the stamp read the same instant.
     now: datetime | None = None
+    #: The years the reader's question puts in play (``years_in_scope``). The
+    #: executor refuses a call that reaches for another past year once. ``None``
+    #: outside a Turn, where there is no question to read it from.
+    question_years: frozenset[int] | None = None
 
 
 @dataclass(frozen=True)

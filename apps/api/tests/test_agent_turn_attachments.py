@@ -578,7 +578,7 @@ class TestTheImageBudgetRefusesBeforeTheTurnExists:
 
         assert response.status_code == 400
         assert response.json()["detail"]["reason"] == "turn_image_budget"
-        assert "bỏ một ảnh" in response.json()["detail"]["message"]
+        assert "drop one image" in response.json()["detail"]["message"]
         desk.control.finish()
 
     async def test_more_ids_than_the_count_cap_is_a_422(self, client, auth, desk):

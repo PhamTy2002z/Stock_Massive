@@ -540,3 +540,78 @@ __all__ = [
     "extract_publication_stamp",
     "is_temporally_admissible",
 ]
+
+
+#: A four-digit year in a question or a query. A document number such as
+#: ``96/2025/QH15`` or ``11/2021/TT-NHNN`` names a law, not a period, and is
+#: removed before this runs.
+_YEAR_RE = re.compile(r"(?<!\d)(19[89]\d|20\d\d)(?!\d)")
+_DOCUMENT_NUMBER_RE = re.compile(r"\b\d+/(?:19|20)\d\d/[A-ZĐ][A-ZĐ0-9-]*")
+#: "3 năm qua", "5 năm" — a horizon reaching back that many years.
+_HORIZON_RE = re.compile(r"(?<!\d)(\d{1,2})\s*năm(?!\s*\d)", re.IGNORECASE)
+#: Words that reach back one year without naming it.
+_LAST_YEAR_RE = re.compile(
+    r"năm\s+(?:ngoái|trước|qua)|cùng\s+kỳ|so\s+với\s+năm|\byoy\b|12\s*tháng",
+    re.IGNORECASE,
+)
+#: What makes a year a *date* rather than a reporting period: a day or a month
+#: right before it — ``26/9/2025``, ``tháng 9 2025``, ``tuần 21-25/9 2025``.
+_DATED_BEFORE_RE = re.compile(
+    r"(?:(?<![A-Za-z])\d{1,2}\s*[/-]\s*|tháng\s*\d{1,2}\s*[/-]?\s*|tuần\s*)$", re.IGNORECASE
+)
+#: ``quý 4/2025`` is a reporting period, not a day and month.
+_QUARTER_BEFORE_RE = re.compile(r"(?:quý|q)\s*[1-4]\s*[/-]?\s*$", re.IGNORECASE)
+
+
+def years_in_scope(text: str, *, today: date) -> frozenset[int]:
+    """The years a question puts in play: this one, any it names, and any its horizon reaches.
+
+    Read out of the reader's own words, like ``as_of_from_text``, because the
+    question is the only record of which past year was asked about on purpose.
+    """
+    text = _DOCUMENT_NUMBER_RE.sub(" ", text or "")
+    years = {today.year} | {int(year) for year in _YEAR_RE.findall(text)}
+    horizon = max((int(n) for n in _HORIZON_RE.findall(text)), default=0)
+    if _LAST_YEAR_RE.search(text):
+        horizon = max(horizon, 1)
+    years.update(range(today.year - horizon, today.year))
+    return frozenset(years)
+
+
+def stale_year(
+    tool_name: str,
+    arguments: Mapping[str, Any],
+    *,
+    today: date,
+    in_scope: frozenset[int],
+) -> int | None:
+    """The past year a call reaches for although the question never put it in play.
+
+    Measured on kiro-glm-5 (2026-09-27): told today's date, it searched "tuần
+    21-25 tháng 9 2025" and "… 2024" and asked for prices ending 2025-06-23 —
+    it works in the year it remembers. A note in the result did not stop it, so
+    the host refuses the call before it spends a request.
+
+    Last year is refused only as a *date* (``26/9/2025``, ``tháng 9 2025``): a
+    bare ``2025`` or ``quý 4/2025`` is, until the next annual report, the latest
+    full year a question about the present may rightly look for.
+    """
+    if tool_name == "web_search":
+        query = _DOCUMENT_NUMBER_RE.sub(" ", str(arguments.get("query") or ""))
+        for match in _YEAR_RE.finditer(query):
+            year = int(match.group(1))
+            if year >= today.year or year in in_scope:
+                continue
+            before = query[: match.start()]
+            dated = _DATED_BEFORE_RE.search(before) and not _QUARTER_BEFORE_RE.search(before)
+            if year <= today.year - 2 or dated:
+                return year
+    elif tool_name == "get_market_data":
+        end = arguments.get("end")
+        try:
+            year = date.fromisoformat(str(end)).year if end else None
+        except ValueError:
+            return None
+        if year is not None and year < today.year and year not in in_scope:
+            return year
+    return None

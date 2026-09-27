@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
+from fastapi import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.agent.attachments import MAX_IMAGES_PER_TURN
@@ -25,6 +26,10 @@ from src.agent.turns import MAX_USER_INPUT_BYTES
 from src.alpha.models import FLAG_REASONS
 
 from src.agent.symbols import normalize_symbol
+
+#: A BIGINT row id taken from the URL. Bounded so a number past the column's
+#: range is a 422 at the edge, not a driver overflow and a 500.
+RowId = Annotated[int, Path(ge=1, le=2**63 - 1)]
 
 
 def _symbol(value: str) -> str:
@@ -137,6 +142,34 @@ class ThreadDetailResponse(ThreadResponse):
 
 class ThreadListResponse(BaseModel):
     threads: list[ThreadResponse]
+
+
+class DeletedCountResponse(BaseModel):
+    """How many rows a delete-everything request removed."""
+
+    deleted: int
+
+
+class MemoryFactResponse(BaseModel):
+    """One note the reader asked to keep, as the Settings list draws it.
+
+    ``source_url`` is null for a note stated in conversation: the stored
+    placeholder is not a page anybody could open.
+    """
+
+    id: int
+    title: str
+    body: str
+    symbol: str | None = None
+    source_url: str | None = None
+    source_name: str
+    as_of: datetime | None = None
+    created_at: datetime
+
+
+class MemoryFactListResponse(BaseModel):
+    items: list[MemoryFactResponse]
+    total: int
 
 
 class AllowanceResponse(BaseModel):
@@ -349,7 +382,10 @@ __all__ = [
     "CreateThreadRequest",
     "CreateTurnRequest",
     "CreatedTurnResponse",
+    "DeletedCountResponse",
     "FlagMessageRequest",
+    "MemoryFactListResponse",
+    "MemoryFactResponse",
     "MessageFlagResponse",
     "MessageResponse",
     "QuestionResponse",

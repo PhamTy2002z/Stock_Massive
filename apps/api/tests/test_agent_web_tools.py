@@ -398,7 +398,7 @@ def test_the_web_tools_declare_what_their_results_may_weigh():
 
 @pytest.mark.asyncio
 async def test_every_result_carries_the_position_the_provider_returned_it_in():
-    """Five snippets with no order at all give a model nothing to prefer."""
+    """Snippets with no order at all give a model nothing to prefer."""
     raw = [
         {"title": f"R{index}", "url": f"https://s{index}.example/a", "content": "x"}
         for index in range(web.MAX_RESULTS)
@@ -409,7 +409,7 @@ async def test_every_result_carries_the_position_the_provider_returned_it_in():
 
     result = await tools.web_search(CONTEXT, {"query": "vn-index"})
 
-    assert [item["rank"] for item in result["results"]] == [1, 2, 3, 4, 5]
+    assert [item["rank"] for item in result["results"]] == list(range(1, web.MAX_RESULTS + 1))
     assert [item["url"] for item in result["results"]] == [
         f"https://s{index}.example/a" for index in range(web.MAX_RESULTS)
     ]
@@ -475,7 +475,8 @@ async def test_search_result_is_typed_as_discovery_only_even_for_a_primary_domai
 
 def long_page(needle: str) -> str:
     """A page whose answer sits far past where the old cut fell."""
-    filler = "Tin thị trường chung không liên quan. " * 900
+    sentence = "Tin thị trường chung không liên quan. "
+    filler = sentence * (web.MAX_PAGE_TEXT_CHARS // len(sentence) + 100)
     assert len(filler) > web.MAX_PAGE_TEXT_CHARS
     return filler + needle + " " + filler
 
@@ -566,7 +567,7 @@ async def test_two_questions_about_one_cached_page_get_two_different_excerpts():
     body = (
         "<html><body>"
         + "<p>Lãi suất điều hành giữ ở 4,5 phần trăm.</p>"
-        + "<p>Nội dung xen giữa. </p>" * 1_400
+        + "<p>Nội dung xen giữa. </p>" * (web.MAX_PAGE_TEXT_CHARS // 18 + 200)
         + "<p>Khối ngoại bán ròng 1.245 tỷ đồng.</p>"
         + "</body></html>"
     ).encode("utf-8")
@@ -620,8 +621,8 @@ def test_the_question_is_an_argument_the_model_fills_in_not_part_of_identity():
     assert not hasattr(ToolContext(user_id=11), "looking_for")
 
 
-def test_the_page_ceiling_is_unchanged_by_this_phase():
-    assert web.MAX_PAGE_TEXT_CHARS == 20_000
+def test_the_page_ceiling_is_the_internal_deployments():
+    assert web.MAX_PAGE_TEXT_CHARS == 60_000
 
 
 # -- the page this conversation has already read -----------------------------
@@ -1016,3 +1017,199 @@ def test_a_query_naming_a_past_year_says_what_today_is():
     assert year_note("STB giá cổ phiếu hôm nay", now) is None
     # A price or a count is not a year.
     assert year_note("STB 56500 đồng 12000 cổ phiếu", now) is None
+
+
+def test_a_recency_window_searches_the_news_index_that_honours_it(monkeypatch):
+    """Tavily ignores ``days`` and omits ``published_date`` outside ``topic: news``."""
+    sent: list[dict[str, Any]] = []
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> Mapping[str, Any]:
+            return {"results": []}
+
+    def post(url: str, *, json: dict[str, Any], timeout: float) -> Response:
+        sent.append(json)
+        return Response()
+
+    monkeypatch.setattr(web.httpx, "post", post)
+    tools = web.WebTools(settings=settings())
+
+    tools._tavily_search("chứng khoán tuần này", 7)
+    tools._tavily_search("thông tư 41/2016/TT-NHNN", None)
+
+    assert (sent[0]["topic"], sent[0]["days"]) == ("news", 7)
+    assert "topic" not in sent[1] and "days" not in sent[1]
+
+
+@pytest.mark.parametrize(
+    "address", ["64:ff9b::7f00:1", "2002:7f00:1::", "::ffff:127.0.0.1"]
+)
+def test_an_ipv6_translation_of_a_private_address_is_refused(address):
+    with pytest.raises(ValueError, match="non-public address"):
+        web.validate_public_url("http://translated.example/", resolver=resolver_for(address))
+
+
+# --- the whole-download deadline -------------------------------------------
+
+
+def _drip_server(*, declare_length: bool):
+    """A local server that sends its headers, then one byte every 50 ms forever.
+
+    No single read ever waits long enough to trip a socket timeout, which is the
+    attack the total deadline exists for.
+    """
+    import socket
+    import threading
+    import time
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    stop = threading.Event()
+
+    def serve():
+        conn, _ = listener.accept()
+        with conn:
+            conn.recv(4096)
+            head = b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+            head += b"Content-Length: 100000\r\n" if declare_length else b"Connection: close\r\n"
+            conn.sendall(head + b"\r\n")
+            try:
+                while not stop.is_set():
+                    conn.sendall(b"a")
+                    time.sleep(0.05)
+            except OSError:
+                pass
+
+    threading.Thread(target=serve, daemon=True).start()
+    return listener, stop
+
+
+@pytest.mark.parametrize("declare_length", [True, False])
+def test_a_dripping_server_is_cut_off_at_the_total_deadline(declare_length):
+    import time
+
+    listener, stop = _drip_server(declare_length=declare_length)
+    port = listener.getsockname()[1]
+    started = time.monotonic()
+    try:
+        with pytest.raises(TimeoutError, match="did not finish"):
+            web._http_download(
+                f"http://drip.test:{port}/",
+                1_000_000,
+                2.0,
+                resolver=lambda *_args, **_kwargs: [(0, 0, 0, "", ("127.0.0.1", port))],
+                total_seconds=0.5,
+                # Loopback is refused by the real check; this test is about time.
+                address_check=lambda _address: True,
+            )
+    finally:
+        stop.set()
+        listener.close()
+    # Cut at the deadline, not at the per-read timeout or never.
+    assert time.monotonic() - started < 1.5
+
+
+def test_a_download_that_finishes_in_time_is_returned_whole():
+    import socket
+    import threading
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    def serve():
+        conn, _ = listener.accept()
+        with conn:
+            conn.recv(4096)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello")
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        status, _headers, body = web._http_download(
+            f"http://ok.test:{port}/",
+            1_000,
+            2.0,
+            resolver=lambda *_args, **_kwargs: [(0, 0, 0, "", ("127.0.0.1", port))],
+            total_seconds=2.0,
+            address_check=lambda _address: True,
+        )
+    finally:
+        listener.close()
+    assert (status, body) == (200, b"hello")
+
+
+def test_one_fetch_shares_one_deadline_across_its_redirect_hops(monkeypatch):
+    """A redirect, then a dripping server: the drip gets what the hop left."""
+    import time
+
+    monkeypatch.setattr(web, "FETCH_CALL_TOTAL_SECONDS", 0.8)
+    listener, stop = _drip_server(declare_length=False)
+    port = listener.getsockname()[1]
+    budgets: list[float] = []
+
+    def download(url: str, max_bytes: int, budget: float):
+        budgets.append(budget)
+        if "drip" not in url:
+            time.sleep(0.3)
+            return 302, {"location": f"http://drip.example:{port}/"}, b""
+        return web._http_download(
+            url,
+            max_bytes,
+            min(2.0, budget),
+            resolver=lambda *_args, **_kwargs: [(0, 0, 0, "", ("127.0.0.1", port))],
+            total_seconds=budget,
+            address_check=lambda _address: True,
+        )
+
+    tools = web.WebTools(
+        settings=settings(),
+        lane=DirectLane(),
+        download=download,
+        resolver=resolver_for("93.184.216.34"),
+    )
+    started = time.monotonic()
+    try:
+        with pytest.raises(TimeoutError, match="did not finish"):
+            tools._fetch_page("https://news.example/")
+    finally:
+        stop.set()
+        listener.close()
+
+    assert time.monotonic() - started < 1.3
+    assert len(budgets) == 2
+    assert budgets[0] <= 0.8 and budgets[1] < budgets[0] - 0.25
+
+
+def test_a_redirect_loop_stops_when_the_call_deadline_is_spent(monkeypatch):
+    import time
+
+    monkeypatch.setattr(web, "FETCH_CALL_TOTAL_SECONDS", 0.3)
+    hops: list[str] = []
+
+    def slow_redirect(url: str, max_bytes: int, budget: float):
+        hops.append(url)
+        time.sleep(0.2)
+        return 302, {"location": url + "x"}, b""
+
+    tools = web.WebTools(
+        settings=settings(),
+        lane=DirectLane(),
+        download=slow_redirect,
+        resolver=resolver_for("93.184.216.34"),
+    )
+
+    with pytest.raises(TimeoutError, match="did not finish within 0.3 seconds"):
+        tools._fetch_page("https://news.example/")
+    assert len(hops) == 2
+
+
+def test_the_fetch_deadline_ends_before_the_declared_tool_timeout():
+    tools = web.WebTools(settings=settings(), lane=DirectLane())
+    fetch = next(entry for entry in tools.entries() if entry.name == "fetch_url")
+
+    assert web.FETCH_CALL_TOTAL_SECONDS < fetch.timeout_seconds

@@ -588,3 +588,45 @@ def test_an_index_is_read_in_points_and_never_scaled_like_a_price():
     assert "đóng 1.785,11 điểm" in lines[1]
     assert "thay đổi +10,02 điểm (+0,56%)" in lines[1]
     assert "đồng" not in result["excerpt"]
+
+
+def test_a_repeated_read_is_served_from_memory_and_keeps_its_fetch_time() -> None:
+    tools = tools_returning(daily(24, 25, 26, 27, 28))
+    asked: list[tuple[Any, ...]] = []
+    frame = tools._history
+    tools._history = lambda *args, **kwargs: asked.append(args) or frame(*args, **kwargs)  # type: ignore[method-assign]
+
+    first = read(tools)
+    later = ToolContext(user_id=11, now=NOW + timedelta(minutes=30))
+    second = read(tools, context=later)
+    other = read(tools, symbol="VNM", context=later)
+
+    assert len(asked) == 2  # FPT once, VNM once
+    assert second["rows"] == first["rows"]
+    # The bars were sent when the first call ran, not when the second read them.
+    assert second["retrieved_at"] == first["retrieved_at"] == NOW.isoformat()
+    assert other["retrieved_at"] == later.now.isoformat()
+
+
+def test_a_closed_day_names_itself_and_the_next_session():
+    """Measured 2026-09-27 (a Sunday): answers said "hôm nay chưa có phiên đóng cửa
+    (có thể là cuối tuần hoặc nghỉ lễ)" and could not say when the next session was.
+    The calendar is the host's; the read says it."""
+    sunday = ToolContext(user_id=11, now=datetime(2026, 9, 27, 11, 0, tzinfo=market_data.ICT))
+    frame = FakeFrame(
+        [
+            {"time": datetime(2026, 9, 24, 7, 0), "open": 70, "high": 71, "low": 69, "close": 70, "volume": 100},
+            {"time": datetime(2026, 9, 25, 7, 0), "open": 70, "high": 72, "low": 70, "close": 71, "volume": 200},
+        ]
+    )
+    line = read(tools_returning(frame), start="2026-09-20", end="2026-09-27", context=sunday)["excerpt"].splitlines()[1]
+
+    assert "hôm nay Chủ nhật 27/09/2026 thị trường nghỉ (cuối tuần)" in line
+    assert "phiên kế tiếp Thứ Hai 28/09/2026" in line
+
+
+def test_an_open_day_before_its_close_still_says_the_session_has_not_closed():
+    line = read(tools_returning(daily(27, 28)), start="2026-08-20", end="2026-09-04")["excerpt"].splitlines()[1]
+
+    assert "chưa có phiên đóng cửa" in line
+    assert "nghỉ" not in line

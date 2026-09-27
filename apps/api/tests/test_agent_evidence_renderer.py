@@ -217,3 +217,28 @@ def test_exact_excerpt_hash_cannot_disagree_with_the_quote():
 
     with pytest.raises(ValueError, match="exact excerpt"):
         replace(source, excerpt_sha256="0" * 64)
+
+
+def test_the_memo_is_rendered_in_the_claims_own_language():
+    """The model composes claims in the user's language; the memo around them
+    follows (owner decision, 2026-09-27) — read off the claims themselves,
+    since a memo has no answer of its own to read a language from first."""
+    supporting = evidence("issuer", "Net income reached VND 1.245 trillion.", source_class=SourceClass.ISSUER)
+    opposing = evidence("audit", "Adjusted net income was VND 1.100 trillion.")
+    proposed = claim(
+        supporting,
+        text="Net income reached VND 1.245 trillion.",
+        contradict=(opposing,),
+        verdict=VerificationVerdict.CONFLICTING,
+    )
+
+    report = validate_claim_ledger(ledger(supporting, opposing, claims=(proposed,)))
+    memo = render_claim_ledger(report.ledger)
+
+    assert "Sources conflict" in memo
+    assert "### Sources" in memo
+    assert "**Verification result:**" in memo
+    from src.agent.evidence.ledger import SOURCES_SECTION_HEADING
+
+    assert SOURCES_SECTION_HEADING["en"] in memo
+    assert "Nguồn mâu thuẫn" not in memo

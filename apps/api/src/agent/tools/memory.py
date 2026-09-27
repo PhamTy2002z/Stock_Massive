@@ -31,10 +31,12 @@ from datetime import date, datetime, time, timezone
 from typing import Any
 from urllib.parse import urlsplit
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from src.alpha.models import AgentKnowledge
+from src.auth.models import User
+from src.auth.schemas import UserPreferences
 from src.core.database import sync_session_factory
 
 from ..registry import (
@@ -73,6 +75,33 @@ CONVERSATION_SOURCE = "memory://conversation"
 
 SessionFactory = Callable[[], Session]
 
+#: The reason a note tool gives when the reader switched memory off. A result,
+#: not a failure: nothing went wrong, and a failure would count toward the
+#: guardrail that stops a tool which keeps breaking. The MEMORY section tells
+#: the model what to do with it.
+MEMORY_DISABLED = "memory_disabled"
+_DISABLED_MESSAGE = (
+    "The user turned memory off in Settings, so notes are neither kept nor read. "
+    "Do not call this tool again in this Turn."
+)
+
+
+def _memory_disabled(session: Session, user_id: int) -> bool:
+    """Whether this reader switched the note tools off.
+
+    Asked per call, inside the call's own transaction, rather than decided when
+    the Turn's tool surface is built. Taking the tools off the surface would be
+    the stronger form, and it needs the reader's preferences where the surface
+    is resolved — the Turn runner and the loop — which is a wider change than a
+    switch warrants. Here the gate sits on the one path every call takes, keyed
+    by the trusted ``user_id``, and reads the stored row the way ``/auth/me``
+    does, so the two cannot disagree about what the switch says.
+    """
+    stored = session.execute(
+        select(User.preferences).where(User.id == user_id)
+    ).scalar_one_or_none()
+    return not UserPreferences.from_stored(stored).memory_enabled
+
 
 class MemoryTools:
     """Read this user's transcript and keep the facts they asked to keep."""
@@ -86,7 +115,7 @@ class MemoryTools:
                 name="session_search",
                 toolset=TOOLSET,
                 description=(
-                    "Search this user's earlier messages and answers by keyword. "
+                    "Search this user's own earlier messages by keyword. "
                     "Use it when the user refers to something said before that is "
                     "not in the visible conversation, before asking them to repeat "
                     "it. It is not a source of current market data."
@@ -103,11 +132,15 @@ class MemoryTools:
                     ("query",),
                 ),
                 handler=self.session_search,
-                display_name="Tìm trong hội thoại trước",
+                display_name="Search earlier conversation",
                 summary_detail_arg="query",
-                # The user's own earlier words. Already in the trust position
-                # the conversation gives them, so wrapping them would tell the
-                # model to weigh what it was itself told a moment ago.
+                # The user's own earlier words, and only those: the search reads
+                # user-role rows alone. Already in the trust position the
+                # conversation gives them, so wrapping them would tell the
+                # model to weigh what it was itself told a moment ago. An
+                # earlier *answer* is not the user's word — it may repeat what
+                # a page said — and grounding exempts this tool's figures as
+                # the reader's own, so answers must not come back through it.
                 effect=ToolEffect.READ,
                 idempotency=ToolIdempotency.IDEMPOTENT,
                 access=ToolAccess.STORE,
@@ -155,7 +188,7 @@ class MemoryTools:
                     ("title", "body"),
                 ),
                 handler=self.remember_fact,
-                display_name="Ghi nhớ",
+                display_name="Remember",
                 summary_detail_arg="title",
                 effect=ToolEffect.WRITE,
                 idempotency=ToolIdempotency.UNKNOWN,
@@ -188,7 +221,7 @@ class MemoryTools:
                     ("query",),
                 ),
                 handler=self.recall_facts,
-                display_name="Đọc lại ghi chú",
+                display_name="Recall notes",
                 summary_detail_arg="query",
                 effect=ToolEffect.READ,
                 idempotency=ToolIdempotency.IDEMPOTENT,
@@ -214,7 +247,18 @@ class MemoryTools:
         if not query:
             raise ValueError("query must not be blank")
         limit = min(MAX_MATCHES, max(1, int(arguments.get("limit", MAX_MATCHES))))
+        owner = _owner(context)
         with self._session_factory() as session:
+            # The transcript is memory too: a reader who switched memory off
+            # is not searched across conversations either.
+            if _memory_disabled(session, owner):
+                return {
+                    "query": query,
+                    "matches": [],
+                    "count": 0,
+                    "reason": MEMORY_DISABLED,
+                    "message": _DISABLED_MESSAGE,
+                }
             rows = session.execute(
                 text(
                     """
@@ -242,6 +286,7 @@ class MemoryTools:
                     CROSS JOIN search
                     WHERE
                       thread.user_id = :user_id
+                      AND message.role = 'user'
                       AND to_tsvector(
                         'simple',
                         immutable_unaccent(coalesce(message.content->>'text', ''))
@@ -252,7 +297,7 @@ class MemoryTools:
                 ),
                 {
                     "query": query,
-                    "user_id": _owner(context),
+                    "user_id": owner,
                     "excerpt": MAX_EXCERPT_CHARS,
                     "limit": limit,
                 },
@@ -292,9 +337,16 @@ class MemoryTools:
         source_url, source_name = _source(arguments.get("source_url"))
         remembered_at = context.now or datetime.now(timezone.utc)
         as_of = _optional_instant(arguments.get("as_of"))
+        owner = _owner(context)
         with self._session_factory() as session:
+            if _memory_disabled(session, owner):
+                return {
+                    "remembered": False,
+                    "reason": MEMORY_DISABLED,
+                    "message": _DISABLED_MESSAGE,
+                }
             row = AgentKnowledge(
-                user_id=_owner(context),
+                user_id=owner,
                 title=title,
                 body=body,
                 source_url=source_url,
@@ -324,7 +376,16 @@ class MemoryTools:
         if not query:
             raise ValueError("query must not be blank")
         limit = min(MAX_FACTS, max(1, int(arguments.get("limit", MAX_FACTS))))
+        owner = _owner(context)
         with self._session_factory() as session:
+            if _memory_disabled(session, owner):
+                return {
+                    "query": query,
+                    "facts": [],
+                    "count": 0,
+                    "reason": MEMORY_DISABLED,
+                    "message": _DISABLED_MESSAGE,
+                }
             rows = session.execute(
                 text(
                     """
@@ -361,7 +422,7 @@ class MemoryTools:
                     LIMIT :limit
                     """
                 ),
-                {"query": query, "user_id": _owner(context), "limit": limit},
+                {"query": query, "user_id": owner, "limit": limit},
             ).mappings()
             facts = [
                 {
@@ -449,6 +510,7 @@ __all__ = [
     "MAX_FACTS",
     "MAX_MATCHES",
     "MAX_TITLE_CHARS",
+    "MEMORY_DISABLED",
     "MemoryTools",
     "TOOLSET",
     "register_memory_tools",

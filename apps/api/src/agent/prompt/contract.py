@@ -10,10 +10,12 @@ holds until a page asks nicely.
 Three properties are proven here rather than asserted.
 
 **Almost nothing can reach the prompt.** :func:`render` accepts a
-:class:`RuntimeContext` whose fields are a ``date`` and one optional short name,
-and :data:`_STATIC_TEXT` is built by concatenation with no formatting call
-anywhere in the module. The name is the one free-text value, and it is sanitised
-on the way in — see :meth:`RuntimeContext.__post_init__`.
+:class:`RuntimeContext` whose fields are a ``date``, a market status, and the
+reader's own name, investing style and instructions, and :data:`_STATIC_TEXT` is
+built by concatenation with no formatting call anywhere in the module. The name
+and the instructions are the free-text values; both are sanitised on the way in
+and the style is one of a fixed set of codes — see
+:meth:`RuntimeContext.__post_init__`.
 
 **The prose is the version.** :func:`contract_hash` hashes the section text
 itself, so an edit that forgets to bump :data:`PROMPT_VERSION` still changes the
@@ -28,12 +30,15 @@ include today's date.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
+from ..threat_patterns import INVISIBLE_CHARS, findings_in
 from .sections import PROMPT_VERSION, SECTIONS, PromptSection
 
 #: How much of a user-supplied name is carried into the prompt. Long enough for
@@ -62,6 +67,57 @@ def sanitise_name(raw: str) -> str | None:
     """
     cleaned = _NAME_SPACES.sub(" ", _NAME_UNSAFE.sub("", raw)).strip()
     return cleaned[:MAX_NAME_CHARS].strip() or None
+
+
+#: The investing styles a reader can pick in Settings, by the code the prompt
+#: prints. ``auth.schemas.InvestingStyle`` accepts exactly these; the CONTEXT
+#: section says in words what each one means.
+INVESTING_STYLES: tuple[str, ...] = ("long_term", "growth", "dividend", "swing", "learning")
+
+#: How much of the reader's own instructions reaches the prompt — the same cap
+#: the Settings form enforces, restated here because this is the gate that holds
+#: whatever the row happens to contain.
+MAX_INSTRUCTIONS_CHARS = 1500
+
+_INVISIBLE = re.compile(f"[{INVISIBLE_CHARS}]")
+#: Control characters, angle brackets and braces, and nothing else. Angle
+#: brackets go because every delimiter this harness wraps content in is a tag —
+#: ``untrusted_tool_result``, ``user_attachment`` — and a tag with no ``<`` cannot
+#: open or close anything. Braces go so the rendered prompt keeps holding no
+#: formatting hole anywhere, the property :func:`assert_no_formatting_hole`
+#: proves for the prose.
+_INSTRUCTIONS_UNSAFE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f<>{}]")
+
+logger = logging.getLogger(__name__)
+
+
+def sanitise_instructions(raw: str) -> str | None:
+    """The reader's own instructions, as one line, or nothing at all.
+
+    Wider than :func:`sanitise_name` because this field is prose by design, so
+    punctuation stays. What cannot stay is anything that changes the *shape* of
+    the prompt: a newline would let the value start a line of its own and pose
+    as a runtime field, and a bracket could forge a wrapper tag. Invisible
+    characters come out first, the same way ``threat_patterns.normalise`` folds
+    them, so what is scanned is what the model reads.
+
+    A match against the threat patterns drops the instructions for the Turn
+    rather than editing them. A half-cleaned injection is still an injection, and
+    the reader loses only a preference, never the answer. The finding names are
+    logged and the text is not: it is the reader's own words.
+    """
+    folded = _INVISIBLE.sub("", unicodedata.normalize("NFKC", raw))
+    cleaned = _NAME_SPACES.sub(" ", _INSTRUCTIONS_UNSAFE.sub(" ", folded)).strip()
+    cleaned = cleaned[:MAX_INSTRUCTIONS_CHARS].strip()
+    if not cleaned:
+        return None
+    findings = findings_in(cleaned)
+    if findings:
+        logger.warning(
+            "custom instructions dropped for this Turn: %s", ", ".join(findings)
+        )
+        return None
+    return cleaned
 
 
 class MarketPhase(str, Enum):
@@ -133,23 +189,52 @@ class RuntimeContext:
     is no silent state in which the prompt simply says nothing about trading.
 
     ``user_name`` is what to call the reader, when the account carries a name.
-    Optional because most do not, and sanitised because it is the one field a
-    user writes.
+    Optional because most do not, and sanitised because a user writes it.
+
+    ``investing_style`` and ``custom_instructions`` are the reader's own
+    preferences from Settings, about how an answer is presented. They are data
+    about the reader, never policy: the CONTEXT section says so to the model,
+    and this class makes sure neither can carry more than that — the style is
+    reduced to a known code or dropped, and the instructions go through
+    :func:`sanitise_instructions`.
+
+    ``memory_enabled`` is false when the reader switched memory off. It is said
+    up front so the model can tell a reader asking to be remembered that it
+    cannot, instead of learning it from a refused tool call it may never make
+    and promising to remember anyway. The memory tools still refuse on their
+    own, so the prompt is the courtesy and the handler is the guarantee.
     """
 
     today: date
     user_name: str | None = None
     market: MarketDay = field(default_factory=lambda: MarketDay(MarketPhase.UNKNOWN))
+    investing_style: str | None = None
+    custom_instructions: str | None = None
+    memory_enabled: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.today, date):
             raise TypeError("today must be a date")
         if not isinstance(self.market, MarketDay):
             raise TypeError("market must be a MarketDay")
+        if not isinstance(self.memory_enabled, bool):
+            raise TypeError("memory_enabled must be a bool")
+        for name in ("user_name", "investing_style", "custom_instructions"):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, str):
+                raise TypeError(f"{name} must be a string when present")
         if self.user_name is not None:
-            if not isinstance(self.user_name, str):
-                raise TypeError("user_name must be a string when present")
             object.__setattr__(self, "user_name", sanitise_name(self.user_name))
+        if self.investing_style not in INVESTING_STYLES:
+            # A stale or hand-edited row degrades to no style rather than
+            # printing a code the CONTEXT section never explained.
+            object.__setattr__(self, "investing_style", None)
+        if self.custom_instructions is not None:
+            object.__setattr__(
+                self,
+                "custom_instructions",
+                sanitise_instructions(self.custom_instructions),
+            )
 
 
 def assert_no_formatting_hole(sections: Sequence[PromptSection]) -> None:
@@ -210,6 +295,12 @@ def prefix() -> str:
     return _STATIC_TEXT
 
 
+#: Vietnamese weekday names, Monday first as ``date.weekday()`` counts. The date
+#: alone left the model to work out the day of the week, and on 2026-09-27 it
+#: called that Sunday "thứ Bảy" in three answers.
+WEEKDAYS = ("Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ nhật")
+
+
 def render(context: RuntimeContext) -> str:
     """The whole system prompt: the stable prefix, then the Turn's values.
 
@@ -223,7 +314,7 @@ def render(context: RuntimeContext) -> str:
     if market.holiday:
         phase = f"{phase} ({market.holiday})"
     lines = [
-        f"- today: {context.today.isoformat()}",
+        f"- today: {context.today.isoformat()} ({WEEKDAYS[context.today.weekday()]})",
         f"- market_today: {phase}",
     ]
     if market.previous_trading_day is not None:
@@ -232,6 +323,12 @@ def render(context: RuntimeContext) -> str:
         )
     if context.user_name:
         lines.append(f"- user_name: {context.user_name}")
+    if context.investing_style:
+        lines.append(f"- investing_style: {context.investing_style}")
+    if context.custom_instructions:
+        lines.append(f"- user_instructions: {context.custom_instructions}")
+    if not context.memory_enabled:
+        lines.append("- memory: off")
     return _STATIC_TEXT + "\n\n" + "\n".join(lines) + "\n"
 
 
@@ -285,6 +382,8 @@ def cache_key(
 
 
 __all__ = [
+    "INVESTING_STYLES",
+    "MAX_INSTRUCTIONS_CHARS",
     "MAX_NAME_CHARS",
     "PROMPT_HASH",
     "PROMPT_VERSION",
@@ -294,5 +393,6 @@ __all__ = [
     "contract_hash",
     "prefix",
     "render",
+    "sanitise_instructions",
     "sanitise_name",
 ]

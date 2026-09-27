@@ -98,8 +98,8 @@ def test_the_block_rung_is_reached_at_one_call_a_round():
 
 
 def test_the_halt_rung_is_reached_inside_the_external_call_budget():
-    # Two searches a round is an ordinary fan-out, not a pathological one, and
-    # twenty failures is the whole external allowance. Above the ceiling this
+    # Four searches a round is an ordinary fan-out (the round allows sixteen),
+    # and the halt rung is the whole external allowance. Above the ceiling this
     # could not happen at all: the Turn would run out of calls first. The inner
     # loop stops on the halt because the executor does — a halted Turn
     # dispatches nothing more, so a test that kept going would be counting calls
@@ -110,7 +110,7 @@ def test_the_halt_rung_is_reached_inside_the_external_call_budget():
     for round_index in range(MAX_TOOL_ROUNDS):
         if guardrails.halted:
             break
-        for slot in range(2):
+        for slot in range(4):
             if guardrails.halted:
                 break
             verdicts.append(

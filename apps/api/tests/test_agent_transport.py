@@ -502,6 +502,34 @@ class TestIdempotency:
             )
         desk.control.finish()
 
+    async def test_repeating_an_active_turn_returns_it_rather_than_a_429(
+        self, client, auth, desk
+    ):
+        """The repeat starts nothing, so the allowance the first spent is not asked."""
+        thread_id = await open_thread(client, auth)
+        turn_id = str(uuid.uuid4())
+        first = await start_turn(client, auth, thread_id, turn_id=turn_id)
+        await asyncio.wait_for(desk.control.started.wait(), 2)
+        desk.ledger.refusal = BudgetRefusal(
+            "user_turn_starts_daily",
+            "Your daily Turn allowance has been exhausted.",
+            reset_at=datetime(2026, 8, 16, tzinfo=timezone.utc),
+        )
+
+        again = await start_turn(client, auth, thread_id, turn_id=turn_id)
+        clash = await start_turn(client, auth, thread_id, turn_id=turn_id, text="HPG?")
+        fresh = await start_turn(client, auth, thread_id)
+
+        assert first.status_code == 201
+        assert again.status_code == 200, again.text
+        assert again.json()["id"] == turn_id
+        assert again.json()["created"] is False
+        assert clash.status_code == 409
+        # A new id is still admitted, and refused.
+        assert fresh.status_code == 429
+        assert len(desk.ledger.checked) == 2
+        desk.control.finish()
+
     async def test_the_same_id_with_a_different_question_is_a_conflict(
         self, client, auth, desk
     ):
@@ -831,6 +859,12 @@ class _CountingLimiter:
 
     def check_turn(self, turn_id) -> None:
         self.turns.append(str(turn_id))
+
+    async def acheck_user(self, user_id: int) -> None:
+        self.check_user(user_id)
+
+    async def acheck_turn(self, turn_id) -> None:
+        self.check_turn(turn_id)
 
 
 # -- cancel ----------------------------------------------------------------

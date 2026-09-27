@@ -38,7 +38,6 @@ the bytes were actually fetched, never with now.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import http.client
 import ipaddress
@@ -48,6 +47,8 @@ import math
 import re
 import socket
 import ssl
+import threading
+import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
@@ -59,6 +60,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import certifi
 import httpx
 
+from src.core.blocking_pool import run_blocking
 from src.core.config import Settings, get_settings
 from src.core.web_lane import URL_FRESH_SECONDS, WebLane, WebUnavailable
 
@@ -78,7 +80,7 @@ from ..evidence.source_policy import (
     extract_publication_stamp,
 )
 from ..budget import SPILL_FLOOR_CHARS
-from ..security import refuse_secret_egress
+from ..security import is_public_address, refuse_secret_egress
 from ..registry import (
     ContentTrust,
     ToolAccess,
@@ -92,14 +94,22 @@ from ..registry import (
     register,
 )
 
-MAX_RESULTS = 5
+MAX_RESULTS = 10
 MAX_REDIRECTS = 4
 FETCH_TIMEOUT_SECONDS = 8.0
+#: The whole of one download, connect to last byte. ``FETCH_TIMEOUT_SECONDS``
+#: bounds each socket operation, and a server dripping a byte every few seconds
+#: never trips it; this is what ends that download, and frees its worker.
+FETCH_TOTAL_SECONDS = 20.0
+#: One ``fetch_url`` call, every redirect hop included. Below the tool's declared
+#: 25-second bound, so the worker thread is back before the executor gives up on
+#: the call; per hop, each download gets what is left of this.
+FETCH_CALL_TOTAL_SECONDS = 22.0
 MAX_SNIPPET_CHARS = 700
 #: How much of one page the model may read. Generous compared with the previous
 #: harness, whose 3,000 characters existed because a page was a side source next
 #: to the market store; here a page is often the whole basis of an answer.
-MAX_PAGE_TEXT_CHARS = 20_000
+MAX_PAGE_TEXT_CHARS = 60_000
 
 #: What each tool declares to the result budget. Search results are already
 #: packed to five capped snippets, so their declaration is small; a page read
@@ -123,6 +133,8 @@ TOOLSET = "web"
 
 Resolver = Callable[..., Sequence[tuple[Any, ...]]]
 Search = Callable[[str, int | None], Sequence[Mapping[str, Any]]]
+#: ``(url, max_bytes, budget_seconds)``: the budget is what this one request may
+#: take in total, so a redirect loop can carry one deadline across its hops.
 Download = Callable[[str, int, float], tuple[int, Mapping[str, str], bytes]]
 Clock = Callable[[], datetime]
 #: How a page read asks whether this Thread has already read a URL.
@@ -502,10 +514,11 @@ def validate_public_url(
 ) -> str:
     """Return a normalized public HTTP(S) URL or reject it before any I/O.
 
-    ``is_global`` is the whole check and it is deliberately not a list of
-    private ranges: loopback, link-local, the cloud metadata address, carrier
-    NAT and every reserved block are all "not global", and a hand-written list
-    is a list that misses one.
+    The address check is ``security.is_public_address``: ``is_global`` first,
+    deliberately not a list of private ranges — loopback, link-local, the cloud
+    metadata address, carrier NAT and every reserved block are all "not
+    global", and a hand-written list is a list that misses one — then the IPv6
+    translation blocks ``is_global`` wrongly lets through.
     """
     parsed = urlsplit(url.strip())
     if parsed.scheme.lower() not in {"http", "https"}:
@@ -517,7 +530,7 @@ def validate_public_url(
     if any(host == item or host.endswith(f".{item}") for item in denied):
         raise ValueError("the URL host is denied by configuration")
     for address in _resolved_addresses(host, resolver):
-        if not address.is_global:
+        if not is_public_address(address):
             raise ValueError(f"the URL resolves to a non-public address ({address})")
     netloc = host
     if ":" in host:
@@ -530,6 +543,11 @@ def validate_public_url(
 class _PinnedHTTPConnection(http.client.HTTPConnection):
     """Connect to a validated address while preserving the original Host header."""
 
+    #: The socket as connected, kept after ``close()`` drops ``sock``: a
+    #: ``Connection: close`` response closes the connection and reads on through
+    #: the response, so this is what the deadline watchdog has to shut down.
+    watched_sock: socket.socket | None = None
+
     def __init__(self, host: str, address: str, port: int, timeout: float) -> None:
         super().__init__(host, port=port, timeout=timeout)
         self._address = address
@@ -538,10 +556,13 @@ class _PinnedHTTPConnection(http.client.HTTPConnection):
         self.sock = self._create_connection(
             (self._address, self.port), self.timeout, self.source_address
         )
+        self.watched_sock = self.sock
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     """Pin TCP to a public IP and still verify TLS against the URL hostname."""
+
+    watched_sock: socket.socket | None = None
 
     def __init__(self, host: str, address: str, port: int, timeout: float) -> None:
         super().__init__(
@@ -557,6 +578,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
             (self._address, self.port), self.timeout, self.source_address
         )
         self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
+        self.watched_sock = self.sock
 
 
 def capped_body(response: Any, headers: Mapping[str, str], max_bytes: int) -> bytes:
@@ -587,36 +609,97 @@ def _http_download(
     timeout: float,
     *,
     resolver: Resolver = socket.getaddrinfo,
+    total_seconds: float = FETCH_TOTAL_SECONDS,
+    address_check: Callable[[Any], bool] = is_public_address,
 ) -> tuple[int, Mapping[str, str], bytes]:
-    """Download through a DNS-pinned socket so validation cannot be rebound."""
+    """Download through a DNS-pinned socket so validation cannot be rebound.
+
+    ``timeout`` bounds each socket operation; ``total_seconds`` bounds the whole
+    download across every address tried. A watchdog shuts the socket down when
+    the total runs out, which is the only way to interrupt a blocking read from
+    outside it. A body cut short that way can look like a clean end of stream,
+    so the deadline is checked again after the read: a truncated page is never
+    returned as a complete one.
+    """
     parsed = urlsplit(url)
     assert parsed.hostname is not None
     addresses = _resolved_addresses(parsed.hostname, resolver)
-    if any(not address.is_global for address in addresses):
+    if any(not address_check(address) for address in addresses):
         raise ValueError("the URL changed to a non-public address during connection")
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     target = parsed.path or "/"
     if parsed.query:
         target = f"{target}?{parsed.query}"
+    deadline = time.monotonic() + total_seconds
     last_error: OSError | None = None
     for address in addresses:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
         connection_type = (
             _PinnedHTTPSConnection if parsed.scheme == "https" else _PinnedHTTPConnection
         )
-        connection = connection_type(parsed.hostname, str(address), port, timeout)
+        connection = connection_type(
+            parsed.hostname, str(address), port, min(timeout, remaining)
+        )
+        expired = threading.Event()
+        watchdog = threading.Timer(remaining, _cut_off, (connection, expired))
+        watchdog.daemon = True
+        watchdog.start()
         try:
             connection.request(
                 "GET", target, headers={"User-Agent": "Stock-Massive-Agent/1.0"}
             )
             response = connection.getresponse()
             headers = {key.lower(): value for key, value in response.getheaders()}
-            return response.status, headers, capped_body(response, headers, max_bytes)
-        except OSError as exc:
+            body = capped_body(response, headers, max_bytes)
+            if expired.is_set():
+                raise _total_timeout(total_seconds)
+            return response.status, headers, body
+        except (OSError, http.client.HTTPException) as exc:
+            # A read the watchdog interrupted surfaces as whatever the socket
+            # said (reset, EOF, an incomplete chunk); it is the deadline.
+            if expired.is_set():
+                raise _total_timeout(total_seconds) from exc
+            if not isinstance(exc, OSError):
+                raise
             last_error = exc
         finally:
+            watchdog.cancel()
             connection.close()
-    assert last_error is not None
+    if last_error is None:
+        raise _total_timeout(total_seconds)
     raise last_error
+
+
+def _total_timeout(seconds: float) -> TimeoutError:
+    return TimeoutError(f"the URL did not finish within {seconds:g} seconds")
+
+
+def _budgeted_download(
+    url: str, max_bytes: int, budget: float
+) -> tuple[int, Mapping[str, str], bytes]:
+    """``_http_download`` held to ``budget`` seconds in total (the ``Download`` contract)."""
+    return _http_download(
+        url, max_bytes, min(FETCH_TIMEOUT_SECONDS, budget), total_seconds=budget
+    )
+
+
+def _cut_off(
+    connection: _PinnedHTTPConnection | _PinnedHTTPSConnection, expired: threading.Event
+) -> None:
+    """Watchdog: end a download past its total deadline by shutting its socket."""
+    expired.set()
+    sock = connection.watched_sock
+    if sock is None:
+        # Still connecting, which its own per-operation timeout bounds.
+        return
+    try:
+        # The plain socket's shutdown even for TLS: ``SSLSocket.shutdown`` also
+        # drops the SSL object the reading thread is still inside.
+        socket.socket.shutdown(sock, socket.SHUT_RDWR)
+    except OSError:
+        pass
 
 
 def _age_seconds(retrieved_at: str, now: datetime) -> float | None:
@@ -665,7 +748,7 @@ class WebTools:
         settings: Settings | None = None,
         lane: WebLane | None = None,
         search: Search | None = None,
-        download: Download = _http_download,
+        download: Download = _budgeted_download,
         resolver: Resolver = socket.getaddrinfo,
         now: Clock | None = None,
         records: PageRecords | None = None,
@@ -722,13 +805,17 @@ class WebTools:
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 3650,
-                            "description": "Only results published this recently.",
+                            "description": (
+                                "Only news published this many days back. Set it "
+                                "for anything about the present; leave it out for "
+                                "laws, filings and reference pages."
+                            ),
                         },
                     },
                     ("query",),
                 ),
                 handler=self.web_search,
-                display_name="Tìm trên web",
+                display_name="Search the web",
                 summary_detail_arg="query",
                 # Stated rather than left to the default, because this is the
                 # tool the default exists for: what comes back is a stranger's
@@ -799,7 +886,7 @@ class WebTools:
                     ("url",),
                 ),
                 handler=self.fetch_url,
-                display_name="Đọc trang",
+                display_name="Read the page",
                 summary_detail_arg="url",
                 effect=ToolEffect.READ,
                 idempotency=ToolIdempotency.IDEMPOTENT,
@@ -826,7 +913,7 @@ class WebTools:
     async def web_search(
         self, context: ToolContext, arguments: Mapping[str, Any]
     ) -> Mapping[str, Any]:
-        found = await asyncio.to_thread(self._web_search, dict(arguments), context.as_of)
+        found = await run_blocking(self._web_search, dict(arguments), context.as_of)
         note = year_note(str(arguments.get("query") or ""), context.now or datetime.now(timezone.utc))
         return {**found, "year_note": note} if note else found
 
@@ -880,7 +967,7 @@ class WebTools:
         refuse_secret_egress(url, label="URL")
         looking_for = str(arguments.get("looking_for") or "").strip()
         recorded = await self._recorded_page(context.thread_id, url)
-        page = await asyncio.to_thread(self._fetch_url, url, looking_for, recorded)
+        page = await run_blocking(self._fetch_url, url, looking_for, recorded)
         if _outside_as_of(page, context.as_of):
             # One call, one result, on this path too: the model is told the page
             # exists and why it may not read it, so it looks for an earlier
@@ -1098,6 +1185,7 @@ class WebTools:
 
     def _fetch_page(self, initial: str) -> Mapping[str, Any]:
         current = initial
+        deadline = time.monotonic() + FETCH_CALL_TOTAL_SECONDS
         for redirect_count in range(MAX_REDIRECTS + 1):
             # Re-validated on every hop: a redirect is a new URL chosen by the
             # server, so the first validation says nothing about this one.
@@ -1105,6 +1193,11 @@ class WebTools:
             current = validate_public_url(
                 current, denylist=self._denylist(), resolver=self._resolver
             )
+            # One deadline for the whole redirect chain: every hop gets what
+            # the earlier ones left, not a fresh allowance of its own.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise _total_timeout(FETCH_CALL_TOTAL_SECONDS)
             # The wire cap is the PDF one because the content type is not
             # known until the answer arrives; HTML is held to its own cap below.
             status, headers, body = self._download(
@@ -1113,7 +1206,7 @@ class WebTools:
                     self._settings.web_fetch_max_bytes,
                     self._settings.web_fetch_pdf_max_bytes,
                 ),
-                FETCH_TIMEOUT_SECONDS,
+                remaining,
             )
             if status in {301, 302, 303, 307, 308}:
                 location = headers.get("location") or headers.get("Location")
@@ -1223,6 +1316,13 @@ class WebTools:
             "include_raw_content": False,
         }
         if recency_days is not None:
+            # Tavily honours ``days`` only on the news index, and only that index
+            # returns ``published_date``. On the default one the window was
+            # silently ignored: measured 2026-09-27, "… tuần này" with days=7
+            # returned five undated section pages, and on ``news`` five articles
+            # from that week, four of them dated. Without a window the general
+            # index stays, for laws, filings and reference pages.
+            payload["topic"] = "news"
             payload["days"] = recency_days
         response = httpx.post(
             "https://api.tavily.com/search",
@@ -1283,6 +1383,8 @@ def register_web_tools(**kwargs: Any) -> tuple[ToolEntry, ...]:
 
 __all__ = [
     "FETCH_TIMEOUT_SECONDS",
+    "FETCH_CALL_TOTAL_SECONDS",
+    "FETCH_TOTAL_SECONDS",
     "MAX_PAGE_TEXT_CHARS",
     "PASSAGE_GAP",
     "select_passages",

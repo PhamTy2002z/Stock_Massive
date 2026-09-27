@@ -6,6 +6,7 @@ import asyncio
 import dataclasses
 import json
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -64,7 +65,7 @@ class Surface:
         self.entries[name] = registry.ToolEntry(
             name=name,
             toolset="stub",
-            schema=registry.object_schema({"value": {"type": "string"}}),
+            schema=registry.object_schema({"value": {"type": "string"}, "query": {"type": "string"}}),
             handler=handler if is_async else blocking,
             description=f"stub {name}",
             display_name=f"Stub {name}",
@@ -1008,3 +1009,44 @@ def test_a_null_optional_argument_is_the_omission_strict_mode_spells_it_as():
         validate_arguments({"symbol": None, "start": None}, schema)
     with pytest.raises(ArgumentSchemaError):
         validate_arguments({"symbol": "STB", "start": 5}, schema)
+
+
+@pytest.mark.asyncio
+async def test_a_search_in_an_unnamed_past_year_is_refused_once_then_runs():
+    """kiro-glm-5 searched last September's week on 27/09/2026; a note did not stop it."""
+    surface = Surface()
+    surface.add("web_search")
+    context = registry.ToolContext(
+        user_id=7,
+        now=datetime(2026, 9, 27, 5, 0, tzinfo=timezone.utc),
+        question_years=frozenset({2026}),
+    )
+    tools = executor.ToolExecutor(
+        context=context,
+        lookup=surface.entries.get,
+        availability=lambda name: name in surface.entries,
+    )
+    stale = {"query": "chứng khoán tuần 21-25 tháng 9 2025"}
+
+    first = (await tools.run([call("web_search", arguments=stale)])).results[0]
+    assert (first.error, first.dispatched) == (executor.BLOCKED_CALL, False)
+    assert "27/09/2026" in first.guidance and "2025" in first.guidance
+    assert surface.order == []
+
+    # Current-year query runs; the model insisting on the old year runs too.
+    current = (await tools.run([call("web_search", "c2", {"query": "chứng khoán tuần 21-25 tháng 9 2026"})])).results[0]
+    again = (await tools.run([call("web_search", "c3", stale)])).results[0]
+    assert current.ok and again.ok
+    assert surface.order == ["web_search", "web_search"]
+
+
+@pytest.mark.asyncio
+async def test_a_context_without_a_question_never_refuses_for_a_year():
+    surface = Surface()
+    surface.add("web_search")
+
+    outcome = await surface.executor().run(
+        [call("web_search", arguments={"query": "giá STB ngày 26/9/2025"})]
+    )
+
+    assert outcome.results[0].ok

@@ -56,6 +56,9 @@ from . import vnstock_provider
 from .market_data import FETCH_TIMEOUT_SECONDS, ICT, INTERNAL_PROFILE, is_index
 from .vnstock_provider import MarketDataError, import_vnstock
 
+#: How long a reported-ratio read is reused.
+STATEMENT_TTL_SECONDS = 12 * 3600.0
+
 logger = logging.getLogger(__name__)
 
 TOOLSET = "market_data"
@@ -190,8 +193,11 @@ class KbsFinancials:
     source = "kbs"
     not_carried = NOT_IN_KBS
 
-    def __init__(self, *, max_wait: float = vnstock_provider.MAX_WAIT_SECONDS) -> None:
+    def __init__(
+        self, *, max_wait: float = vnstock_provider.MAX_WAIT_SECONDS, keep_free: int = 0
+    ) -> None:
         self._max_wait = max_wait
+        self._keep_free = keep_free
 
     def ratios(self, symbol: str, *, quarterly: bool, periods: int) -> Statement:
         import_vnstock()
@@ -211,7 +217,9 @@ class KbsFinancials:
                 page_size=KBS_PAGE_SIZE,
             )
 
-        raw = vnstock_provider.call(read, symbol=symbol, max_wait=self._max_wait)
+        raw = vnstock_provider.call(
+            read, symbol=symbol, max_wait=self._max_wait, keep_free=self._keep_free
+        )
         if not isinstance(raw, Mapping):
             raise MarketDataError("no_data", f"the provider returned no statements for {symbol}")
         paired, dropped = pair_periods(raw, quarterly=quarterly)
@@ -305,10 +313,14 @@ class VciFinancials:
     source = "vci"
     not_carried: tuple[str, ...] = ()
 
-    def __init__(self, *, max_wait: float = vnstock_provider.MAX_WAIT_SECONDS) -> None:
+    def __init__(
+        self, *, max_wait: float = vnstock_provider.MAX_WAIT_SECONDS, keep_free: int = 0
+    ) -> None:
         # How long a read may wait for the provider's quota. The screener passes
-        # 0: it fills what room allows and names the tickers it left out.
+        # 0: it fills what room allows and names the tickers it left out, and
+        # ``keep_free`` stops that fill short of the window's last requests.
         self._max_wait = max_wait
+        self._keep_free = keep_free
 
     def ratios(self, symbol: str, *, quarterly: bool, periods: int) -> Statement:
         import_vnstock()
@@ -322,7 +334,9 @@ class VciFinancials:
             return frame.to_dict(orient="records")
 
         # Two requests: Vietcap opens a session before it answers.
-        records = vnstock_provider.call(read, symbol=symbol, weight=2, max_wait=self._max_wait)
+        records = vnstock_provider.call(
+            read, symbol=symbol, weight=2, max_wait=self._max_wait, keep_free=self._keep_free
+        )
         paired, dropped = pair_vci(records, quarterly=quarterly)
         encoded = json.dumps(records, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
         return Statement(
@@ -441,7 +455,7 @@ class FinancialsTools:
                     ("symbol",),
                 ),
                 handler=self.get_financial_ratios,
-                display_name="Đọc chỉ số tài chính",
+                display_name="Read financial ratios",
                 summarise=_summarise,
                 effect=ToolEffect.READ,
                 idempotency=ToolIdempotency.IDEMPOTENT,
@@ -474,19 +488,37 @@ class FinancialsTools:
             raise MarketDataError(
                 "provider_unavailable", "financial statements are not enabled on this deployment"
             )
+        now = (context.now or datetime.now(tz=ICT)).astimezone(ICT)
         statements: list[Statement] = []
+        fetched: list[datetime] = []
         failed: list[str] = []
+        errors: list[MarketDataError] = []
         for provider in self._providers:
             try:
-                statement = provider.ratios(symbol, quarterly=quarterly, periods=periods)
-            except MarketDataError:
+                # Reported quarters change a few times a year, so a repeat within
+                # half a day is answered from memory.
+                statement, fetched_at = vnstock_provider.cached(
+                    ("ratios", provider.source, symbol, quarterly, periods),
+                    STATEMENT_TTL_SECONDS,
+                    lambda provider=provider: provider.ratios(symbol, quarterly=quarterly, periods=periods),
+                    now=now,
+                )
+            except MarketDataError as exc:
                 failed.append(provider.publisher)
+                errors.append(exc)
                 continue
             if statement.periods:
                 statements.append(statement)
+                fetched.append(fetched_at)
         if not statements:
+            # Every source refused: say why rather than that the ticker has no
+            # periods — a quota refusal read as "no data" is a ticker the model
+            # stops asking about, when a moment later it would answer.
+            if len(errors) == len(self._providers):
+                raise next(
+                    (e for e in errors if e.code != "no_data"), errors[0]
+                )
             raise MarketDataError("no_data", f"no unambiguous periods for {symbol}")
-        now = (context.now or datetime.now(tz=ICT)).astimezone(ICT)
         latest = max((statement.periods[0] for statement in statements), key=lambda p: p.ended)
         missing = missing_latest(statements)
         excerpt = "\n".join(
@@ -505,7 +537,8 @@ class FinancialsTools:
             "evidence_kind": "store_figure",
             "title": f"{symbol} · chỉ số tài chính · {latest.label}",
             "as_of": datetime.combine(latest.ended, datetime.min.time(), tzinfo=ICT).isoformat(),
-            "retrieved_at": now.isoformat(),
+            # The oldest of the reads this answer rests on, cached or not.
+            "retrieved_at": min(fetched).astimezone(ICT).isoformat(),
             "content_sha256": digest,
             "statements": [
                 {
@@ -543,8 +576,8 @@ class FinancialsTools:
 
 def _summarise(arguments: Mapping[str, Any]) -> str:
     symbol = str(arguments.get("symbol") or "?").strip().upper()
-    period = "năm" if str(arguments.get("period") or "") == "year" else "quý"
-    return f"Đọc chỉ số tài chính {symbol} · theo {period}"
+    period = "year" if str(arguments.get("period") or "") == "year" else "quarter"
+    return f"Read financial ratios {symbol} · by {period}"
 
 
 def register_financials_tools(*, settings: Settings | None = None) -> tuple[ToolEntry, ...]:

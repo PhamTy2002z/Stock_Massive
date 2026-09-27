@@ -100,6 +100,18 @@ def previous_trading_day(today: date) -> date | None:
     return None
 
 
+def next_trading_day(today: date) -> date | None:
+    """The first session strictly after ``today``, when the holiday table can speak for it."""
+    day = today
+    for _ in range(_MAX_LOOKBACK_DAYS):
+        day += timedelta(days=1)
+        if day.year not in COVERED_YEARS:
+            return None
+        if not _is_closed(day):
+            return day
+    return None
+
+
 def market_day(today: date) -> MarketDay:
     """What the harness knows about trading on ``today``.
 
@@ -123,4 +135,4 @@ def market_day(today: date) -> MarketDay:
     return MarketDay(phase=MarketPhase.OPEN)
 
 
-__all__ = ["COVERED_YEARS", "HOLIDAYS", "market_day", "previous_trading_day"]
+__all__ = ["COVERED_YEARS", "HOLIDAYS", "market_day", "next_trading_day", "previous_trading_day"]

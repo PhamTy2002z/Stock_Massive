@@ -25,7 +25,8 @@ mean guessing which Turns it replaced — so this module never writes one.
 
 **Nothing is deleted.** The turns behind a summary stay in ``agent_message``
 word for word, which is what makes ``session_search`` the recovery path for
-whatever the compression dropped. The summary message says so to the model in
+whatever the compression dropped from the user's side of them (the search reads
+user-role rows only; an earlier answer's figures are fetched again, not recalled). The summary message says so to the model in
 one line (``SUMMARY_LABEL``); no sixth tool is involved.
 """
 
@@ -382,6 +383,11 @@ class ThreadCompactor:
         self._timeout = timeout_seconds
         self._clock = clock
         self._cooling: dict[str, float] = {}
+        # Threads with a summary being written right now. Two Turns of one
+        # Thread settling close together would otherwise both plan the same
+        # span and both pay for it; the second finds this and does nothing,
+        # which is what it would have done a moment later anyway.
+        self._in_flight: set[str] = set()
 
     @property
     def model(self) -> str:
@@ -398,8 +404,9 @@ class ThreadCompactor:
         method that would be worth interrupting a reader for.
         """
         key = str(thread_id)
-        if self._cold(key):
+        if key in self._in_flight or self._cold(key):
             return None
+        self._in_flight.add(key)
         try:
             view = await self._store.read_thread(user_id, thread_id)
             if view is None:
@@ -423,7 +430,7 @@ class ThreadCompactor:
             # Every failure lands here and stops here. Whatever went wrong —
             # the route, the ceiling, the reply, the write — the conversation
             # keeps the context it already had.
-            self._cooling[key] = self._clock() + self._cooldown
+            self._cool(key)
             logger.warning(
                 "Compaction of thread %s wrote nothing (%s: %s)",
                 key,
@@ -431,6 +438,21 @@ class ThreadCompactor:
                 exc,
             )
             return None
+        finally:
+            self._in_flight.discard(key)
+
+    def _cool(self, key: str) -> None:
+        """Start a thread's cooldown, dropping every cooldown that has ended.
+
+        Pruned on write rather than only on the thread's own next read: a
+        thread that failed once and was never compacted again would otherwise
+        keep its entry for as long as the process lives. Held this way, the map
+        is bounded by the threads that failed within one cooldown.
+        """
+        now = self._clock()
+        for stale in [name for name, until in self._cooling.items() if until <= now]:
+            del self._cooling[stale]
+        self._cooling[key] = now + self._cooldown
 
     def _cold(self, key: str) -> bool:
         until = self._cooling.get(key)

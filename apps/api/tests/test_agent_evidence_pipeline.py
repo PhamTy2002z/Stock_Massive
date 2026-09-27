@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from src.agent import registry
-from src.agent.loop import AgentLoop, TurnRequest, TurnStatus
+from src.agent.loop import HARNESS_NOTE_PREFIX, AgentLoop, TurnRequest, TurnStatus
 from src.agent.lanes import DEEP
 from src.agent.messages import ANSWER, THOUGHT
 from src.agent.prompt import RuntimeContext
@@ -235,7 +235,16 @@ async def search(_context, arguments):
                 "snippet": "discovery only",
                 "source": "issuer.example",
                 "durable_evidence": False,
-            }
+            },
+            # Listed so the counter pass's read is of a URL a source gave:
+            # once a Turn has read the web, only such a URL may be fetched.
+            {
+                "url": "https://audit.example/story",
+                "title": "Audit story",
+                "snippet": "discovery only",
+                "source": "audit.example",
+                "durable_evidence": False,
+            },
         ],
         "reason": None,
     }
@@ -459,8 +468,12 @@ async def test_a_pass_that_answers_in_prose_is_asked_once_more_and_the_memo_surv
 
 
 @pytest.mark.asyncio
-async def test_a_retry_that_also_misses_the_shape_fails_the_pipeline_honestly():
-    """One retry, not a loop: the second miss is the pass's answer."""
+async def test_a_retry_that_also_misses_the_shape_answers_from_the_prose_under_the_figure_check():
+    """One retry, not a loop: the second miss is the pass's answer — checked, never verified.
+
+    kiro-glm-5 (2026-09-27) wrote the reader's answer in prose on both passes,
+    and every deep Turn used to end with nothing to read.
+    """
     client = ProseThenTypedClient(recover=False)
     publisher = Publisher()
 
@@ -470,11 +483,31 @@ async def test_a_retry_that_also_misses_the_shape_fails_the_pipeline_honestly():
 
     assert client.recovered == 1
     assert outcome.status is TurnStatus.COMPLETE
+    # The filing this Turn read prints 1.245 tỷ: cited and dated as on the light lane,
+    # with the figure check's ledger rather than an empty failed one.
+    assert "1.245 tỷ đồng [1 · 20/08/2026]" in outcome.answer
+    assert "**Nguồn số liệu**" in outcome.answer
     assert outcome.claim_ledger is not None
+    assert [claim["verdict"] for claim in outcome.claim_ledger["claims"]] == ["single_source"]
+
+
+@pytest.mark.asyncio
+async def test_a_prose_answer_stating_what_nothing_read_is_labelled_not_verified():
+    class Invented(ProseThenTypedClient):
+        async def complete(self, request, spend=None):
+            if self.step == 2:
+                self.requests.append(request)
+                self.spends.append(spend)
+                self.step += 1
+                return completion(text="Lợi nhuận đạt 9.999 tỷ đồng.")
+            return await super().complete(request, spend)
+
+    outcome = await AgentLoop(
+        client=Invented(recover=False), config=config(), lane=DEEP, publisher=Publisher(), clock=lambda: NOW
+    ).run(request())
+
+    assert "9.999 tỷ đồng [chưa kiểm chứng]" in outcome.answer
     assert outcome.claim_ledger["verifierOutcome"] != "verified"
-    assert "research_draft_schema_invalid" in json.dumps(
-        outcome.claim_ledger, ensure_ascii=False
-    )
 
 
 # -- the Signal Desk planning batch ----------------------------------------
@@ -601,7 +634,7 @@ def market_entry():
         description="stub market read",
         schema=registry.object_schema({"symbol": {"type": "string"}}),
         handler=market,
-        display_name="Đọc dữ liệu giá",
+        display_name="Read price data",
         summary_detail_arg="symbol",
         effect=registry.ToolEffect.READ,
         idempotency=registry.ToolIdempotency.IDEMPOTENT,
@@ -778,7 +811,7 @@ async def test_a_signal_desk_turn_leaves_a_chart_built_from_the_call_it_made():
         "Bar Chart",
     ]
     drawn = outcome.visual["assemblies"][0]["data"]["values"]
-    assert [row["Đóng"] for row in drawn] == [71_400, 71_900]
+    assert [row["Close"] for row in drawn] == [71_400, 71_900]
     assert outcome.visual["sourceCallIds"] == ["plan-market"]
     assert outcome.visual["evidenceIds"][0] in {
         item["evidenceId"] for item in outcome.claim_ledger["evidence"]
@@ -815,3 +848,50 @@ async def test_a_label_policy_corrects_still_earns_the_chart_it_evidenced():
 
     assert outcome.claim_ledger["claims"][0]["verdict"] == "single_source"
     assert outcome.visual is not None
+
+
+
+@pytest.mark.asyncio
+async def test_the_planning_note_travels_as_the_last_user_message():
+    """Measured 2026-09-27 on the kiro route, 2/2 each way: the same planning note
+    sent as a system message after the question got prose and no tool call; sent
+    in the user role it got the three searches and the market read it asked for."""
+    client = PipelineClient()
+
+    await AgentLoop(client=client, config=config(), lane=DEEP, clock=lambda: NOW).run(request())
+
+    last = client.requests[0].messages[-1]
+    assert last.role.value == "user"
+    assert "PLANNING PASS" in str(last.content)
+    assert str(last.content).startswith(HARNESS_NOTE_PREFIX)
+    assert [m.role.value for m in client.requests[0].messages].count("system") == 1
+
+
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        "{body}",
+        "```json\n{body}\n```",
+        # kiro-glm-5, 2026-09-27: reasoning closed on the same message, then the object.
+        "Mình sẽ tổng hợp.</think>\n{body}",
+        "Đây là bản nháp nghiên cứu:\n{body}\nHết.",
+    ],
+)
+def test_a_draft_is_read_out_of_whatever_envelope_the_route_wraps_it_in(envelope):
+    from src.agent.evidence.pipeline import parse_research_draft
+
+    body = json.dumps(
+        {"claims": [{"claim_id": "c1", "text": "HPG đóng cửa 20.650 đồng", "candidate_evidence_ids": ["e1"]}]},
+        ensure_ascii=False,
+    )
+
+    draft = parse_research_draft(envelope.replace("{body}", body))
+
+    assert [claim.claim_id for claim in draft.claims] == ["c1"]
+
+
+def test_prose_without_an_object_is_still_not_a_draft():
+    from src.agent.evidence.pipeline import parse_research_draft
+
+    with pytest.raises((ValueError, json.JSONDecodeError)):
+        parse_research_draft("Tôi chưa tìm được dữ liệu phù hợp.")

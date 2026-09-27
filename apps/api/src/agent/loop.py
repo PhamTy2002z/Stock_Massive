@@ -149,9 +149,10 @@ from .executor import (
 from .executor import ToolCall as ExecutorToolCall
 from .executor import ToolResult as ExecutorToolResult
 from .evidence import ClaimLedger, render_claim_ledger, validate_claim_ledger
+from .evidence.ledger import SOURCES_SECTION_HEADING
 from .evidence import grounding
 from .visual import build_visual
-from .evidence.source_policy import as_of_from_text
+from .evidence.source_policy import ICT, as_of_from_text, years_in_scope
 from .evidence.pipeline import (
     COUNTER_TOOL_ROUND_LIMIT,
     DRAFT_FORMAT,
@@ -176,6 +177,7 @@ from .evidence.pipeline import (
 )
 from .guardrails import TurnGuardrails, canonical_json
 from .lanes import DEEP, DEFAULT_REASON, LIGHT, LaneProfile
+from .permissions import TurnPermissionState
 from .parts import (
     ATTEMPT_CANCELLED,
     ATTEMPT_COMPLETED,
@@ -220,7 +222,7 @@ from .messages import (
     shown_result,
     summarise_call,
 )
-from .prompt import RuntimeContext, cache_key, prefix as prompt_prefix, render
+from .prompt import MarketPhase, RuntimeContext, cache_key, prefix as prompt_prefix, render
 from .domain import active_pack
 from .toolsets import CHAT_TOOLSETS, TOOLSETS
 
@@ -244,7 +246,7 @@ logger = logging.getLogger(__name__)
 # the ceiling rather than enforce it — the guardrail rungs, the attachment token
 # arithmetic, the replay harness — are describing the lane nearly every Turn
 # gets, and a test compares the two so they cannot drift.
-MAX_TOOL_ROUNDS = 10
+MAX_TOOL_ROUNDS = 25
 
 # In-process is correct because uvicorn runs a single worker.
 #
@@ -262,8 +264,10 @@ SESSION_CONCURRENCY = 3
 # with ``finish_reason`` ``length``: a truncated answer rather than a short one.
 #
 # Every lane carries this same figure, and that is a decision rather than an
-# oversight: a lane buys more *rounds of evidence*, not a longer reply.
-DEFAULT_MAX_OUTPUT_TOKENS = 4_000
+# oversight: a lane buys more *rounds of evidence*, not a longer reply. 16,000
+# since 2026-09-27: the internal route is unmetered, and a sector comparison
+# with its tables ran out at 4,000.
+DEFAULT_MAX_OUTPUT_TOKENS = 16_000
 
 # What the route calls a completion it had to cut short, and the stable reason
 # the Turn ends under when it does. Both are strings the interactive surface
@@ -368,7 +372,7 @@ TOOL_TIMEOUT_SECONDS = 30.0
 #
 # The light lane's figure. A Turn reads its own lane's deadline, and a caller may
 # still pass one explicitly — which is how a test forces the expiry it is about.
-TURN_DEADLINE_SECONDS = 1_800.0
+TURN_DEADLINE_SECONDS = 3_600.0
 
 # How many calls to tools that cost money or reach off this deployment one Turn
 # may make. A round cap alone does not bound this: one round may fan out to five
@@ -408,7 +412,7 @@ TURN_DEADLINE_SECONDS = 1_800.0
 # measurement, so a route change is a reason to run the arithmetic again rather
 # than to trust this comment. A lane that raises it is making the same claim
 # about money and owes the same measurement.
-MAX_EXTERNAL_TOOL_CALLS = 20
+MAX_EXTERNAL_TOOL_CALLS = 80
 EXTERNAL_TOOL_EXHAUSTED_MESSAGE = (
     "This turn has reached its limit on external tool calls. Answer from what has "
     "already been gathered, and say what you could not look up."
@@ -525,6 +529,14 @@ SYSTEM_NOTE_TOKENS = 160
 # for this note to point at, and spending a call to ask it to try again would be
 # the apology call this loop does not make.
 MAX_EMPTY_NUDGES = 1
+#: What opens every note the harness adds after the conversation. The notes go in
+#: the user role, not the system one: on 2026-09-27 the kiro route, given the deep
+#: planning note as a system message after the question, answered in prose with
+#: its tool call written out as text, 2 times out of 2; the same note as a user
+#: message got the batch it asked for, 2 out of 2. A system message anywhere but
+#: first is also what several OpenAI-compatible routes merge or drop. The prefix
+#: says whose words these are, so the model does not answer them as the reader's.
+HARNESS_NOTE_PREFIX = "[Ghi chú của hệ thống, không phải người dùng viết]\n"
 EMPTY_AFTER_TOOLS_NOTE = (
     "Your last message contained no answer for the reader — only the sentence "
     "introducing the tool calls. The results of those calls are above. Write the "
@@ -1081,6 +1093,11 @@ class _TurnState:
     thread_id: str | None = None
     question: str = ""
     as_of: datetime | None = None
+    #: Today has no session (weekend or holiday), from the runtime's calendar.
+    market_closed: bool = False
+    #: The deep pipeline could not get a draft, and the research pass's prose is
+    #: the answer: checked and cited like any light-lane answer.
+    answered_from_prose: bool = False
     text: str | None = None
     #: The same prose minus the thoughts: what the *reader* is shown as the
     #: reply. Held separately rather than derived by subtracting one string from
@@ -1396,6 +1413,8 @@ class AgentLoop:
             thread_id=str(request.thread_id),
             question=_asked(request.user_text),
             as_of=turn_as_of,
+            market_closed=request.runtime.market.phase
+            in (MarketPhase.CLOSED_WEEKEND, MarketPhase.CLOSED_HOLIDAY),
             cancel_event=cancel_event,
             user_text=request.user_text,
         )
@@ -1420,10 +1439,20 @@ class AgentLoop:
                 # has one, and passing *that* here would make every Turn refuse
                 # every source it could not date — which is most of the web.
                 as_of=stated_as_of,
+                question_years=years_in_scope(
+                    request.user_text, today=now.astimezone(ICT).date()
+                ),
             ),
             guardrails=TurnGuardrails(),
             trace=self._trace_writer(request, turn_budget),
             surface=surface,
+            # An upload is text the reader chose but did not write, so a Turn
+            # carrying one starts tainted; the URLs the reader pasted stay
+            # fetchable once it is.
+            permission_state=TurnPermissionState.for_turn(
+                user_text=request.user_text,
+                attachment_count=len(request.attachments),
+            ),
             # The same stop the model call races. What the executor does with it
             # is its own rule: reads in flight are given up on, and a write that
             # has started is allowed to finish.
@@ -1844,6 +1873,17 @@ class AgentLoop:
 
         assert state.as_of is not None
         if state.pipeline_stage is PipelineStage.PLANNING:
+            # What the model wrote instead, in the log: the prose is discarded
+            # before any surface sees it, so without this a refused plan leaves
+            # nothing to diagnose it by.
+            logger.warning(
+                "Turn %s planning pass answered in prose with no tool call "
+                "(model=%s finish_reason=%r): %.300r",
+                request.request_message_id,
+                completion.model,
+                completion.finish_reason,
+                completion.text or "",
+            )
             return await self._fail_deep_pipeline(
                 request, state, "planner_returned_no_search_batch"
             )
@@ -1855,6 +1895,22 @@ class AgentLoop:
                     request, state, PipelineStage.RESEARCH.value, completion.text
                 )
                 if recovered is None:
+                    logger.warning(
+                        "Turn %s research pass returned no readable draft "
+                        "(model=%s finish_reason=%r): %.300r",
+                        request.request_message_id,
+                        completion.model,
+                        completion.finish_reason,
+                        completion.text or "",
+                    )
+                    prose = (completion.text or "").rsplit("</think>", 1)[-1].strip()
+                    if prose and not state.answer:
+                        # Measured 2026-09-27 on kiro-glm-5: the research pass
+                        # wrote the reader's answer in prose, twice, and every
+                        # deep Turn ended with no answer at all. An answer the
+                        # figure check labels is worth more than an empty one.
+                        state.answered_from_prose = True
+                        self._append_text(state, prose)
                     return await self._fail_deep_pipeline(
                         request, state, "research_draft_schema_invalid"
                     )
@@ -2159,6 +2215,14 @@ class AgentLoop:
         reason: str,
     ) -> TurnOutcome:
         assert state.as_of is not None
+        if state.answered_from_prose:
+            # The figure check writes this answer's ledger, as on the light lane,
+            # and the chart inherits that ledger's gate exactly as it inherits
+            # the verifier's: only market reads a grounded figure rested on.
+            await self._check_figures(state)
+            state.visual = build_visual(
+                calls=state.calls, ledger=state.claim_ledger, as_of=state.as_of
+            )
         if state.claim_ledger is None:
             state.claim_ledger = failed_ledger(
                 as_of=state.as_of,
@@ -2179,7 +2243,11 @@ class AgentLoop:
         await self._record_trajectory(
             request,
             PipelineStage.VERIFICATION.value,
-            {"outcome": "failed", "reason": reason},
+            {
+                "outcome": "failed",
+                "reason": reason,
+                "answered_from_prose": state.answered_from_prose,
+            },
         )
         return await self._ended(state, TurnStatus.COMPLETE, None)
 
@@ -2221,7 +2289,7 @@ class AgentLoop:
     def _appended(
         self, request: TurnRequest, state: _TurnState, exhausted: bool
     ) -> tuple[tuple[Message, str, int], ...]:
-        """The system messages added after the context was constructed.
+        """The harness notes added after the context was constructed.
 
         Each one comes with the layer it is charged to and what it is charged,
         so the caller has one list to send and one list to account for. The
@@ -2239,8 +2307,9 @@ class AgentLoop:
             appended.append(
                 (
                     Message(
-                        role=Role.SYSTEM,
-                        content=rounds_exhausted_note(self._lane.max_tool_rounds),
+                        role=Role.USER,
+                        content=HARNESS_NOTE_PREFIX
+                        + rounds_exhausted_note(self._lane.max_tool_rounds),
                     ),
                     SYSTEM_DYNAMIC,
                     SYSTEM_NOTE_TOKENS,
@@ -2249,7 +2318,7 @@ class AgentLoop:
         if state.note:
             appended.append(
                 (
-                    Message(role=Role.SYSTEM, content=state.note),
+                    Message(role=Role.USER, content=HARNESS_NOTE_PREFIX + state.note),
                     SYSTEM_DYNAMIC,
                     max(SYSTEM_NOTE_TOKENS, state.note_tokens or 0),
                 )
@@ -3348,7 +3417,7 @@ class AgentLoop:
                 evidence=evidence_from_calls(state.calls),
             )
             self._append_text(state, render_claim_ledger(state.claim_ledger))
-        self._check_figures(state)
+        await self._check_figures(state)
         self._settle_orphans(state, status)
         await self._save(state, boundary=True)
         return TurnOutcome(
@@ -3378,18 +3447,49 @@ class AgentLoop:
 
     # -- the figure check ---------------------------------------------------
 
-    def _figure_report(self, state: _TurnState) -> grounding.GroundingReport:
-        """Every figure in the answer so far, decided against this Turn's calls."""
-        today = (state.as_of or self._clock()).astimezone(grounding.ICT).date()
-        sources = grounding.collect_sources(state.calls, user_text=state.user_text)
+    async def _figure_report(self, state: _TurnState) -> grounding.GroundingReport:
+        """Every figure in the answer so far, decided against this Turn's calls.
+
+        The decision is pure CPU and grows with every row the Turn read, so it
+        runs on a worker thread rather than stalling every other Turn's stream.
+        Its inputs are read here, on the loop, so the thread sees one snapshot:
+        the call records are frozen and the tuple cannot grow under it.
+        """
+        return await asyncio.to_thread(
+            self._decide_figures,
+            calls=tuple(state.calls),
+            answer=state.answer or "",
+            user_text=state.user_text,
+            as_of=state.as_of or self._clock(),
+            market_closed=state.market_closed,
+        )
+
+    def _decide_figures(
+        self,
+        *,
+        calls: Sequence[TurnToolCall],
+        answer: str,
+        user_text: str,
+        as_of: datetime,
+        market_closed: bool,
+    ) -> grounding.GroundingReport:
+        today = as_of.astimezone(grounding.ICT).date()
+        sources = grounding.collect_sources(calls, user_text=user_text)
         deep = self._lane.name == DEEP.name
+        answer = grounding.normalise(answer)
+        # The deep memo ends in its own source list, whose dates and counts are
+        # a bibliography rather than claims — in whichever language
+        # ``render_claim_ledger`` wrote that heading in.
+        skip_after = next(
+            (heading for heading in SOURCES_SECTION_HEADING.values() if heading in answer),
+            None,
+        ) if deep else None
         return grounding.check_answer(
-            grounding.normalise(state.answer or ""),
+            answer,
             sources,
             today=today,
-            # The deep memo ends in its own source list, whose dates and counts
-            # are a bibliography rather than claims.
-            skip_after="### Nguồn" if deep else None,
+            skip_after=skip_after,
+            market_closed=market_closed,
         )
 
     async def _repair_figures(
@@ -3414,7 +3514,7 @@ class AgentLoop:
         """
         if state.figure_repairs >= MAX_FIGURE_REPAIRS or not state.answer:
             return
-        report = self._figure_report(state)
+        report = await self._figure_report(state)
         if not report.unverified:
             return
         state.figure_repairs += 1
@@ -3425,7 +3525,7 @@ class AgentLoop:
         )
         state.note = grounding.repair_note(report)
         state.note_tokens = estimate_tokens(
-            Message(role=Role.SYSTEM, content=state.note)
+            Message(role=Role.USER, content=HARNESS_NOTE_PREFIX + state.note)
         )
         self._attempt(state, ATTEMPT_RUNNING)
         try:
@@ -3455,7 +3555,8 @@ class AgentLoop:
             return
         previous = state.answer
         self._replace_answer(state, rewrite)
-        if len(self._figure_report(state).unverified) > len(report.unverified):
+        rewritten = await self._figure_report(state)
+        if len(rewritten.unverified) > len(report.unverified):
             self._replace_answer(state, previous or "")
         await self._save(state)
 
@@ -3468,7 +3569,7 @@ class AgentLoop:
             state.text = answer if not state.text else f"{state.text}\n\n{answer}"
         state.answer = answer
 
-    def _check_figures(self, state: _TurnState) -> None:
+    async def _check_figures(self, state: _TurnState) -> None:
         """Label every figure in the answer and write the Turn's figure ledger.
 
         On every lane and every terminal path, because an incomplete Turn's
@@ -3480,10 +3581,14 @@ class AgentLoop:
         if state.figures_checked:
             return
         state.figures_checked = True
-        report = self._figure_report(state)
-        deep = self._lane.name == DEEP.name
+        report = await self._figure_report(state)
+        # A deep answer taken from prose has no verifier memo citing its sources.
+        deep = self._lane.name == DEEP.name and not state.answered_from_prose
         if report.figures:
             self._replace_answer(state, grounding.annotate(report, cite=not deep))
+        elif state.answer and report.answer != state.answer:
+            # No figure to label, but the draft carried labels of its own.
+            self._replace_answer(state, report.answer)
         # Only beside an answer: a ledger is anchored to the message it
         # substantiates, and a Turn that wrote no prose — or ended on a question
         # card — has no answer for figures to be checked in.
@@ -3586,6 +3691,7 @@ __all__ = [
     "SCHEMA_REJECTED",
     "SESSION_CONCURRENCY",
     "SUMMARY_LABEL",
+    "HARNESS_NOTE_PREFIX",
     "SYSTEM_NOTE_TOKENS",
     "TOOL_TIMEOUT",
     "TOOL_TIMEOUT_SECONDS",

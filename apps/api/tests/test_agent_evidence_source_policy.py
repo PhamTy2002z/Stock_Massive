@@ -21,6 +21,8 @@ from src.agent.evidence.source_policy import (
     ICT,
     as_of_from_text,
     is_temporally_admissible,
+    stale_year,
+    years_in_scope,
 )
 
 
@@ -189,3 +191,62 @@ def test_a_compact_news_id_dates_the_page_a_snippet_left_undated():
         url="https://vnexpress.net/chung-khoan-giam-them-37-diem-5109204.html"
     )
     assert plain.published_at is None
+
+
+TODAY = date(2026, 9, 27)
+
+
+def _stale_search(query: str, question: str = "") -> int | None:
+    scope = years_in_scope(question, today=TODAY)
+    return stale_year("web_search", {"query": query}, today=TODAY, in_scope=scope)
+
+
+@pytest.mark.parametrize(
+    ("query", "year"),
+    [
+        # Measured on kiro-glm-5, 2026-09-27, with today's date in the prompt.
+        ("tin chứng khoán tuần 21-25 tháng 9 2025", 2025),
+        ("mã cổ phiếu thép niêm yết HOSE HNX 2024", 2024),
+        ("giá STB ngày 26/9/2025", 2025),
+    ],
+)
+def test_a_search_in_a_year_the_question_never_named_is_stale(query, year):
+    assert _stale_search(query) == year
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        # Last year as a reporting period is the latest full year until the next report.
+        "VCB lợi nhuận năm 2025",
+        "VCB lợi nhuận quý 4/2025",
+        "HPG Q4/2025 kết quả",
+        "STB tháng 9/2026",
+        # A document number names a law, not a period.
+        "thông tư 11/2021/TT-NHNN phân loại nợ",
+    ],
+)
+def test_a_reporting_period_or_a_law_number_is_not_stale(query):
+    assert _stale_search(query) is None
+
+
+def test_a_year_the_question_named_or_reached_back_to_is_in_scope():
+    assert _stale_search("VCB lợi nhuận 2024", "so với 2024 thì sao") is None
+    assert _stale_search("giá STB tháng 9 2025", "so với cùng kỳ năm ngoái") is None
+    assert _stale_search("VCB cổ tức 2023", "cổ tức 3 năm qua") is None
+    assert _stale_search("VCB cổ tức 2022", "cổ tức 3 năm qua") == 2022
+
+
+def test_a_price_window_ending_in_an_unnamed_past_year_is_stale():
+    def end(value: str, question: str) -> int | None:
+        return stale_year(
+            "get_market_data",
+            {"symbol": "VNINDEX", "end": value},
+            today=TODAY,
+            in_scope=years_in_scope(question, today=TODAY),
+        )
+
+    assert end("2025-06-23", "Thị trường tuần vừa qua") == 2025
+    assert end("2025-12-31", "Giá HPG cuối năm 2025") is None
+    assert end("2026-09-25", "Thị trường tuần vừa qua") is None
+    assert stale_year("get_market_data", {"symbol": "HPG"}, today=TODAY, in_scope=frozenset({2026})) is None

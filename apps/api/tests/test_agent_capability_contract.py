@@ -87,19 +87,19 @@ def test_every_shipped_description_says_when_to_use_it_and_where_arguments_come_
 
 def test_shipped_schema_order_and_display_contract_are_locked():
     expected_runtime = {
-        "web_search": ("Tìm trên web", True, 8_000, "query", False),
-        "fetch_url": ("Đọc trang", True, 22_000, "url", False),
-        "session_search": ("Tìm trong hội thoại trước", True, None, "query", False),
-        "remember_fact": ("Ghi nhớ", True, None, "title", False),
-        "recall_facts": ("Đọc lại ghi chú", True, None, "query", False),
+        "web_search": ("Search the web", True, 8_000, "query", False),
+        "fetch_url": ("Read the page", True, 62_000, "url", False),
+        "session_search": ("Search earlier conversation", True, None, "query", False),
+        "remember_fact": ("Remember", True, None, "title", False),
+        "recall_facts": ("Recall notes", True, None, "query", False),
         # Blocking, because the provider client is synchronous, and it composes
         # its own rail row because no single argument says what was read.
-        "get_market_data": ("Đọc dữ liệu giá", False, 24_000, None, True),
-        "get_financial_ratios": ("Đọc chỉ số tài chính", False, 24_000, None, True),
-        "calculate": ("Tính toán", False, 4_000, None, True),
-        "get_company_events": ("Đọc sự kiện doanh nghiệp", False, 16_000, None, True),
-        "get_company_news": ("Đọc tin doanh nghiệp", False, 16_000, None, True),
-        "screen_stocks": ("Lọc cổ phiếu", False, 20_000, None, True),
+        "get_market_data": ("Read price data", False, 24_000, None, True),
+        "get_financial_ratios": ("Read financial ratios", False, 24_000, None, True),
+        "calculate": ("Calculate", False, 4_000, None, True),
+        "get_company_events": ("Read corporate events", False, 16_000, None, True),
+        "get_company_news": ("Read company news", False, 16_000, None, True),
+        "screen_stocks": ("Screen stocks", False, 20_000, None, True),
     }
     with isolated_registry():
         tools.register_all()

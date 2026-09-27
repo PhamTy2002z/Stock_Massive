@@ -360,7 +360,11 @@ MAX_QUESTION_OPTION_ID_CHARS = 64
 #: The choice that is always offered. Skipping is not cancelling: the work runs
 #: on default assumptions and prints them, which is what keeps a question card
 #: from ever being a door the reader has to open.
-DEFAULT_SKIP_LABEL = "Bỏ qua — dùng giả định mặc định"
+#:
+#: Chrome the client renders as a button label (owner decision 2026-09-27: the
+#: webapp UI is English), so this is English regardless of the answer's
+#: language.
+DEFAULT_SKIP_LABEL = "Skip — use the default assumption"
 
 #: The keys one question carries on the wire, in the order they are written.
 #:

@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from src.agent.registry import ToolContext
-from src.agent.tools.memory import CONVERSATION_SOURCE, MemoryTools
+from src.agent.tools.memory import CONVERSATION_SOURCE, MEMORY_DISABLED, MemoryTools
 from src.alpha.models import AgentKnowledge, AgentMessage, AgentThread
 from src.auth.models import User
 from src.core.database import Base
@@ -101,9 +101,39 @@ async def test_the_transcript_search_finds_this_users_own_messages(memory_world)
         ToolContext(user_id=owner_id), {"query": "lãi suất"}
     )
 
-    assert found["count"] == 2
-    assert {match["role"] for match in found["matches"]} == {"user", "assistant"}
+    # The assistant's answer also says "lãi suất", and is not returned: only the
+    # reader's own words come back through this tool.
+    assert found["count"] == 1
+    assert {match["role"] for match in found["matches"]} == {"user"}
     assert all(match["thread_title"] == "Rates" for match in found["matches"])
+
+
+@pytest.mark.asyncio
+async def test_the_transcript_search_is_off_when_memory_is(memory_world):
+    tools, _, _ = memory_world
+    with tools._session_factory() as session:
+        reader = User(
+            email=f"off-{uuid.uuid4().hex}@example.com",
+            hashed_password="x",
+            preferences={"memory_enabled": False},
+        )
+        session.add(reader)
+        session.commit()
+        thread = AgentThread(id=uuid.uuid4(), user_id=reader.id, title="Off")
+        session.add(thread)
+        session.commit()
+        session.add(
+            AgentMessage(
+                thread_id=thread.id, seq=1, role="user", content={"text": "lãi suất"}
+            )
+        )
+        session.commit()
+        reader_id = reader.id
+
+    found = await tools.session_search(ToolContext(user_id=reader_id), {"query": "lãi suất"})
+
+    assert found["matches"] == []
+    assert found["reason"] == MEMORY_DISABLED
 
 
 @pytest.mark.asyncio

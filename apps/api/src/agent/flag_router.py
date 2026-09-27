@@ -50,6 +50,7 @@ from src.agent.persistence import (
     UnflaggableMessage,
 )
 from src.agent.schemas import (
+    RowId,
     FlagMessageRequest,
     MessageFlagResponse,
     MessageHelpfulResponse,
@@ -87,7 +88,7 @@ def _helpful(record: MessageRecord) -> MessageHelpfulResponse:
 
 @router.post("/{message_id}/flag", response_model=MessageFlagResponse)
 async def flag_message(
-    message_id: int,
+    message_id: RowId,
     payload: FlagMessageRequest,
     current_user: CurrentUser,
     store: Store,
@@ -120,7 +121,7 @@ async def flag_message(
 
 @router.delete("/{message_id}/flag", response_model=MessageFlagResponse)
 async def unflag_message(
-    message_id: int,
+    message_id: RowId,
     current_user: CurrentUser,
     store: Store,
 ) -> MessageFlagResponse:
@@ -138,7 +139,7 @@ async def unflag_message(
 
 @router.post("/{message_id}/helpful", response_model=MessageHelpfulResponse)
 async def mark_message_helpful(
-    message_id: int,
+    message_id: RowId,
     current_user: CurrentUser,
     store: Store,
 ) -> MessageHelpfulResponse:
@@ -168,7 +169,7 @@ async def mark_message_helpful(
 
 @router.delete("/{message_id}/helpful", response_model=MessageHelpfulResponse)
 async def clear_message_helpful(
-    message_id: int,
+    message_id: RowId,
     current_user: CurrentUser,
     store: Store,
 ) -> MessageHelpfulResponse:

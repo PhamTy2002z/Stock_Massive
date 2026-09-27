@@ -54,6 +54,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
+from sqlalchemy import delete
 # Starlette's, not FastAPI's subclass: ``request.form()`` yields the former, and
 # an ``isinstance`` against the latter would never match.
 from starlette.datastructures import UploadFile
@@ -81,6 +82,7 @@ from src.agent.schemas import (
     CreateThreadRequest,
     CapabilitiesResponse,
     CreateTurnRequest,
+    DeletedCountResponse,
     MessageResponse,
     QuestionResponse,
     ThreadDetailResponse,
@@ -104,10 +106,12 @@ from src.agent.attachments import (
 )
 from src.auth.dependencies import CurrentUser
 from src.core.ratelimit import heavy_rate_limit
+from src.alpha.models import AgentThread
 from src.auth.models import User
+from src.auth.schemas import UserPreferences
 from src.auth.security import TokenError, decode_access_token
 from src.auth.service import get_user_by_id
-from src.core.database import async_session_factory
+from src.core.database import DbSession, async_session_factory
 
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
@@ -405,6 +409,29 @@ async def update_thread(
     return _thread(record)
 
 
+@router.delete("/threads", response_model=DeletedCountResponse)
+async def delete_all_threads(
+    current_user: CurrentUser,
+    desk: Desk,
+    session: DbSession,
+) -> DeletedCountResponse:
+    """Delete every Thread this user has, in one statement and one transaction.
+
+    The same semantics as deleting one, applied to all of them: the database
+    cascades each Thread to its messages, Turns, traces, questions and claim
+    ledger, and an attachment outlives its Turn with the link nulled. Scoped by
+    the resolved user and nothing else, so there is no shape of this request
+    that reaches another account's history. A Turn still running in one of
+    these Threads is not stopped here any more than the single delete stops
+    one; its settle finds the Thread gone.
+    """
+    desk.assert_enabled()
+    result = await session.execute(
+        delete(AgentThread).where(AgentThread.user_id == current_user.id)
+    )
+    return DeletedCountResponse(deleted=result.rowcount or 0)
+
+
 @router.delete("/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_thread(
     thread_id: uuid.UUID,
@@ -440,16 +467,23 @@ def _runtime(user: User) -> RuntimeContext:
     is the one place the two can be read together, so it is the one place they
     cannot disagree about which day is being described.
 
-    The name is the only user-supplied string that reaches the system prompt, so
-    it is the whole attack surface of this function. ``RuntimeContext`` sanitises
-    it; passing it through untouched here is deliberate, because a second
-    cleaning rule beside that one is how the two come to disagree.
+    The name, the investing style and the reader's own instructions are the
+    user-supplied values that reach the system prompt, so they are the whole
+    attack surface of this function. ``RuntimeContext`` sanitises them; passing
+    them through untouched here is deliberate, because a second cleaning rule
+    beside that one is how the two come to disagree. The nickname set in
+    Settings wins over the account name, because it is what the reader asked
+    to be called.
     """
     today = datetime.now(VN_TZ).date()
+    preferences = UserPreferences.from_stored(user.preferences)
     return RuntimeContext(
         today=today,
-        user_name=user.full_name,
+        user_name=preferences.nickname or user.full_name,
         market=market_day(today),
+        investing_style=preferences.investing_style,
+        custom_instructions=preferences.custom_instructions,
+        memory_enabled=preferences.memory_enabled,
     )
 
 
@@ -531,8 +565,13 @@ async def create_turn(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     # Asked once the Thread is known to exist and to be this user's, so a
-    # stranger's id cannot be used to probe how busy the service is.
-    await desk.admission.admit(user_id=current_user.id)
+    # stranger's id cannot be used to probe how busy the service is. A repeat
+    # of a Turn id this user already holds is not admitted: the create below
+    # answers it from its idempotency check (the same Turn, or the reuse
+    # conflict) and starts nothing, so a client retrying its own active Turn
+    # must not be refused for the slot that very Turn occupies.
+    if await desk.store.read_turn(current_user.id, payload.turn_id) is None:
+        await desk.admission.admit(user_id=current_user.id)
 
     # Read and checked before the lifecycle is entered: a refusal here must not
     # leave a Turn behind, and the reader is told which file to drop while they
@@ -610,7 +649,7 @@ async def turn_events(
     is no window in which an event is in neither half — registration and
     snapshot capture are atomic with respect to the publisher.
     """
-    desk.subscriptions.check_user(user_id)
+    await desk.subscriptions.acheck_user(user_id)
     subscriber = await desk.turns.subscribe(user_id, turn_id)
     if subscriber is None:
         raise HTTPException(status_code=404, detail="Turn not found")
@@ -619,7 +658,7 @@ async def turn_events(
         # only be spent by the Turn's owner. The subscriber is already
         # registered with the publisher by this point, so a refusal closes it
         # instead of leaving a queue nobody drains.
-        desk.subscriptions.check_turn(turn_id)
+        await desk.subscriptions.acheck_turn(turn_id)
     except Exception:
         subscriber.close()
         raise
@@ -656,7 +695,7 @@ async def read_turn(
 
 
 @router.get("/capabilities", response_model=CapabilitiesResponse)
-async def read_capabilities(desk: Desk) -> CapabilitiesResponse:
+async def read_capabilities(current_user: CurrentUser, desk: Desk) -> CapabilitiesResponse:
     """What the configured route can do.
 
     Read off the same ``LLMRoute`` the loop reads, so the answer the surface
@@ -740,20 +779,31 @@ async def upload_attachment(
     cost is that the multipart shape is documented in this docstring rather than
     in the schema.
 
-    ``Content-Length`` is a claim, so it is used only to refuse early and is
-    never believed afterwards: the real length is measured on the bytes.
+    ``Content-Length`` is required: without it (a chunked body) the form parser
+    would spool however much arrives before any ceiling is asked, so the request
+    is refused with 411 instead. With it, the server reads no more than it
+    declares, which makes the early 413 a real bound on the body. It is still
+    a claim about the whole body rather than the file, so the file itself is
+    read no further than one byte past its ceiling and measured on its bytes.
     """
     declared_length = request.headers.get("content-length")
-    if declared_length and declared_length.isdigit():
-        # Multipart framing costs a little over the file itself, hence the slack.
-        if int(declared_length) > MAX_ATTACHMENT_BYTES + 8 * 1024:
-            raise HTTPException(
-                status_code=413,
-                detail={
-                    "reason": "file_too_large",
-                    "message": f"past the {MAX_ATTACHMENT_BYTES} byte ceiling",
-                },
-            )
+    if not (declared_length and declared_length.isdigit()):
+        raise HTTPException(
+            status_code=status.HTTP_411_LENGTH_REQUIRED,
+            detail={
+                "reason": "length_required",
+                "message": "an upload must declare its Content-Length",
+            },
+        )
+    # Multipart framing costs a little over the file itself, hence the slack.
+    if int(declared_length) > MAX_ATTACHMENT_BYTES + 8 * 1024:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "reason": "file_too_large",
+                "message": f"past the {MAX_ATTACHMENT_BYTES} byte ceiling",
+            },
+        )
 
     form = await request.form()
     upload = form.get("file")
@@ -763,7 +813,8 @@ async def upload_attachment(
             detail={"reason": "missing_file", "message": "expected a `file` part"},
         )
 
-    data = await upload.read()
+    # One byte past the ceiling is enough for the store to refuse it as too large.
+    data = await upload.read(MAX_ATTACHMENT_BYTES + 1)
     try:
         stored = await store.store(
             current_user.id,

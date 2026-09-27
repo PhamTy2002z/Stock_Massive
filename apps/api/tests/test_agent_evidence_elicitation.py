@@ -17,6 +17,8 @@ import pytest
 
 from src.agent import registry
 from src.agent.evidence.pipeline import (
+    question_prose,
+    unasked_assumption,
     ELICITATION_ALREADY_ASKED,
     ELICITATION_ASKED,
     ELICITATION_MALFORMED,
@@ -363,3 +365,19 @@ async def test_a_question_with_no_completed_read_behind_it_does_not_end_the_turn
     assert any(
         ELICITATION_NO_SCOUT in item for item in outcome.claim_ledger["assumptions"]
     )
+
+
+def test_the_prose_beside_a_card_follows_the_language_the_question_is_written_in():
+    assert question_prose(candidate()).endswith(
+        "Nếu bỏ qua, phân tích chạy với giả định: Khung thời gian trung hạn 6–12 tháng."
+    )
+    english = candidate(
+        unknown="The holding horizon is not on the web.",
+        default_assumption="A medium-term horizon of 6–12 months.",
+    )
+    assert question_prose(english).endswith(
+        "If skipped, the analysis runs on this assumption: A medium-term horizon of 6–12 months."
+    )
+    assert unasked_assumption(english, "no_scout").startswith("Did not ask the user again (no_scout)")
+    assert unasked_assumption(candidate(), "no_scout").startswith("Không hỏi lại người dùng (no_scout)")
+

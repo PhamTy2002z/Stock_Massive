@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import delete, select
@@ -53,6 +53,7 @@ from src.alpha.models import (
     AgentToolCall,
     AgentTurn,
     LlmCallUsage,
+    TURN_STALE_SECONDS,
 )
 from src.auth.models import User
 from src.core.database import Base, get_sync_db, sync_engine, sync_session_factory
@@ -960,7 +961,7 @@ async def test_the_sweep_freezes_no_call_anybody_is_still_waiting_on(owner):
                 request_message_id=message.id,
                 status=TURN_RUNNING,
                 last_event_seq=4,
-                started_at=datetime.now(timezone.utc),
+                started_at=_before_a_restart(),
                 draft_content={
                     "text": "Một phần đã kịp nói.",
                     "tool_calls": [
@@ -989,6 +990,15 @@ async def test_the_sweep_freezes_no_call_anybody_is_still_waiting_on(owner):
 
 
 # --- the startup sweep -----------------------------------------------------
+
+
+def _before_a_restart() -> datetime:
+    """When a Turn a restart left behind was admitted: past the staleness window.
+
+    The sweep only takes Turns whose process stopped beating, and a row that
+    never beat is judged by ``started_at``.
+    """
+    return datetime.now(timezone.utc) - timedelta(seconds=TURN_STALE_SECONDS + 60)
 
 
 def _checkpoint_of_an_older_build() -> dict:
@@ -1024,7 +1034,7 @@ async def test_a_turn_left_running_by_a_restart_is_frozen_incomplete(owner):
                 request_message_id=message.id,
                 status=TURN_RUNNING,
                 last_event_seq=4,
-                started_at=datetime.now(timezone.utc),
+                started_at=_before_a_restart(),
                 draft_content=_checkpoint_of_an_older_build(),
             )
         )
@@ -1082,7 +1092,7 @@ async def test_a_swept_turn_keeps_the_trail_its_checkpoint_held(owner):
                 request_message_id=message.id,
                 status=TURN_RUNNING,
                 last_event_seq=6,
-                started_at=datetime.now(timezone.utc),
+                started_at=_before_a_restart(),
                 draft_content={**_checkpoint_of_an_older_build(), "progress": trail},
             )
         )
@@ -1108,7 +1118,7 @@ async def test_a_frozen_turn_that_never_spoke_writes_no_message(owner):
                 thread_id=thread_id,
                 request_message_id=message.id,
                 status="admitted",
-                started_at=datetime.now(timezone.utc),
+                started_at=_before_a_restart(),
             )
         )
 
@@ -1337,7 +1347,11 @@ async def test_a_completed_turn_emits_its_terminal_event_after_the_transaction(o
     # refetching the Thread on that event cannot race the row.
     assistant = [row for row in messages_of(thread_id) if row.role == "assistant"][0]
     assert seen[-1].data["message_id"] == assistant.id
-    assert [event.seq for event in seen] == list(range(1, len(seen) + 1))
+    # The subscriber may attach after the first events (tools run on their own
+    # pool, so the Turn can get ahead of the subscribe read); its snapshot
+    # restates those, and the stream continues from the next seq with no gap.
+    first = subscriber.through_seq + 1
+    assert [event.seq for event in seen] == list(range(first, first + len(seen)))
 
 
 @pytest.mark.asyncio

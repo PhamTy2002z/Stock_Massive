@@ -53,6 +53,8 @@ from zoneinfo import ZoneInfo
 
 from src.core.config import Settings, get_settings
 
+from ..domain.trading_calendar import market_day, next_trading_day
+from ..prompt.contract import WEEKDAYS, MarketPhase
 from ..registry import (
     ContentTrust,
     ToolAccess,
@@ -171,6 +173,10 @@ MAX_RESULT_CHARS = 24_000
 #: How long one provider round trip may take before the call is given up on.
 FETCH_TIMEOUT_SECONDS = 20.0
 
+#: How long a provider read is reused: a range still forming, and a closed one.
+LIVE_READ_TTL_SECONDS = 60.0
+CLOSED_READ_TTL_SECONDS = 6 * 3600.0
+
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 #: The columns the provider contract promises. A payload missing one of them is
@@ -287,14 +293,26 @@ def _render_rows(
     return "\n".join(lines)
 
 
+def _no_session_today(today: date) -> str:
+    """Why today has no closed bar, from the host's calendar rather than the model's guess.
+
+    Measured 2026-09-27, a Sunday: told only "chưa có phiên đóng cửa", answers hedged
+    "có thể là cuối tuần hoặc nghỉ lễ" and could not name the next session.
+    """
+    day = market_day(today)
+    stamp = f"{WEEKDAYS[today.weekday()]} {today.strftime('%d/%m/%Y')}"
+    if day.phase is MarketPhase.OPEN or day.phase is MarketPhase.UNKNOWN:
+        return f"hôm nay {stamp} chưa có phiên đóng cửa"
+    why = "cuối tuần" if day.phase is MarketPhase.CLOSED_WEEKEND else f"nghỉ lễ {day.holiday}"
+    upcoming = next_trading_day(today)
+    after = f"; phiên kế tiếp {WEEKDAYS[upcoming.weekday()]} {upcoming.strftime('%d/%m/%Y')}" if upcoming else ""
+    return f"hôm nay {stamp} thị trường nghỉ ({why}){after}"
+
+
 def _latest_line(latest: Mapping[str, Any], *, index: bool = False) -> str:
     session = date.fromisoformat(str(latest["session_date"]))
     today = date.fromisoformat(str(latest["today"]))
-    when = (
-        "phiên hôm nay"
-        if latest.get("session_today")
-        else f"hôm nay {today.strftime('%d/%m/%Y')} chưa có phiên đóng cửa"
-    )
+    when = "phiên hôm nay" if latest.get("session_today") else _no_session_today(today)
     line = (
         f"{latest['bar_closed_at']}: PHIÊN GẦN NHẤT {session.strftime('%d/%m/%Y')} "
         f"({when}) · đóng {_level(latest['close'], index)}"
@@ -417,7 +435,7 @@ class MarketDataTools:
                     ("symbol", "interval"),
                 ),
                 handler=self.get_market_data,
-                display_name="Đọc dữ liệu giá",
+                display_name="Read price data",
                 summarise=_summarise,
                 effect=ToolEffect.READ,
                 idempotency=ToolIdempotency.IDEMPOTENT,
@@ -451,7 +469,15 @@ class MarketDataTools:
         # model never sees a row it could not have known about.
         horizon = min(now, context.as_of.astimezone(ICT)) if context.as_of else now
 
-        frame = self._history(symbol, start, end, interval)
+        # A range reaching today holds a bar still forming, so a repeat within a
+        # minute is served from memory and a later one asks again; a closed range
+        # only changes when the provider re-adjusts history.
+        frame, fetched_at = vnstock_provider.cached(
+            ("history", SOURCE, symbol, start, end, interval),
+            LIVE_READ_TTL_SECONDS if end >= now.date() else CLOSED_READ_TTL_SECONDS,
+            lambda: self._history(symbol, start, end, interval),
+            now=now,
+        )
         raw_payload, records = _raw(frame)
         rows, dropped_future = _normalise(
             records, start, end, interval, horizon, index=is_index(symbol)
@@ -501,7 +527,8 @@ class MarketDataTools:
             "rows_dropped_after_horizon": dropped_future,
             "truncated": truncated,
             "quality": "partial" if (truncated or dropped_future) else "ok",
-            "retrieved_at": now.isoformat(),
+            # When the provider sent these bars: earlier than now on a cached read.
+            "retrieved_at": fetched_at.astimezone(ICT).isoformat(),
             # The hash is of what the provider sent, before the scale was
             # applied and before anything was filtered. One hash rather than
             # two: the normalised rows follow from the raw ones deterministically,
@@ -724,8 +751,8 @@ def _summarise(arguments: Mapping[str, Any]) -> str:
     start = str(arguments.get("start") or "").strip()
     end = str(arguments.get("end") or "").strip()
     if not start and not end:
-        return f"Đọc dữ liệu giá {symbol} · {interval} · 3 tháng gần nhất"
-    return f"Đọc dữ liệu giá {symbol} · {interval} · {start or '…'} → {end or 'hôm nay'}"
+        return f"Read price data {symbol} · {interval} · last 3 months"
+    return f"Read price data {symbol} · {interval} · {start or '…'} → {end or 'today'}"
 
 
 def _warm() -> None:

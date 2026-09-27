@@ -119,11 +119,11 @@ def test_one_market_call_becomes_candles_over_volume():
     # The columns are the words the axes are titled with, so they are written
     # the way the pane is read rather than the way the payload is keyed.
     assert part["assemblies"][0]["chart_spec"]["encodings"] == {
-        "x": "Phiên",
-        "open": "Mở",
-        "high": "Cao",
-        "low": "Thấp",
-        "close": "Đóng",
+        "x": "Session",
+        "open": "Open",
+        "high": "High",
+        "low": "Low",
+        "close": "Close",
     }
 
 
@@ -138,14 +138,14 @@ def test_every_value_in_the_assembly_is_a_field_of_the_call():
     for drawn, source in zip(rows, result["rows"], strict=True):
         # The label is the bar close written short, and nothing else on the row
         # is derived at all.
-        assert drawn["Phiên"] == datetime.fromisoformat(
+        assert drawn["Session"] == datetime.fromisoformat(
             source["bar_closed_at"]
         ).strftime("%d/%m")
-        assert drawn["Mở"] == source["open"]
-        assert drawn["Đóng"] == source["close"]
-        assert drawn["Khối lượng"] == source["volume"]
+        assert drawn["Open"] == source["open"]
+        assert drawn["Close"] == source["close"]
+        assert drawn["Volume"] == source["volume"]
     # Whole dong, as the tool normalised them — not the provider's thousands.
-    assert rows[0]["Mở"] == 72_500
+    assert rows[0]["Open"] == 72_500
 
 
 def test_the_part_names_the_call_and_the_evidence_behind_it():
@@ -170,10 +170,10 @@ def test_two_comparable_calls_become_one_multi_series_line():
     assert len(part["assemblies"]) == 1
     spec = part["assemblies"][0]["chart_spec"]
     assert spec["chartType"] == visual.LINE
-    assert spec["encodings"] == {"x": "Phiên", "y": "Đóng", "color": "Mã"}
+    assert spec["encodings"] == {"x": "Session", "y": "Close", "color": "Symbol"}
     # Series order follows call order, so the same two calls always draw the
     # same chart.
-    assert [row["Mã"] for row in part["assemblies"][0]["data"]["values"]][0] == "FPT"
+    assert [row["Symbol"] for row in part["assemblies"][0]["data"]["values"]][0] == "FPT"
     assert part["sourceCallIds"] == ["call_1", "call_2"]
 
 
@@ -341,3 +341,25 @@ def test_the_assembled_part_is_json_and_stays_that_way():
 
     assert json.loads(json.dumps(part)) == part
     assert again == part
+
+
+def test_the_figure_checks_ledger_admits_the_feed_its_figure_rested_on():
+    """A deep answer taken from prose carries the figure check's ledger, which
+    names a market read by its feed rather than by this module's evidence id."""
+    from src.agent.evidence import grounding
+
+    calls = [call(market_read())]
+    report = grounding.check_answer(
+        "Phiên 26/08/2026 FPT đóng cửa 71.400 đồng.",
+        grounding.collect_sources(calls),
+        today=NOW.date(),
+    )
+    ledger = grounding.to_ledger(report, as_of=NOW)
+    invented = grounding.to_ledger(
+        grounding.check_answer("FPT đạt 1.234.567 đồng.", grounding.collect_sources(calls), today=NOW.date()),
+        as_of=NOW,
+    )
+
+    assert [f.status.value for f in report.figures] == ["grounded"]
+    assert build(calls, ledger) is not None
+    assert build(calls, invented) is None

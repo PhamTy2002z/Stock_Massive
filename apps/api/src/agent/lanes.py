@@ -97,6 +97,11 @@ RECOVERY_CALLS = 2
 
 #: The lane almost every Turn gets, and the plain agent loop's.
 #:
+#: Opened up on 2026-09-27 for the internal deployment, which runs on an
+#: unmetered subscription route: 25 rounds, 80 external calls, 16k output per
+#: call and an hour. Input is funded at every call's full context
+#: (``TURN_CONTEXT_PER_CALL``), output at every call's full ceiling.
+#:
 #: Raised to the deep lane's ceilings on 2026-09-26, when Chat became the whole
 #: product: four rounds and seven external calls ran out before a stock question
 #: had its evidence. What still separates the lanes is the deep pipeline, not
@@ -104,12 +109,12 @@ RECOVERY_CALLS = 2
 #: lane test pins them equal.
 LIGHT = LaneProfile(
     name="light",
-    max_tool_rounds=10,
-    deadline_seconds=1_800.0,
-    max_external_calls=20,
-    max_output_tokens=4_000,
-    owner_output_total=52_000,
-    owner_input_total=300_000,
+    max_tool_rounds=25,
+    deadline_seconds=3_600.0,
+    max_external_calls=80,
+    max_output_tokens=16_000,
+    owner_output_total=448_000,
+    owner_input_total=3_360_000,
 )
 
 #: The lane for a question that asks for verification rather than a fact.
@@ -126,12 +131,12 @@ LIGHT = LaneProfile(
 #: envelope.
 DEEP = LaneProfile(
     name="deep",
-    max_tool_rounds=10,
-    deadline_seconds=1_800.0,
-    max_external_calls=20,
-    max_output_tokens=4_000,
-    owner_output_total=52_000,
-    owner_input_total=300_000,
+    max_tool_rounds=25,
+    deadline_seconds=3_600.0,
+    max_external_calls=80,
+    max_output_tokens=16_000,
+    owner_output_total=448_000,
+    owner_input_total=3_360_000,
 )
 
 #: The words that make a question a verification request rather than a lookup.

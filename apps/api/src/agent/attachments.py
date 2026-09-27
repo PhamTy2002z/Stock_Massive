@@ -27,12 +27,15 @@ stores what it was given.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 import struct
+import unicodedata
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -124,8 +127,8 @@ def assert_within_turn_budget(attachments: Sequence["StoredAttachment"]) -> None
         return
     raise AttachmentRefused(
         "turn_image_budget",
-        f"những ảnh này cần khoảng {total} token, vượt trần {IMAGE_TOKENS_PER_CALL} "
-        "token ảnh của một lượt — hãy bỏ một ảnh rồi gửi lại",
+        f"these images need about {total} tokens, past the {IMAGE_TOKENS_PER_CALL} "
+        "image-token ceiling for one Turn — drop one image and send again",
     )
 
 
@@ -250,7 +253,7 @@ def sanitise_filename(raw: str) -> str:
     read as one is one fewer thing to get right later.
     """
     name = _UNSAFE.sub("_", (raw or "").replace("\\", "/").rsplit("/", 1)[-1]).strip()
-    name = name.lstrip(".") or "tep-dinh-kem"
+    name = name.lstrip(".") or "attachment"
     return name[:255]
 
 
@@ -266,17 +269,29 @@ def serving_headers(media_type: str, filename: str) -> tuple[str, dict[str, str]
     attachment.
 
     Images keep their type, because that type was read from their bytes.
+
+    A header is Latin-1, so a Vietnamese name cannot ride in ``filename``: that
+    carries an ASCII fold of it, and the real name travels in RFC 6266's
+    ``filename*``, which every current browser prefers.
     """
     safe = sanitise_filename(filename)
-    if media_type in IMAGE_TYPES:
-        return media_type, {
-            "Content-Disposition": f'inline; filename="{safe}"',
-            "X-Content-Type-Options": "nosniff",
-        }
-    return "application/octet-stream", {
-        "Content-Disposition": f'attachment; filename="{safe}"',
+    disposition = "inline" if media_type in IMAGE_TYPES else "attachment"
+    headers = {
+        "Content-Disposition": (
+            f'{disposition}; filename="{_ascii_filename(safe)}"; '
+            f"filename*=UTF-8''{quote(safe, safe='')}"
+        ),
         "X-Content-Type-Options": "nosniff",
     }
+    if media_type in IMAGE_TYPES:
+        return media_type, headers
+    return "application/octet-stream", headers
+
+
+def _ascii_filename(safe: str) -> str:
+    """The sanitised name with accents folded off and anything else non-ASCII dropped."""
+    folded = unicodedata.normalize("NFKD", safe).encode("ascii", "ignore").decode("ascii")
+    return sanitise_filename(folded)
 
 
 # --- the store -------------------------------------------------------------
@@ -377,7 +392,22 @@ class AttachmentStore:
 
     @staticmethod
     def _check_quota(session: Session, user_id: int, incoming: int) -> None:
-        """Rows and bytes, asked before the insert rather than after."""
+        """Rows and bytes, asked before the insert rather than after.
+
+        Under a per-user transaction lock, so two uploads racing each other
+        cannot both count the quota as unspent; the lock is held until the
+        caller's insert commits. Keyed the way ``core.llm.admission`` keys its
+        scopes, and skipped the same way off Postgres.
+        """
+        if session.get_bind().dialect.name == "postgresql":
+            key = int.from_bytes(
+                hashlib.blake2b(
+                    f"attachment-quota-user:{user_id}".encode(), digest_size=8
+                ).digest(),
+                byteorder="big",
+                signed=True,
+            )
+            session.execute(select(func.pg_advisory_xact_lock(key)))
         rows, held = session.execute(
             select(
                 func.count(AgentAttachment.id),

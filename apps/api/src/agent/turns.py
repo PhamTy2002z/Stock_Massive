@@ -34,9 +34,12 @@ terminal *event* is published after that transaction, because the client refetch
 the Thread when it arrives and must not race the row it is refetching.
 
 **A restart never resumes.**  A Turn left ``running`` by a crash or a deploy is
-frozen ``incomplete`` on startup.  Resuming would mean replaying a
-non-deterministic model against a store that has moved; an honest ``incomplete``
-with everything that ran attached is worth more than a plausible continuation.
+frozen ``incomplete`` once its heartbeat goes stale — by the startup sweep, or by
+the reaper every process runs (``run_turn_housekeeping``).  Resuming would mean
+replaying a non-deterministic model against a store that has moved; an honest
+``incomplete`` with everything that ran attached is worth more than a plausible
+continuation.  Only a *stale* Turn is frozen, because the table is shared: a
+second process running its own Turns keeps them beating and keeps them.
 """
 
 from __future__ import annotations
@@ -45,12 +48,14 @@ import asyncio
 import logging
 import time
 import uuid
+import weakref
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any
 
 from src.alpha.refusals import AlphaRefusal
+from src.core.llm.admission import BudgetRefusal
 from src.core.llm.config import LLMConfig
 
 from .events import (
@@ -69,6 +74,7 @@ from .loop import (
     TurnAttachment,
     TurnDraft,
     TurnOutcome,
+    TurnRefused,
     TurnRequest,
     TurnStatus,
 )
@@ -77,7 +83,13 @@ from .loop import (
 # the store, and the store cannot import this module — needed the same function.
 from .messages import CALL_INTERRUPTED, settle_orphan_calls
 from .parts import QUESTION_PENDING, QuestionPart
-from .persistence import TURN_COMPLETE, TURN_INCOMPLETE, AgentPersistence, TurnRecord
+from .persistence import (
+    INTERRUPTED_REASON,
+    TURN_COMPLETE,
+    TURN_INCOMPLETE,
+    AgentPersistence,
+    TurnRecord,
+)
 from .prompt import RuntimeContext
 from .toolsets import CHAT_TOOLSETS, SIGNAL_DESK_TOOLSETS
 
@@ -119,7 +131,7 @@ MAX_USER_INPUT_BYTES = 8 * 1024
 # accepts one explicitly, and a number given here overrides every lane — which is
 # what an operator capping a deployment, or a test forcing an expiry, is asking
 # for.
-TURN_DEADLINE_SECONDS = 1_800.0
+TURN_DEADLINE_SECONDS = 3_600.0
 
 # How long active Turns get to reach a safe checkpoint. The container's stop
 # grace must exceed it, or the checkpoint this buys never lands.
@@ -129,6 +141,31 @@ GRACEFUL_SHUTDOWN_SECONDS = 30.0
 # a cancellation or a terminal state that waited out a rate limiter is a
 # checkpoint that did not happen.
 CHECKPOINT_INTERVAL_SECONDS = 1.0
+
+# How often this process says its Turns are still running, and how often it
+# settles the ones another process stopped saying that about. The heartbeat is a
+# fraction of ``TURN_STALE_SECONDS`` (90s, ``alpha.models``) so that a slow beat
+# or two never makes a live Turn look dead.
+HEARTBEAT_INTERVAL_SECONDS = 20.0
+REAPER_INTERVAL_SECONDS = 60.0
+
+# How many times the terminal transaction is tried before the Turn is given up
+# on, and the first pause between tries (doubled each time). Bounded because a
+# subscriber is waiting for the terminal event the whole time.
+FINISH_ATTEMPTS = 3
+FINISH_BACKOFF_SECONDS = 0.5
+
+# Every live service in this process, so the one housekeeping task can beat for
+# all of their Turns without anything handing it a service. Weak, because a
+# service nobody holds any more has no Turns worth beating for.
+_SERVICES: "weakref.WeakSet[TurnService]" = weakref.WeakSet()
+
+
+def running_turn_ids() -> tuple[uuid.UUID, ...]:
+    """Every Turn executing in this process, across every live service."""
+    return tuple(
+        turn_id for service in tuple(_SERVICES) for turn_id in service.running_ids
+    )
 
 
 class UserInputTooLarge(AlphaRefusal):
@@ -394,6 +431,8 @@ def frozen_message(record: TurnRecord) -> Mapping[str, Any] | None:
 
 async def sweep_interrupted_turns(
     store: AgentPersistence | None = None,
+    *,
+    exclude: Sequence[uuid.UUID] = (),
 ) -> tuple[TurnRecord, ...]:
     """Freeze whatever a crash or a deploy left active. Resume nothing.
 
@@ -401,15 +440,54 @@ async def sweep_interrupted_turns(
     application's startup runs it before anything has composed a service, and
     it genuinely needs nothing else: the message it writes comes out of the
     checkpoint, and no execution is started.
+
+    Only Turns whose heartbeat is stale are taken, so this is also the reaper:
+    the same call, every ``REAPER_INTERVAL_SECONDS``, with ``exclude`` naming
+    what this process is running itself.
     """
     frozen = await (store or AgentPersistence()).freeze_interrupted_turns(
-        frozen_message
+        frozen_message, exclude=exclude
     )
     if frozen:
         logger.warning(
-            "Froze %d Turn(s) left active by a restart; v1 resumes none", len(frozen)
+            "Froze %d Turn(s) whose process stopped beating; v1 resumes none",
+            len(frozen),
         )
     return frozen
+
+
+async def run_turn_housekeeping(
+    store: AgentPersistence | None = None,
+    *,
+    heartbeat_seconds: float = HEARTBEAT_INTERVAL_SECONDS,
+    reap_seconds: float = REAPER_INTERVAL_SECONDS,
+) -> None:
+    """Beat for this process's Turns, and reap the ones nobody beats for. Until cancelled.
+
+    One task for the whole process, started by the application's lifespan. The
+    heartbeat is one ``UPDATE`` for every running Turn; the reap is the startup
+    sweep again, sparing this process's own Turns. Either failing is logged and
+    tried again next tick: a missed beat costs nothing until several are missed,
+    and a missed reap is the next reap's work.
+    """
+    persistence = store or AgentPersistence()
+    since_reap = 0.0
+    while True:
+        await asyncio.sleep(heartbeat_seconds)
+        try:
+            await persistence.heartbeat_turns(running_turn_ids())
+        except Exception as exc:  # noqa: BLE001 - the next beat is the retry
+            logger.warning(
+                "Turn heartbeat failed: %s: %s", type(exc).__name__, exc
+            )
+        since_reap += heartbeat_seconds
+        if since_reap < reap_seconds:
+            continue
+        since_reap = 0.0
+        try:
+            await sweep_interrupted_turns(persistence, exclude=running_turn_ids())
+        except Exception as exc:  # noqa: BLE001 - the next reap is the retry
+            logger.warning("Turn reaper failed: %s: %s", type(exc).__name__, exc)
 
 
 @dataclass(frozen=True)
@@ -449,6 +527,7 @@ class TurnService:
         self._deadline = deadline_seconds
         self._shutdown_seconds = shutdown_seconds
         self._running: dict[uuid.UUID, RunningTurn] = {}
+        _SERVICES.add(self)
 
     # -- creation ---------------------------------------------------------
 
@@ -481,18 +560,26 @@ class TurnService:
         """
         assert_input_within_cap(user_text)
         attached = tuple(attachments)
-        creation = await self._store.create_turn(
-            user_id=user_id,
-            thread_id=thread_id,
-            turn_id=turn_id,
-            user_text=user_text,
-            symbols=symbols,
-            retry_of_turn_id=retry_of_turn_id,
-            mode=mode,
-            # Metadata only, and derived in one place: the committed request
-            # records what was attached, and the payload goes to the run.
-            attachments=[entry.as_metadata() for entry in attached],
-        )
+        try:
+            creation = await self._store.create_turn(
+                user_id=user_id,
+                thread_id=thread_id,
+                turn_id=turn_id,
+                user_text=user_text,
+                symbols=symbols,
+                retry_of_turn_id=retry_of_turn_id,
+                mode=mode,
+                # Metadata only, and derived in one place: the committed request
+                # records what was attached, and the payload goes to the run.
+                attachments=[entry.as_metadata() for entry in attached],
+                # Re-counted under admission's locks inside the create
+                # transaction, so two creates racing past preflight cannot
+                # both commit a Turn one of them is then refused for.
+                ceilings=self._config.ceilings,
+            )
+        except BudgetRefusal as refusal:
+            # The refusal preflight would have given, with the same status.
+            raise TurnRefused.of(refusal) from refusal
         if not creation.created:
             # Idempotent: the same id and payload returns the Turn that already
             # exists, and starts nothing at all.
@@ -553,37 +640,43 @@ class TurnService:
 
     # -- execution --------------------------------------------------------
 
-    async def _execute(self, running: RunningTurn, request: TurnRequest) -> TurnRecord:
+    async def _execute(
+        self, running: RunningTurn, request: TurnRequest
+    ) -> TurnRecord | None:
         turn_id = running.turn.id
         publisher = running.publisher
         def remember(draft: TurnDraft) -> dict[str, Any]:
             running.draft = draft
             return draft_content(draft)
 
-        checkpointer = Checkpointer(self._store, turn_id, publisher, payload=remember)
-        agent = self._loop_factory(
-            checkpoint=checkpointer,
-            publisher=publisher,
-            lane=running.lane,
-            toolsets=(
-                SIGNAL_DESK_TOOLSETS
-                if running.mode == SIGNAL_DESK_MODE
-                else CHAT_TOOLSETS
-            ),
-        )
         # The loop's own between-round check fires at this same number and fires
         # first, which is what leaves a partial answer attached; this one is the
         # backstop for a Turn stuck somewhere the loop does not get to look.
         deadline = (
             running.lane.deadline_seconds if self._deadline is None else self._deadline
         )
-        await self._store.mark_turn_running(turn_id)
         # The registry entry outlives execution by exactly one step: the Turn
         # stays reachable until its terminal event has been published, so a
         # subscriber attaching in that window is told how the Turn ended rather
         # than being handed a snapshot that still says ``running``.
         try:
             try:
+                checkpointer = Checkpointer(
+                    self._store, turn_id, publisher, payload=remember
+                )
+                agent = self._loop_factory(
+                    checkpoint=checkpointer,
+                    publisher=publisher,
+                    lane=running.lane,
+                    toolsets=(
+                        SIGNAL_DESK_TOOLSETS
+                        if running.mode == SIGNAL_DESK_MODE
+                        else CHAT_TOOLSETS
+                    ),
+                )
+                # Inside the ``try`` with the run: a store that fails here is a
+                # Turn that failed, and it still has to end and say so.
+                await self._store.mark_turn_running(turn_id)
                 outcome = await asyncio.wait_for(
                     agent.run(
                         request,
@@ -593,25 +686,79 @@ class TurnService:
                     deadline,
                 )
             except TimeoutError:
-                return await self._finish_bare(running, "incomplete", "turn_deadline")
+                return await self._settle(
+                    running,
+                    lambda: self._finish_bare(running, "incomplete", "turn_deadline"),
+                )
             except asyncio.CancelledError:
                 # The shutdown path cancels the task after asking politely; the
-                # checkpoint it already reached is what survives, and the
-                # startup sweep writes the terminal state.
+                # checkpoint it already reached is what survives, and shutdown
+                # (or, failing that, the reaper) writes the terminal state.
                 raise
             except AlphaRefusal as refusal:
-                return await self._finish_bare(running, "incomplete", refusal.reason)
+                reason = refusal.reason
+                return await self._settle(
+                    running,
+                    lambda: self._finish_bare(running, "incomplete", reason),
+                )
             except Exception:
                 logger.exception("Turn %s failed", turn_id)
-                return await self._finish_bare(running, "incomplete", "turn_failed")
-            record = await self._finish(running, outcome)
+                return await self._settle(
+                    running,
+                    lambda: self._finish_bare(running, "incomplete", "turn_failed"),
+                )
+            record = await self._settle(running, lambda: self._finish(running, outcome))
             # After the terminal transaction and the terminal event, never
             # before: the reader has their answer by this line, and what follows
-            # is housekeeping for the Turn after this one.
-            self._compact_later(request, outcome)
+            # is housekeeping for the Turn after this one. A Turn whose terminal
+            # state could not be written has nothing settled to summarise.
+            if record is not None:
+                self._compact_later(request, outcome)
             return record
         finally:
             self._running.pop(turn_id, None)
+
+    async def _settle(
+        self,
+        running: RunningTurn,
+        finish: Callable[[], Awaitable[TurnRecord]],
+    ) -> TurnRecord | None:
+        """Write the terminal state, retrying; close the stream whatever happens.
+
+        ``finish`` is safe to call again: the terminal transaction is first
+        terminal wins, so a try that committed and then failed on the way out
+        returns the row it already wrote.
+
+        If every try fails the row is left active, and that is recoverable where
+        the alternative is not. Removing the Turn from the registry stops its
+        heartbeat, so admission stops counting it once it goes stale and the
+        reaper freezes it from its checkpoint. What cannot wait for either is
+        the reader: the terminal event is published here, with the reason the
+        reaper will write, so every stream closes now instead of beating forever
+        on a Turn nothing is running.
+        """
+        for attempt in range(1, FINISH_ATTEMPTS + 1):
+            try:
+                return await finish()
+            except Exception:
+                logger.exception(
+                    "Turn %s could not write its terminal state (try %d of %d)",
+                    running.turn.id,
+                    attempt,
+                    FINISH_ATTEMPTS,
+                )
+                if attempt < FINISH_ATTEMPTS:
+                    await asyncio.sleep(FINISH_BACKOFF_SECONDS * 2 ** (attempt - 1))
+        draft = running.draft
+        running.publisher.terminal(
+            terminal_event_for(
+                TURN_INCOMPLETE, has_content=bool(draft is not None and draft.text)
+            ),
+            status=TURN_INCOMPLETE,
+            terminal_reason=INTERRUPTED_REASON,
+            data={"message_id": None},
+        )
+        return None
 
     def _compact_later(self, request: TurnRequest, outcome: TurnOutcome) -> None:
         """Hand the settled Thread to the compaction specialist, and wait for nothing.
@@ -889,7 +1036,7 @@ class TurnService:
 
     async def sweep(self) -> tuple[TurnRecord, ...]:
         """Freeze whatever a crash or a deploy left active. Resume nothing."""
-        return await sweep_interrupted_turns(self._store)
+        return await sweep_interrupted_turns(self._store, exclude=self.running_ids)
 
     async def shutdown(self, timeout: float | None = None) -> None:
         """Give every active Turn its window to reach a safe checkpoint."""
@@ -914,13 +1061,27 @@ class TurnService:
             task.cancel()
         if pending:
             await asyncio.wait(pending, timeout=1.0)
-            # Whatever did not reach a terminal state inside the window is left
-            # for the startup sweep, which is the same honest ``incomplete`` a
-            # crash would have produced.
             logger.warning(
                 "%d Turn(s) did not reach a checkpoint within %.0fs of shutdown",
                 len(pending),
                 deadline,
+            )
+        # Whatever did not reach a terminal state is frozen now, the same honest
+        # ``incomplete`` a crash would have produced. Now rather than left to
+        # the next process: its sweep only takes stale Turns, and these were
+        # beating a moment ago, so a quick restart would leave them active —
+        # and their users locked out — until they aged into the reaper's reach.
+        # Every Turn this process held, because a row that already settled is
+        # not active and is not touched.
+        try:
+            await self._store.freeze_interrupted_turns(
+                frozen_message, only=[entry.turn.id for entry in running]
+            )
+        except Exception as exc:  # noqa: BLE001 - the reaper is the fallback
+            logger.warning(
+                "Could not freeze Turns at shutdown; the reaper will: %s: %s",
+                type(exc).__name__,
+                exc,
             )
 
     @property
@@ -966,8 +1127,11 @@ def _terminal_state(running: RunningTurn, outcome: TurnOutcome) -> tuple[str, st
 
 __all__ = [
     "CHECKPOINT_INTERVAL_SECONDS",
+    "FINISH_ATTEMPTS",
     "GRACEFUL_SHUTDOWN_SECONDS",
+    "HEARTBEAT_INTERVAL_SECONDS",
     "MAX_USER_INPUT_BYTES",
+    "REAPER_INTERVAL_SECONDS",
     "TURN_DEADLINE_SECONDS",
     "Checkpointer",
     "RunningTurn",
@@ -978,6 +1142,8 @@ __all__ = [
     "assistant_message",
     "draft_content",
     "frozen_message",
+    "run_turn_housekeeping",
+    "running_turn_ids",
     "settle_orphan_calls",
     "sweep_interrupted_turns",
 ]

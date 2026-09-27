@@ -147,6 +147,30 @@ def fold(text: str) -> str:
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 
 
+#: How large a diacritic letter's share of an answer's letters must be before
+#: the answer counts as Vietnamese. A share, not a presence: an English answer
+#: that quotes one Vietnamese name ("Sài Gòn Thương Tín") carries a handful of
+#: marked letters among hundreds of plain ones and must not flip on that alone.
+VIETNAMESE_LETTER_SHARE = 0.08
+
+
+def answer_language(text: str) -> str:
+    """"vi" or "en", read off how much of ``text`` is written with Vietnamese
+    diacritics rather than decided by any one word.
+
+    A letter counts as Vietnamese when :func:`fold` changes it — a vowel with a
+    tone or quality mark, or ``đ``/``Đ`` — which is exactly the set of letters
+    English prose never has a reason to use. Text with no letters at all (a
+    bare number, an empty string) has no evidence either way and is called
+    Vietnamese, the language every answer defaulted to before this existed.
+    """
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return "vi"
+    vietnamese = sum(1 for ch in letters if fold(ch) != ch.lower())
+    return "vi" if vietnamese / len(letters) >= VIETNAMESE_LETTER_SHARE else "en"
+
+
 def parse(token: str) -> Decimal | None:
     """One written number as a Decimal, deciding which mark is the decimal point.
 
@@ -335,8 +359,10 @@ __all__ = [
     "MAGNITUDES",
     "SIGNIFICANT_DIGITS_FLOOR",
     "UNIT_WINDOW",
+    "VIETNAMESE_LETTER_SHARE",
     "Occurrence",
     "Verdict",
+    "answer_language",
     "contains",
     "fold",
     "occurrences",

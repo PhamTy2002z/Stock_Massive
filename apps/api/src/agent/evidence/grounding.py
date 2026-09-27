@@ -43,8 +43,10 @@ import hashlib
 import json
 import re
 import unicodedata
+from bisect import bisect_left, bisect_right
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import cached_property
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import Enum
@@ -125,11 +127,13 @@ _KIND_RANK = {SourceKind.STRUCTURED: 0, SourceKind.PAGE: 1, SourceKind.SNIPPET: 
 #: The units a figure may carry, as a sentence here writes them. Longest first,
 #: so ``tỷ đồng`` is read whole rather than as ``tỷ`` followed by a word.
 _UNIT = re.compile(
-    r"^[ \u00a0]*(%|phần trăm|nghìn tỷ đồng|ngàn tỷ đồng|nghìn tỷ|ngàn tỷ|tỷ đồng|tỉ đồng|"
-    r"triệu đồng|nghìn đồng|ngàn đồng|đồng/cp|đ/cp|đồng|đ|vnđ|vnd|usd|tỷ|tỉ|triệu|nghìn|"
-    r"ngàn|trillion|billion|million|thousand|bn|mn|k|cp|cổ phiếu|điểm|lần|x)(?![\w])",
+    r"^[ \u00a0]*(%|per cent|percent|phần trăm|nghìn tỷ đồng|ngàn tỷ đồng|nghìn tỷ|ngàn tỷ|tỷ đồng|tỉ đồng|"
+    r"triệu đồng|nghìn đồng|ngàn đồng|đồng/cp|đ/cp|đồng|đ|vnđ|vnd|dong|usd|tỷ|tỉ|triệu|tr|nghìn|"
+    r"ngàn|trillion|billion|million|thousand|bn|mn|k|cp|cổ phiếu|shares|điểm|points|lần|times|x)(?![\w])",
     re.IGNORECASE,
 )
+
+_RANGE_END = re.compile(r"^[  ]*[-–][  ]*[-+−]?\d[\d.,]*")
 
 #: What each magnitude word multiplies by, read off the word as written rather
 #: than folded: folding makes ``ngân`` (bank) and ``ngàn`` (thousand) one word.
@@ -147,6 +151,7 @@ _SCALE = {
     "bn": Decimal(10) ** 9,
     "triệu đồng": Decimal(10) ** 6,
     "triệu": Decimal(10) ** 6,
+    "tr": Decimal(10) ** 6,
     "million": Decimal(10) ** 6,
     "mn": Decimal(10) ** 6,
     "nghìn đồng": Decimal(10) ** 3,
@@ -161,10 +166,10 @@ _SCALE = {
 #: 2–3 lần" is a speculation about the future, not a figure a source prints.
 _FINANCIAL_UNITS = frozenset(
     {
-        "%", "phần trăm", "nghìn tỷ đồng", "ngàn tỷ đồng", "nghìn tỷ", "ngàn tỷ",
+        "%", "per cent", "percent", "phần trăm", "nghìn tỷ đồng", "ngàn tỷ đồng", "nghìn tỷ", "ngàn tỷ",
         "tỷ đồng", "tỉ đồng", "triệu đồng", "nghìn đồng", "ngàn đồng", "đồng/cp",
-        "đ/cp", "đồng", "đ", "vnđ", "vnd", "usd", "tỷ", "tỉ", "triệu", "nghìn",
-        "ngàn", "k", "cp", "cổ phiếu", "điểm", "x",
+        "đ/cp", "đồng", "đ", "vnđ", "vnd", "dong", "usd", "tỷ", "tỉ", "triệu", "tr", "nghìn",
+        "ngàn", "k", "cp", "cổ phiếu", "shares", "điểm", "points", "x",
     }
 )
 
@@ -185,13 +190,32 @@ _VN_DATE = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
 
 #: Words that put a figure at "now". "Gần nhất" alone is not one of them:
 #: "đỉnh gần nhất 79.000 đồng (11/09)" is the most recent peak, a dated past
-#: figure, and only "phiên gần nhất" means the latest session.
+#: figure, and only "phiên gần nhất" means the latest session. English mirrors
+#: sit beside them, folded the same way: fold() is a no-op on plain ASCII.
 _CURRENT = re.compile(
     r"\b(hien tai|hom nay|hien nay|luc nay|phien nay|dang o muc|"
-    r"phien (?:gan nhat|moi nhat)|gia (?:gan nhat|moi nhat))\b"
+    r"phien (?:gan nhat|moi nhat)|gia (?:gan nhat|moi nhat)|"
+    r"current(?:ly)?|now|today|latest session|latest price)\b"
 )
 _YESTERDAY = re.compile(r"\bhom qua\b")
-_DOWN_WORDS = re.compile(r"(giam|mat|lo|am|sut|di xuong|thap hon)\s*$")
+#: Words that let a line mean an earlier session without dating it: a peak, a
+#: range, a level. Without one, a market figure that only an older row prints
+#: is a coincidence in a three-month window, not that session's figure.
+_EARLIER_WORDS = re.compile(
+    r"\b(cao nhat|thap nhat|dinh|day|dao dong|trung binh|tu|truoc|so voi|tuan|thang|quy|"
+    r"lich su|ky luc|vung|khoang|ho tro|khang cu|nguong|muc tieu|tung|bien dong|dien bien)\b"
+    r"|→|->"
+)
+#: A reported ratio said to be priced today. P/E and P/B in a statement are
+#: priced at the quarter's end; at today's price they are a ``calculate`` result.
+_PRICED_NOW = re.compile(
+    r"\b(?:theo|tinh theo|dua tren|voi)\s+gia\s+(?:dong cua\s+)?(?:gan nhat|hien tai|hom nay|moi nhat)\b"
+)
+# "Bán ròng 1,72tr" is a feed's "mua ròng -1.723.800" read by its sign.
+_DOWN_WORDS = re.compile(
+    r"(giam|mat|lo|am|sut|di xuong|thap hon|ban rong|"
+    r"down|fell|declined|decreased|dropped|lower by)\s*$"
+)
 _ROMAN = {"i": 1, "ii": 2, "iii": 3, "iv": 4}
 
 
@@ -207,14 +231,21 @@ class _Value:
     quantum: Decimal
     unit: str | None
     percent: bool
+    #: A down word stands before it in the source: "giảm 1,31%" is -1,31%.
+    down: bool = False
 
-    @property
+    # Cached: :func:`_same` asks it of one figure against every candidate value.
+    @cached_property
     def significant(self) -> int:
         return numbers.significant_digits(self.written)
 
 
-def _value(occurrence: numbers.Occurrence, trailing: str) -> _Value:
+def _value(occurrence: numbers.Occurrence, trailing: str, *, down: bool = False) -> _Value:
     unit_match = _UNIT.match(trailing)
+    if unit_match is None:
+        # The start of a range takes the unit written after its end: "9,1-9,3%".
+        span = _RANGE_END.match(trailing)
+        unit_match = _UNIT.match(trailing[span.end() :]) if span else None
     unit = unit_match.group(1).lower() if unit_match else None
     written = occurrence.written
     factor = _SCALE.get(unit or "", Decimal(1))
@@ -227,6 +258,7 @@ def _value(occurrence: numbers.Occurrence, trailing: str) -> _Value:
         quantum=quantum,
         unit=unit,
         percent=unit in ("%", "phần trăm"),
+        down=down,
     )
 
 
@@ -252,12 +284,23 @@ class _Line:
 #: How each structured source dates a figure beside it, and how long its latest
 #: line may stand for "now". A session is stale after a week; a quarter's ratios
 #: stand until the next quarter's are due (a quarter plus the filing window).
+#: Keyed by the answer's own language — the label a reader sees is built from
+#: this, at :func:`annotate` time, from a role a :class:`_Source` already carries.
 _ROLE_PREFIX = {
-    "market": "phiên",
-    "statement": "kỳ đến",
-    "calculation": "tính từ số liệu đến",
-    "events": "ngày",
-    "news": "tin ngày",
+    "vi": {
+        "market": "phiên",
+        "statement": "kỳ đến",
+        "calculation": "tính từ số liệu đến",
+        "events": "ngày",
+        "news": "tin ngày",
+    },
+    "en": {
+        "market": "session",
+        "statement": "period to",
+        "calculation": "calculated from data to",
+        "events": "event dated",
+        "news": "news dated",
+    },
 }
 _ROLE_FRESH_DAYS = {
     "market": CURRENT_SESSION_DAYS,
@@ -287,11 +330,25 @@ class _Source:
     symbols: frozenset[str] = frozenset()
 
 
+#: A currency written against its digits, as English pages do: "VND64.2 trillion".
+_CURRENCY_GLUE = re.compile(r"(?i)\b(vnd|usd|us\$|\$)(?=\d)")
+
+
 def _values_of(text: str) -> tuple[_Value, ...]:
+    # Measured 2026-09-27 (NVL): every "VND…" figure on three English pages was
+    # invisible, so the answer's correct "64,2 nghìn tỷ" read as invented.
+    text = _CURRENCY_GLUE.sub(lambda m: m.group(1) + " ", text)
     masked = _mask(text)
     found = []
     for occurrence in numbers.occurrences(masked):
-        found.append(_value(occurrence, text[occurrence.end : occurrence.end + 40]))
+        before = numbers.fold(text[max(0, occurrence.start - 24) : occurrence.start])
+        found.append(
+            _value(
+                occurrence,
+                text[occurrence.end : occurrence.end + 40],
+                down=bool(_DOWN_WORDS.search(before)),
+            )
+        )
     return tuple(found)
 
 
@@ -562,6 +619,8 @@ class Sources:
 
     items: tuple[_Source, ...]
     exempt: tuple[_Value, ...]
+    #: Dates the reader wrote, or that come back from their own memory.
+    exempt_dates: _Dates = field(default_factory=lambda: _Dates(frozenset(), frozenset()))
 
     @property
     def latest_session(self) -> date | None:
@@ -572,12 +631,50 @@ class Sources:
     def evidence(self) -> tuple[EvidenceRef, ...]:
         return tuple(item.evidence for item in self.items)
 
+    @cached_property
+    def _by_magnitude(self) -> tuple[list[Decimal], list[tuple[int, int]]]:
+        """Every line's values by absolute base value, sorted, with where each sits."""
+        entries = sorted(
+            (abs(value.base), at, index)
+            for at, item in enumerate(self.items)
+            for index, line in enumerate(item.lines)
+            for value in line.values
+        )
+        return [entry[0] for entry in entries], [(entry[1], entry[2]) for entry in entries]
+
+    @cached_property
+    def _by_written(self) -> dict[Decimal, set[tuple[int, int]]]:
+        found: dict[Decimal, set[tuple[int, int]]] = {}
+        for at, item in enumerate(self.items):
+            for index, line in enumerate(item.lines):
+                for value in line.values:
+                    found.setdefault(value.written, set()).add((at, index))
+        return found
+
+    def lines_near(self, wanted: _Value) -> list[tuple[_Source, _Line]]:
+        """The lines that could hold ``wanted``, in reading order.
+
+        A superset of the lines where :func:`_same` can hold: every match it
+        accepts is within half a quantum of the figure's magnitude, whatever the
+        sign, or prints the figure's digits as written. The window here is a
+        whole quantum each side, so no rounding of the bounds can lose one.
+        Reading order matters because the first of equally ranked sources wins.
+        """
+        keys, where = self._by_magnitude
+        size = abs(wanted.base)
+        found = set(
+            where[bisect_left(keys, size - wanted.quantum) : bisect_right(keys, size + wanted.quantum)]
+        )
+        found |= self._by_written.get(wanted.written, set())
+        return [(self.items[at], self.items[at].lines[index]) for at, index in sorted(found)]
+
 
 def collect_sources(calls: Sequence[TurnToolCall], *, user_text: str = "") -> Sources:
     """Every source a figure could rest on, from the calls that returned one."""
     items: list[_Source] = []
     seen: set[str] = set()
     exempt: list[_Value] = list(_values_of(user_text or ""))
+    exempt_text: list[str] = [user_text or ""]
 
     def add(source: _Source | None) -> None:
         if source is not None and source.evidence.evidence_id not in seen:
@@ -589,6 +686,7 @@ def collect_sources(calls: Sequence[TurnToolCall], *, user_text: str = "") -> So
             continue
         if call.name in EXEMPT_TOOLS:
             exempt.extend(_values_of(call.result_text or ""))
+            exempt_text.append(call.result_text or "")
             continue
         payload = _payload(call)
         if payload is None:
@@ -611,7 +709,239 @@ def collect_sources(calls: Sequence[TurnToolCall], *, user_text: str = "") -> So
         else:
             add(_structured(call, payload))
     _resolve_calculations(items)
-    return Sources(items=tuple(items), exempt=tuple(exempt))
+    return Sources(
+        items=tuple(items), exempt=tuple(exempt), exempt_dates=_dates_in("\n".join(exempt_text))
+    )
+
+
+# -- dates in the prose ------------------------------------------------------
+
+#: How sources spell a date: 10/07/2026, 2026-07-10, 10-07-2026, "ngày 10 tháng 7
+#: năm 2026". A page that omits the year ("ngày 10/7") still names the day.
+_SOURCE_DMY = re.compile(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b")
+_SOURCE_WORDS = re.compile(r"(?i)\b(\d{1,2})\s+tháng\s+(\d{1,2})(?:\s*(?:năm|,)\s*(\d{4}))?")
+_SOURCE_DM = re.compile(r"(?<![\d/.-])(\d{1,2})/(\d{1,2})(?![\d/])")
+_MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+_MONTH_WORD = (
+    r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
+    r"(?:uary|ruary|ch|il|e|y|ust|t|tember|ober|ember)?\b\.?"
+)
+#: English pages: "September 30, 2025", "Sept. 30", "30 September 2025".
+_SOURCE_EN_MDY = re.compile(
+    rf"(?i)\b{_MONTH_WORD}\s+(\d{{1,2}})(?:st|nd|rd|th)?\b(?:,?\s+(\d{{4}}))?"
+)
+_SOURCE_EN_DMY = re.compile(rf"(?i)\b(\d{{1,2}})(?:st|nd|rd|th)?\s+{_MONTH_WORD}(?:\s+(\d{{4}}))?")
+
+
+@dataclass(frozen=True)
+class _Dates:
+    """The full dates a text names, and the day/months it names without a year."""
+
+    full: frozenset[date]
+    day_month: frozenset[tuple[int, int]]
+
+    def names(self, when: date) -> bool:
+        return when in self.full or (when.day, when.month) in self.day_month
+
+
+def _dates_in(text: str) -> _Dates:
+    full: set[date] = set()
+    day_month: set[tuple[int, int]] = set()
+
+    def keep(day: str, month: str, year: str | None) -> None:
+        try:
+            if year:
+                full.add(date(int(year), int(month), int(day)))
+            elif 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+                day_month.add((int(day), int(month)))
+        except ValueError:
+            pass
+
+    folded = unicodedata.normalize("NFC", text)
+    for match in _ISO_DATE.finditer(folded):
+        keep(match.group(3), match.group(2), match.group(1))
+    for match in _SOURCE_DMY.finditer(folded):
+        keep(match.group(1), match.group(2), match.group(3))
+    for match in _SOURCE_WORDS.finditer(folded):
+        keep(match.group(1), match.group(2), match.group(3))
+    for match in _SOURCE_EN_MDY.finditer(folded):
+        keep(match.group(2), str(_MONTHS.index(match.group(1).lower()) + 1), match.group(3))
+    for match in _SOURCE_EN_DMY.finditer(folded):
+        keep(match.group(1), str(_MONTHS.index(match.group(2).lower()) + 1), match.group(3))
+    for match in _SOURCE_DM.finditer(folded):
+        keep(match.group(1), match.group(2), None)
+    return _Dates(frozenset(full), frozenset(day_month))
+
+
+def _source_dates(sources: Sources) -> _Dates:
+    full: set[date] = set()
+    day_month: set[tuple[int, int]] = set()
+    for item in sources.items:
+        found = _dates_in(f"{item.evidence.title}\n{item.evidence.excerpt}")
+        full |= found.full | {when for when in (item.published, item.latest) if when}
+        day_month |= found.day_month
+    return _Dates(frozenset(full), frozenset(day_month))
+
+
+def _check_dates(
+    answer: str, sources: Sources, today: date, checked_until: int
+) -> list[FigureCheck]:
+    """Every full date the answer writes that nothing this Turn read names.
+
+    Only ``dd/mm/yyyy``: a month or a bare year is too loose to hold a source to,
+    and a wrong day on an appointment or a record date is the error readers act
+    on. Grounded dates are not listed — they need no label and carry no figure.
+    """
+    named = _source_dates(sources)
+    checks: list[FigureCheck] = []
+    for match in _VN_DATE.finditer(_URL.sub(lambda m: " " * len(m.group(0)), answer)):
+        if match.start() >= checked_until:
+            break
+        try:
+            when = date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+        except ValueError:
+            continue
+        if when == today or named.names(when) or sources.exempt_dates.names(when):
+            continue
+        line_start = answer.rfind("\n", 0, match.start()) + 1
+        line_end = answer.find("\n", match.end())
+        checks.append(
+            FigureCheck(
+                text=match.group(0),
+                start=match.start(),
+                end=match.end(),
+                value=Decimal(when.toordinal()),
+                unit="date",
+                status=FigureStatus.UNVERIFIED,
+                line=answer[line_start : line_end if line_end != -1 else len(answer)],
+                reason="date_not_in_sources",
+            )
+        )
+    return checks
+
+
+#: The Vietnamese weekday words, and the English names an answer or a source
+#: may write instead ("Saturday" beside "thứ Bảy").
+_WEEKDAY_WORD = (
+    r"thứ\s*(?:hai|ba|tư|năm|sáu|bảy|[2-7])|chủ\s*nhật|"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday"
+)
+_WEEKDAY_NUMBER = {"hai": 0, "2": 0, "ba": 1, "3": 1, "tư": 2, "4": 2, "năm": 3, "5": 3,
+                   "sáu": 4, "6": 4, "bảy": 5, "7": 5}
+_WEEKDAY_EN_NUMBER = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6,
+}
+_WEEKDAY_NAME = ("thứ Hai", "thứ Ba", "thứ Tư", "thứ Năm", "thứ Sáu", "thứ Bảy", "Chủ nhật")
+#: The reason code always names the weekday in Vietnamese — :func:`repair_note`
+#: is what a reader (or the model rewriting a draft) actually sees, and it
+#: translates this name to the answer's own language from there.
+_WEEKDAY_NAME_EN = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+#: "27/09/2026 là thứ Bảy", "27/09/2026 (Chủ nhật)", "thứ Bảy, 26/09/2026", "thứ 7 ngày 26/9/2026",
+#: and the same shapes in English: "27/09/2026 is Saturday", "Friday, 25/09/2026".
+_DATE_THEN_WEEKDAY = re.compile(
+    rf"\b(\d{{1,2}})/(\d{{1,2}})/(\d{{4}})\b[\s*_)]*(?:là|is|,|\(|-|–)?[\s*_(]*(?:ngày\s+)?({_WEEKDAY_WORD})",
+    re.IGNORECASE,
+)
+_WEEKDAY_THEN_DATE = re.compile(
+    rf"({_WEEKDAY_WORD})[\s*_]*[,(\-–]?\s*(?:ngày\s+)?(\d{{1,2}})/(\d{{1,2}})/(\d{{4}})\b",
+    re.IGNORECASE,
+)
+
+
+def _weekday_of(word: str) -> int:
+    folded = re.sub(r"\s+", " ", word.lower()).strip()
+    if folded in _WEEKDAY_EN_NUMBER:
+        return _WEEKDAY_EN_NUMBER[folded]
+    if folded.startswith("chủ"):
+        return 6
+    return _WEEKDAY_NUMBER[folded.split(" ", 1)[1] if " " in folded else folded[3:]]
+
+
+def _check_weekdays(answer: str, checked_until: int) -> list[FigureCheck]:
+    """A weekday written beside a full date that the calendar says it is not.
+
+    Measured 2026-09-27 on kiro-glm-5: "Hôm nay 27/09/2026 là thứ Bảy" (a
+    Sunday), twice in one round. The calendar is the host's to know.
+    """
+    checks: list[FigureCheck] = []
+    found = [
+        (m, m.group(4), m.group(1), m.group(2), m.group(3), m.start(4), m.end(4))
+        for m in _DATE_THEN_WEEKDAY.finditer(answer)
+    ] + [
+        (m, m.group(1), m.group(2), m.group(3), m.group(4), m.start(1), m.end(1))
+        for m in _WEEKDAY_THEN_DATE.finditer(answer)
+    ]
+    seen: set[int] = set()
+    for match, word, day, month, year, start, end in sorted(found, key=lambda item: item[5]):
+        if start >= checked_until or start in seen:
+            continue
+        seen.add(start)
+        try:
+            when = date(int(year), int(month), int(day))
+        except ValueError:
+            continue
+        if _weekday_of(word) == when.weekday():
+            continue
+        line_start = answer.rfind("\n", 0, start) + 1
+        line_end = answer.find("\n", end)
+        checks.append(
+            FigureCheck(
+                text=answer[start:end],
+                start=start,
+                end=end,
+                value=Decimal(when.toordinal()),
+                unit="date",
+                status=FigureStatus.UNVERIFIED,
+                line=answer[line_start : line_end if line_end != -1 else len(answer)],
+                reason=f"wrong_weekday:{_WEEKDAY_NAME[when.weekday()]}",
+            )
+        )
+    return checks
+
+
+#: A session described as happening today: "phiên hôm nay chưa đóng cửa",
+#: "dữ liệu phiên 27/09/2026 chưa có do thị trường chưa đóng cửa", and the
+#: same claim in English: "the market has not closed today".
+_TODAY_SESSION = (
+    r"(?:phiên|giao dịch|thị trường)[^.\n]{{0,40}}?(?:hôm nay|{today})"
+    r"[^.\n]{{0,60}}?(?:chưa (?:có|đóng|kết thúc|hoàn tất)|đang (?:diễn ra|giao dịch))"
+    r"|thị trường chưa đóng cửa"
+    r"|(?:session|trading|market)[^.\n]{{0,40}}?(?:today|{today})"
+    r"[^.\n]{{0,60}}?(?:has(?:n't| not) (?:closed|ended)|no closing data(?: yet)?|"
+    r"is (?:currently )?(?:trading|ongoing|under way))"
+    r"|market has(?:n't| not) closed"
+)
+
+
+def _check_session_today(answer: str, today: date, checked_until: int) -> list[FigureCheck]:
+    """Today's session narrated on a day the market does not trade.
+
+    The runtime tail says so (``market_today``) and the model still wrote
+    "phiên hôm nay 27/09/2026 chưa có dữ liệu đóng cửa" on a Sunday — twice on
+    2026-09-27. A reader takes that to mean a session is under way.
+    """
+    spelled = rf"0?{today.day}/0?{today.month}(?:/{today.year})?"
+    pattern = re.compile(_TODAY_SESSION.format(today=spelled), re.IGNORECASE)
+    checks: list[FigureCheck] = []
+    for match in pattern.finditer(answer):
+        if match.start() >= checked_until:
+            break
+        line_start = answer.rfind("\n", 0, match.start()) + 1
+        line_end = answer.find("\n", match.end())
+        checks.append(
+            FigureCheck(
+                text=match.group(0),
+                start=match.start(),
+                end=match.end(),
+                value=Decimal(today.toordinal()),
+                unit="date",
+                status=FigureStatus.UNVERIFIED,
+                line=answer[line_start : line_end if line_end != -1 else len(answer)],
+                reason="no_session_today",
+            )
+        )
+    return checks
 
 
 # -- figures in the answer ---------------------------------------------------
@@ -631,7 +961,9 @@ class FigureCheck:
     source_date: date | None = None
     reason: str | None = None
     kind: SourceKind | None = None
-    #: How the source dates a figure: "phiên", "kỳ đến", or none for a page.
+    #: The structured source's role ("market", "statement"…), which
+    #: :func:`annotate` reads a "phiên"/"session" style prefix from in the
+    #: answer's own language; ``None`` for a page or a snippet.
     date_prefix: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
@@ -668,22 +1000,62 @@ def _is_list_marker(answer: str, start: int, end: int) -> bool:
 _SENTENCE_END = re.compile(r"(?<=[.!?;])\s+(?=\S)")
 
 
-def _context(line: str, offset: int) -> str:
+def _context(line: str, offset: int, header: str | None = None) -> str:
     """The part of a line a figure's time is read from.
 
     A table row whole — its first cell is usually the period ("Cuối 2025") and
-    the figure sits in another cell. A line of prose, only the figure's own
-    sentence: "đóng 76.500 đồng hôm qua. NPL 6,31%." puts "hôm qua" on the
-    price, not on the ratio.
+    the figure sits in another cell — preceded by the header of the figure's
+    own column, because a table as often names the period, or the ticker, only
+    there: in "| Chỉ số | Q3/2025 | Q4/2025 |" the row "| Nợ/Vốn CSH | 0,93 |
+    0,97 |" names no time at all, and on 2026-09-27 a Q4/2025 cell filled with
+    Q2/2026's figure passed as grounded because of it. A line of prose, only
+    the figure's own sentence: "đóng 76.500 đồng hôm qua. NPL 6,31%." puts
+    "hôm qua" on the price, not on the ratio.
     """
     if line.lstrip().startswith("|"):
-        return line
+        if header is None:
+            return line
+        column = line[:offset].count("|") - 1
+        cells = header.strip().strip("|").split("|")
+        return f"{cells[column].strip()} {line}" if 0 < column < len(cells) else line
     start = 0
     for match in _SENTENCE_END.finditer(line):
         if match.start() >= offset:
             return line[start : match.start()]
         start = match.end()
     return line[start:]
+
+
+def _table_header(answer: str, line_start: int) -> str | None:
+    """The first row of the table the line at ``line_start`` sits in, when it is not that row."""
+    header = None
+    start = line_start
+    while start > 0:
+        previous = answer.rfind("\n", 0, start - 1) + 1
+        if not answer[previous : start - 1].lstrip().startswith("|"):
+            break
+        header, start = answer[previous : start - 1], previous
+    return header
+
+
+def _header_unit(row_before: str, header: str) -> str | None:
+    """The unit a cell's column header states in brackets: "| ROE (%) |" -> "%".
+
+    Measured 2026-09-27: a DGC table wrote "(%)" once in the header and bare
+    numbers in the cells, and all eight ROE and margin cells read as unitless
+    and unverified against Vietcap's "13.75 %".
+    """
+    if not row_before.lstrip().startswith("|"):
+        return None
+    column = row_before.count("|") - 1
+    cells = header.strip().strip("|").split("|")
+    if not 0 <= column < len(cells):
+        return None
+    bracket = re.search(r"\(([^()]{1,20})\)", cells[column])
+    if not bracket:
+        return None
+    unit = _UNIT.match(bracket.group(1).strip())
+    return unit.group(1) if unit and unit.end() == len(bracket.group(1).strip()) else None
 
 
 def _figures(answer: str) -> list[_Figure]:
@@ -694,6 +1066,12 @@ def _figures(answer: str) -> list[_Figure]:
         token = answer[start:end]
         trailing = answer[end : end + 40]
         value = _value(occurrence, trailing)
+        line_start = answer.rfind("\n", 0, start) + 1
+        header = _table_header(answer, line_start)
+        if value.unit is None and header is not None:
+            unit = _header_unit(answer[line_start:start], header)
+            if unit:
+                value = _value(occurrence, unit)
         if _is_list_marker(answer, start, end):
             continue
         if (
@@ -711,9 +1089,12 @@ def _figures(answer: str) -> list[_Figure]:
             continue
         unit_match = _UNIT.match(trailing)
         stop = end + (unit_match.end() if unit_match else 0)
-        line_start = answer.rfind("\n", 0, start) + 1
         line_end = answer.find("\n", end)
-        line = _context(answer[line_start : line_end if line_end != -1 else len(answer)], start - line_start)
+        line = _context(
+            answer[line_start : line_end if line_end != -1 else len(answer)],
+            start - line_start,
+            header,
+        )
         found.append(
             _Figure(
                 text=answer[start:stop],
@@ -735,6 +1116,9 @@ def _same(figure: _Figure, value: _Value) -> bool:
     signs = [value.base]
     if value.base < 0 and wanted.base > 0 and _DOWN_WORDS.search(figure.before):
         # "giảm 0,65%" and a source's "-0,65%" are the same fact written twice.
+        signs.append(-value.base)
+    if value.base > 0 and wanted.base < 0 and value.down:
+        # And the other way round: an answer's "-1,31%" and a page's "giảm 1,31%".
         signs.append(-value.base)
     small = wanted.significant < 3 and abs(wanted.base) < 1000
     for candidate in signs:
@@ -784,10 +1168,12 @@ def _month_end(year: int, month: int) -> date:
 
 def periods(line: str, today: date) -> tuple[tuple[_Period, ...], bool]:
     """The periods a line names, and whether it says it is about now."""
-    # A date after "so với" is what the figure is compared against, not when it
-    # was true: "232.000 đồng (+0,87% so với phiên 24/09)" is the 25/09 close.
+    # A date after "so với" (or its English mirror, "compared with"/"vs") is
+    # what the figure is compared against, not when it was true: "232.000 đồng
+    # (+0,87% so với phiên 24/09)" is the 25/09 close.
     text = re.sub(
-        r"so voi\s*(?:phien|ngay|cung ky|thang|quy|nam)?\s*[\d/\-]+",
+        r"(?:so voi|compared (?:with|to)|vs\.?)\s*"
+        r"(?:phien|ngay|cung ky|thang|quy|nam|q|session|day|period|month|quarter|year)?\s*[\d/\-]+",
         lambda m: " " * (m.end() - m.start()),
         numbers.fold(line),
     )
@@ -879,38 +1265,53 @@ def check_answer(
     *,
     today: date,
     skip_after: str | None = None,
+    market_closed: bool = False,
 ) -> GroundingReport:
     """Decide every figure in ``answer`` against ``sources``.
 
     ``skip_after`` stops the check at a heading, for an answer that ends in its
     own list of sources: the dates and counts in a bibliography are not claims.
+    ``market_closed`` says today has no session, from the same calendar the
+    runtime tail states; an answer narrating one is then held to it.
     """
     checked_until = len(answer)
     if skip_after and skip_after in answer:
         checked_until = answer.index(skip_after)
     latest_session = sources.latest_session
+    known = frozenset().union(
+        *(item.symbols for item in sources.items if item.role in ("market", "statement"))
+    )
     results: list[FigureCheck] = []
     for figure in _figures(answer):
         if figure.start >= checked_until:
             break
         if any(_theirs(figure, value) for value in sources.exempt):
             continue
-        results.append(_decide(figure, sources, today, latest_session))
+        results.append(_decide(figure, sources, today, latest_session, known))
+    results.extend(_check_dates(answer, sources, today, checked_until))
+    results.extend(_check_weekdays(answer, checked_until))
+    if market_closed:
+        results.extend(_check_session_today(answer, today, checked_until))
+    results.sort(key=lambda item: item.start)
     return GroundingReport(answer=answer, figures=tuple(results), sources=sources, today=today)
 
 
 def _decide(
-    figure: _Figure, sources: Sources, today: date, latest_session: date | None
+    figure: _Figure,
+    sources: Sources,
+    today: date,
+    latest_session: date | None,
+    known: frozenset[str],
 ) -> FigureCheck:
+    """One figure's status; ``known`` is every ticker a market or statement read is about."""
     named, current = periods(figure.line, today)
     candidates: list[tuple[tuple[int, int, int], _Source, date | None, bool]] = []
     matched_somewhere = False
     invalid_calculation = False
-    known = frozenset().union(
-        *(item.symbols for item in sources.items if item.role in ("market", "statement"))
-    )
+    priced_now = False
+    folded_line = numbers.fold(figure.line)
     named_symbols = frozenset(_TICKER.findall(figure.line)) & known
-    for source in sources.items:
+    for source, line in sources.lines_near(figure.value):
         if (
             named_symbols
             and source.kind is SourceKind.STRUCTURED
@@ -920,59 +1321,75 @@ def _decide(
             # "STB … 12,83%" cannot rest on TCB's statement line, however the
             # digits fall.
             continue
-        for line in source.lines:
-            if named_symbols and len(source.symbols) > 1:
-                # A source about several tickers (a screen) answers for a ticker
-                # only on that ticker's own line.
-                own = frozenset(_TICKER.findall(line.text)) & source.symbols
-                if own and not (own & named_symbols):
-                    continue
-            if not any(_same(figure, value) for value in line.values):
+        if named_symbols and len(source.symbols) > 1:
+            # A source about several tickers (a screen) answers for a ticker
+            # only on that ticker's own line.
+            own = frozenset(_TICKER.findall(line.text)) & source.symbols
+            if own and not (own & named_symbols):
                 continue
-            matched_somewhere = True
-            if not source.valid:
-                invalid_calculation = True
-                continue
-            when = line.when
-            stale = False
-            if source.kind is SourceKind.STRUCTURED:
-                if when is None:
-                    ok = not named and not current
-                elif current:
-                    # "Hiện tại" is checked first and a date beside it does not
-                    # excuse it: "giá hiện tại 56.500 (26/09/2025)" names a real
-                    # session, a year before today, and calls it now — the exact
-                    # sentence a model working in its remembered year writes.
-                    newest = latest_session if source.role == "market" else source.latest
-                    ok = (
-                        newest is not None
-                        and when == newest
-                        and (today - when).days <= _ROLE_FRESH_DAYS.get(source.role, CURRENT_SESSION_DAYS)
-                    )
-                elif named and source.role == "news":
-                    # News is published after the period it reports on, like a page.
-                    ok = any(when >= period.start for period in named)
-                elif named:
-                    ok = any(period.start <= when <= period.end for period in named)
-                else:
-                    ok = True
-                    # A headline dates the news, not the figure; an old one is
-                    # an old source, the same as an old page.
-                    stale = source.role == "news" and (today - when).days > NEWS_FRESH_DAYS
+        if not any(_same(figure, value) for value in line.values):
+            continue
+        matched_somewhere = True
+        if not source.valid:
+            invalid_calculation = True
+            continue
+        when = line.when
+        stale = False
+        if source.kind is SourceKind.STRUCTURED:
+            if when is None:
+                ok = not named and not current
+            elif source.role == "statement" and _PRICED_NOW.search(folded_line):
+                ok = False
+                priced_now = True
+            elif current:
+                # "Hiện tại" is checked first and a date beside it does not
+                # excuse it: "giá hiện tại 56.500 (26/09/2025)" names a real
+                # session, a year before today, and calls it now — the exact
+                # sentence a model working in its remembered year writes.
+                newest = latest_session if source.role == "market" else source.latest
+                ok = (
+                    newest is not None
+                    and when == newest
+                    and (today - when).days <= _ROLE_FRESH_DAYS.get(source.role, CURRENT_SESSION_DAYS)
+                )
+            elif named and source.role == "news":
+                # News is published after the period it reports on, like a page.
+                ok = any(when >= period.start for period in named)
+            elif named:
+                ok = any(period.start <= when <= period.end for period in named)
+            elif (
+                source.role == "market"
+                and source.latest is not None
+                and when < source.latest
+                and not _EARLIER_WORDS.search(folded_line)
+            ):
+                # Measured 2026-09-27: "Khối lượng: 1,99 triệu cổ phiếu" under
+                # the 25/09 close matched only the 16/07 row. An undated
+                # line reads as the latest session, and that one says otherwise.
+                ok = False
             else:
-                if named:
-                    ok = when is None or any(when >= period.start for period in named)
-                else:
-                    ok = True
-                    stale = when is not None and (today - when).days > WEB_FRESH_DAYS
-            if not ok:
-                continue
-            rank = (
-                _KIND_RANK[source.kind],
-                1 if stale else 0,
-                -(when.toordinal() if when else 0),
-            )
-            candidates.append((rank, source, when, stale))
+                ok = True
+                # A headline dates the news, not the figure; an old one is
+                # an old source, the same as an old page.
+                stale = source.role == "news" and (today - when).days > NEWS_FRESH_DAYS
+        else:
+            if named:
+                # A period still ahead is a plan or a forecast, which a page
+                # can only have published before it: "20% vào tháng 3/2027".
+                ok = when is None or any(
+                    when >= period.start or period.start > today for period in named
+                )
+            else:
+                ok = True
+                stale = when is not None and (today - when).days > WEB_FRESH_DAYS
+        if not ok:
+            continue
+        rank = (
+            _KIND_RANK[source.kind],
+            1 if stale else 0,
+            -(when.toordinal() if when else 0),
+        )
+        candidates.append((rank, source, when, stale))
     base = {
         "text": figure.text,
         "start": figure.start,
@@ -985,6 +1402,8 @@ def _decide(
         reason = (
             "calculation_inputs_unsupported"
             if invalid_calculation
+            else "priced_at_period_end"
+            if priced_now
             else ("wrong_period" if matched_somewhere else "not_in_sources")
         )
         return FigureCheck(**base, status=FigureStatus.UNVERIFIED, reason=reason)
@@ -1001,11 +1420,28 @@ def _decide(
         evidence_id=source.evidence.evidence_id,
         source_date=when,
         kind=source.kind,
-        date_prefix=_ROLE_PREFIX.get(source.role),
+        date_prefix=source.role if source.role in _ROLE_PREFIX["vi"] else None,
     )
 
 
-_PRICE_UNITS = frozenset({"đồng", "đ", "điểm"})
+_PRICE_UNITS = frozenset({"đồng", "đ", "điểm", "dong", "points"})
+
+
+#: How an answer spells an index, and the symbol a market read carries for it.
+_INDEX_ALIASES = (
+    (re.compile(r"(?i)\bvn[\s-]?index\b"), "VNINDEX"),
+    (re.compile(r"(?i)\bhnx[\s-]?index\b"), "HNXINDEX"),
+    (re.compile(r"(?i)\bupcom(?:[\s-]?index)?\b"), "UPCOMINDEX"),
+    (re.compile(r"(?i)\bvn30[\s-]?index\b"), "VN30"),
+    (re.compile(r"(?i)\bhnx30[\s-]?index\b"), "HNX30"),
+)
+
+
+def _line_symbols(line: str) -> frozenset[str]:
+    """The tickers and indices a line names, indices under their market symbol."""
+    for pattern, symbol in _INDEX_ALIASES:
+        line = pattern.sub(symbol, line)
+    return frozenset(_TICKER.findall(line))
 
 
 def _contradicts_market(figure: _Figure, named: Sequence[_Period], sources: Sources) -> bool:
@@ -1016,8 +1452,18 @@ def _contradicts_market(figure: _Figure, named: Sequence[_Period], sources: Sour
     page's "bán ròng 4.000 tỷ ngày 22/09" is not something a price feed could
     contradict, and is left to the page.
     """
+    at = figure.line.find(figure.text)
+    if figure.value.unit is None and at >= 0 and re.match(
+        r"\s*[^\W\d_]", figure.line[at + len(figure.text) :]
+    ):
+        # A number with a noun after it counts something: "9.200 căn" is not a price.
+        return False
+    named_here = _line_symbols(figure.line)
     for source in sources.items:
         if source.kind is not SourceKind.STRUCTURED:
+            continue
+        if named_here and source.symbols and not (source.symbols & named_here):
+            # VN30's close cannot be contradicted by VN-Index's row for the day.
             continue
         for line in source.lines:
             if line.when is None or not any(p.start <= line.when <= p.end for p in named):
@@ -1037,10 +1483,28 @@ def _contradicts_market(figure: _Figure, named: Sequence[_Period], sources: Sour
 
 # -- what the reader and the model are shown ---------------------------------
 
-UNVERIFIED_LABEL = "chưa kiểm chứng"
-STALE_LABEL = "nguồn cũ"
-UNDATED_LABEL = "không rõ ngày"
-SOURCES_HEADING = "**Nguồn số liệu**"
+#: Every fixed label the host writes into or about an answer, keyed by the
+#: language :func:`numbers.answer_language` reads off the answer itself — a
+#: Vietnamese answer keeps exactly these Vietnamese words; an English one gets
+#: their English mirror. The web client parses both sets back out of the prose.
+UNVERIFIED_LABEL = {"vi": "chưa kiểm chứng", "en": "unverified"}
+STALE_LABEL = {"vi": "nguồn cũ", "en": "stale source"}
+UNDATED_LABEL = {"vi": "không rõ ngày", "en": "undated"}
+SOURCES_HEADING = {"vi": "**Nguồn số liệu**", "en": "**Sources**"}
+_PUBLISHED_WORD = {"vi": "đăng", "en": "published"}
+_UNVERIFIED_NOTE = {
+    "vi": "Số có nhãn [{label}] không có trong dữ liệu công cụ của lượt này, "
+    "hoặc không khớp mốc thời gian câu đó nói tới.",
+    "en": "Figures labelled [{label}] are not in this turn's tool data, or "
+    "don't match the time the sentence refers to.",
+}
+_STALE_NOTE = {
+    "vi": "Số có nhãn {label} lấy từ nguồn đã cũ: trang web đăng hơn {web_days} "
+    "ngày, hoặc tin hơn {news_days} ngày trước hôm nay.",
+    "en": "Figures labelled {label} come from an old source: a web page "
+    "published more than {web_days} days ago, or a news item more than "
+    "{news_days} days before today.",
+}
 
 
 def annotate(report: GroundingReport, *, cite: bool = True) -> str:
@@ -1048,8 +1512,11 @@ def annotate(report: GroundingReport, *, cite: bool = True) -> str:
 
     ``cite=False`` labels only what failed, for an answer that already cites its
     own sources (the deep lane's memo) and would otherwise be numbered twice.
+    Every label is written in the answer's own language (owner decision,
+    2026-09-27): the check runs once, and only the labels' words change.
     """
     answer = report.answer
+    lang = numbers.answer_language(answer)
     by_id = {item.evidence.evidence_id: item for item in report.sources.items}
     # One number per address: a search snippet and the page it came from are
     # one source to a reader, whichever of the two a figure matched.
@@ -1077,7 +1544,7 @@ def annotate(report: GroundingReport, *, cite: bool = True) -> str:
     pieces: list[str] = []
     cursor = 0
     for figure in sorted(report.figures, key=lambda item: item.start):
-        label = _label(figure, order, key, cite=cite)
+        label = _label(figure, order, key, cite=cite, lang=lang)
         if label is None:
             continue
         pieces.append(answer[cursor : figure.end])
@@ -1091,22 +1558,20 @@ def annotate(report: GroundingReport, *, cite: bool = True) -> str:
     footer: list[str] = []
     if order:
         footer.append(
-            SOURCES_HEADING
+            SOURCES_HEADING[lang]
             + "\n\n"
             + "\n".join(
-                f"- [{index}] {_source_line(by_id[shown[address]])}"
+                f"- [{index}] {_source_line(by_id[shown[address]], lang)}"
                 for index, address in enumerate(order, start=1)
             )
         )
     if report.unverified:
-        footer.append(
-            f"Số có nhãn [{UNVERIFIED_LABEL}] không có trong dữ liệu công cụ của lượt "
-            "này, hoặc không khớp mốc thời gian câu đó nói tới."
-        )
+        footer.append(_UNVERIFIED_NOTE[lang].format(label=UNVERIFIED_LABEL[lang]))
     if report.stale and cite:
         footer.append(
-            f"Số có nhãn {STALE_LABEL} lấy từ nguồn đã cũ: trang web đăng hơn "
-            f"{WEB_FRESH_DAYS} ngày, hoặc tin hơn {NEWS_FRESH_DAYS} ngày trước hôm nay."
+            _STALE_NOTE[lang].format(
+                label=STALE_LABEL[lang], web_days=WEB_FRESH_DAYS, news_days=NEWS_FRESH_DAYS
+            )
         )
     if not footer:
         return annotated
@@ -1114,50 +1579,130 @@ def annotate(report: GroundingReport, *, cite: bool = True) -> str:
 
 
 def _label(
-    figure: FigureCheck, order: list[str], key: Mapping[str, str], *, cite: bool
+    figure: FigureCheck, order: list[str], key: Mapping[str, str], *, cite: bool, lang: str
 ) -> str | None:
     if figure.status is FigureStatus.UNVERIFIED:
-        return f" [{UNVERIFIED_LABEL}]"
+        return f" [{UNVERIFIED_LABEL[lang]}]"
     address = key.get(figure.evidence_id or "")
     if not cite or address not in order:
         return None
     index = order.index(address) + 1
     if figure.source_date is None:
-        when = UNDATED_LABEL
+        when = UNDATED_LABEL[lang]
     elif figure.date_prefix:
-        when = f"{figure.date_prefix} {figure.source_date.strftime('%d/%m/%Y')}"
+        when = f"{_ROLE_PREFIX[lang][figure.date_prefix]} {figure.source_date.strftime('%d/%m/%Y')}"
     else:
         when = figure.source_date.strftime("%d/%m/%Y")
-    stale = f" · {STALE_LABEL}" if figure.status is FigureStatus.STALE else ""
+    stale = f" · {STALE_LABEL[lang]}" if figure.status is FigureStatus.STALE else ""
     return f" [{index} · {when}{stale}]"
 
 
-def _source_line(source: _Source) -> str:
+def _source_line(source: _Source, lang: str) -> str:
     evidence = source.evidence
     if source.kind is SourceKind.STRUCTURED:
         return f"{evidence.publisher} — {evidence.title}"
     when = (
-        f"đăng {source.published.strftime('%d/%m/%Y')}"
+        f"{_PUBLISHED_WORD[lang]} {source.published.strftime('%d/%m/%Y')}"
         if source.published
-        else UNDATED_LABEL
+        else UNDATED_LABEL[lang]
     )
     link = evidence.canonical_url or evidence.source
     return f"{evidence.publisher} — {evidence.title} — {when} — <{link}>"
 
 
+#: The fixed "why" phrases :func:`repair_note` prints beside each unsupported
+#: figure, and the fixed prose around them, one set per answer language. The
+#: weekday reason is a template: the calendar's own name for the day is filled
+#: in from :data:`_WEEKDAY_NAME` (Vietnamese) or its translation to English.
+_REPAIR_WHY = {
+    "vi": {
+        "wrong_period": "có trong dữ liệu nhưng sai mốc thời gian câu đó nói tới",
+        "date_not_in_sources": "ngày này không có trong dữ liệu công cụ của lượt này",
+        "priced_at_period_end": "chỉ số báo cáo tính theo giá cuối kỳ, không phải giá "
+        "gần nhất; theo giá hôm nay thì phải tính bằng calculate",
+        "no_session_today": "hôm nay thị trường nghỉ, không có phiên giao dịch nào đang "
+        "diễn ra; gắn số liệu với phiên gần nhất",
+        "default": "không có trong dữ liệu công cụ của lượt này",
+        "weekday": "sai thứ: ngày đó là {weekday}",
+    },
+    "en": {
+        "wrong_period": "in the data, but for the wrong time the sentence refers to",
+        "date_not_in_sources": "this date is not in this turn's tool data",
+        "priced_at_period_end": "the ratio is priced at period end, not the latest price; "
+        "at today's price it must be computed with calculate",
+        "no_session_today": "the market is closed today, no session is under way; "
+        "attach the figure to the latest session",
+        "default": "not in this turn's tool data",
+        "weekday": "wrong weekday: that date is {weekday}",
+    },
+}
+_REPAIR_STRINGS = {
+    "vi": {
+        "in_sentence": "trong câu: «{line}»",
+        "more_items": "- … và {more} số khác. Viết lại từ dữ liệu thay vì sửa từng số.",
+        "latest_prices": "Dữ liệu giá mới nhất đã đọc:\n{facts}",
+        "intro": "KIỂM SỐ LIỆU. Bản nháp dưới đây nêu những con số không được dữ liệu công cụ "
+        "của lượt này chống lưng. Hôm nay là {today}.",
+        "instruction": (
+            "Viết lại TOÀN BỘ câu trả lời cho người dùng, bằng tiếng Việt — cùng ngôn ngữ với "
+            "bản nháp dưới đây. Chỉ dùng con số có nguyên văn trong kết quả công cụ, kèm ngày "
+            "của số liệu. Giá hiện tại lấy từ phiên gần nhất và ghi rõ ngày phiên. Số nào "
+            "không có trong dữ liệu thì bỏ, hoặc nói rõ là chưa có dữ liệu — không ước lượng. "
+            "Tỷ lệ, tăng trưởng hay chênh lệch tự tính thì bỏ, trừ khi đã có kết quả của công "
+            "cụ calculate cho đúng phép tính đó. Ngày cụ thể (ngày/tháng/năm) cũng vậy: chỉ "
+            "ghi ngày có trong kết quả công cụ, không thì chỉ nêu tháng. Không nhắc tới bản "
+            "nháp hay việc kiểm số."
+        ),
+        "draft_label": "BẢN NHÁP",
+    },
+    "en": {
+        "in_sentence": 'in the sentence: "{line}"',
+        "more_items": "- … and {more} more figures. Rewrite from the data instead of fixing "
+        "them one by one.",
+        "latest_prices": "Latest price data read this turn:\n{facts}",
+        "intro": "CHECK THE FIGURES. The draft below states figures this turn's tool data "
+        "does not back. Today is {today}.",
+        "instruction": (
+            "Rewrite the ENTIRE answer for the user, in English — the same language as the "
+            "draft below. Use only figures printed verbatim in a tool result, with the data's "
+            "date. Take the current price from the latest session and name that session's "
+            "date. Drop any figure not in the data, or say plainly that there is no data for "
+            "it — do not estimate. Drop any self-computed ratio, growth rate or gap unless the "
+            "calculate tool already returned that exact calculation. The same goes for an "
+            "exact date (day/month/year): state only a date printed in a tool result, "
+            "otherwise name only the month. Do not mention the draft or this check."
+        ),
+        "draft_label": "DRAFT",
+    },
+}
+
+
 def repair_note(report: GroundingReport) -> str:
-    """What the model is told when its draft states figures nothing backs."""
+    """What the model is told when its draft states figures nothing backs.
+
+    Written in the draft's own language (owner decision, 2026-09-27), and
+    explicit about it — the instruction names the language rather than relying
+    on the model to infer it from the prompt, which is what let an earlier,
+    Vietnamese-only version of this note flip an English draft's rewrite back
+    to Vietnamese.
+    """
+    lang = numbers.answer_language(report.answer)
+    why_map = _REPAIR_WHY[lang]
+    strings = _REPAIR_STRINGS[lang]
     items = []
     for figure in report.unverified[:MAX_REPAIR_ITEMS]:
-        why = (
-            "có trong dữ liệu nhưng sai mốc thời gian câu đó nói tới"
-            if figure.reason == "wrong_period"
-            else "không có trong dữ liệu công cụ của lượt này"
-        )
-        items.append(f'- "{figure.text}" ({why}) — trong câu: «{figure.line.strip()[:200]}»')
+        reason = figure.reason or ""
+        if reason.startswith("wrong_weekday:"):
+            vi_name = reason.split(":", 1)[1]
+            weekday = vi_name if lang == "vi" else _WEEKDAY_NAME_EN[_WEEKDAY_NAME.index(vi_name)]
+            why = why_map["weekday"].format(weekday=weekday)
+        else:
+            why = why_map.get(reason, why_map["default"])
+        in_sentence = strings["in_sentence"].format(line=figure.line.strip()[:200])
+        items.append(f'- "{figure.text}" ({why}) — {in_sentence}')
     more = len(report.unverified) - MAX_REPAIR_ITEMS
     if more > 0:
-        items.append(f"- … và {more} số khác. Viết lại từ dữ liệu thay vì sửa từng số.")
+        items.append(strings["more_items"].format(more=more))
     latest = [
         line.text
         for source in report.sources.items
@@ -1167,16 +1712,10 @@ def repair_note(report: GroundingReport) -> str:
     ]
     facts = "\n".join(f"- {text}" for text in latest)
     return (
-        "KIỂM SỐ LIỆU. Bản nháp dưới đây nêu những con số không được dữ liệu công cụ "
-        f"của lượt này chống lưng. Hôm nay là {report.today.strftime('%d/%m/%Y')}.\n"
+        strings["intro"].format(today=report.today.strftime("%d/%m/%Y")) + "\n"
         + "\n".join(items)
-        + (f"\nDữ liệu giá mới nhất đã đọc:\n{facts}" if facts else "")
-        + "\n\nViết lại TOÀN BỘ câu trả lời cho người dùng. Chỉ dùng con số có nguyên "
-        "văn trong kết quả công cụ, kèm ngày của số liệu. Giá hiện tại lấy từ phiên "
-        "gần nhất và ghi rõ ngày phiên. Số nào không có trong dữ liệu thì bỏ, hoặc "
-        "nói rõ là chưa có dữ liệu — không ước lượng. Tỷ lệ, tăng trưởng hay chênh "
-        "lệch tự tính thì bỏ, trừ khi đã có kết quả của công cụ calculate cho đúng "
-        "phép tính đó. Không nhắc tới bản nháp hay việc kiểm số.\n\nBẢN NHÁP:\n<<<\n"
+        + (f"\n{strings['latest_prices'].format(facts=facts)}" if facts else "")
+        + f"\n\n{strings['instruction']}\n\n{strings['draft_label']}:\n<<<\n"
         + report.answer
         + "\n>>>"
     )
@@ -1227,9 +1766,18 @@ def to_ledger(report: GroundingReport, *, as_of: datetime) -> ClaimLedger:
     )
 
 
+#: A figure label in the host's own format. The model copies it from earlier
+#: answers in the Thread; a label it wrote vouches for nothing, so it is removed
+#: before the check and only the host's labels reach the reader. Both
+#: languages' spelling of "unverified" are stripped: a Thread can carry an
+#: earlier Turn's answer in the other language.
+_UNVERIFIED_ALTERNATION = "|".join(re.escape(value) for value in UNVERIFIED_LABEL.values())
+_WRITTEN_LABEL = re.compile(rf" ?\[(?:\d{{1,3}} · [^\]\n]{{1,80}}|{_UNVERIFIED_ALTERNATION})\]")
+
+
 def normalise(text: str) -> str:
-    """The answer in composed form, which is how the unit patterns are written."""
-    return unicodedata.normalize("NFC", text or "")
+    """The answer in composed form, without labels the model wrote itself."""
+    return _WRITTEN_LABEL.sub("", unicodedata.normalize("NFC", text or ""))
 
 
 __all__ = [

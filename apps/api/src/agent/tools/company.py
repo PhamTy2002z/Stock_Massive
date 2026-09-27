@@ -43,6 +43,9 @@ from . import vnstock_provider
 from .market_data import FETCH_TIMEOUT_SECONDS, ICT, INTERNAL_PROFILE, is_index
 from .vnstock_provider import MarketDataError, import_vnstock
 
+#: How long an events or news feed is reused.
+FEED_TTL_SECONDS = 15 * 60.0
+
 TOOLSET = "market_data"
 PUBLISHER = "Vietcap"
 DEFAULT_ITEMS = 10
@@ -176,8 +179,8 @@ class CompanyTools:
                 ),
                 schema=schema,
                 handler=self.get_company_events,
-                display_name="Đọc sự kiện doanh nghiệp",
-                summarise=lambda args: f"Đọc sự kiện doanh nghiệp {str(args.get('symbol') or '?').upper()}",
+                display_name="Read corporate events",
+                summarise=lambda args: f"Read corporate events {str(args.get('symbol') or '?').upper()}",
                 **common,
             ),
             ToolEntry(
@@ -190,23 +193,25 @@ class CompanyTools:
                 ),
                 schema=schema,
                 handler=self.get_company_news,
-                display_name="Đọc tin doanh nghiệp",
-                summarise=lambda args: f"Đọc tin doanh nghiệp {str(args.get('symbol') or '?').upper()}",
+                display_name="Read company news",
+                summarise=lambda args: f"Read company news {str(args.get('symbol') or '?').upper()}",
                 **common,
             ),
         )
 
     def get_company_events(self, context: ToolContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
         symbol, limit = self._request(arguments)
-        records = self._read(symbol, "events")
+        records, fetched_at = self._cached_read(context, symbol, "events")
         lines = event_lines(records, limit)
-        return self._payload(context, symbol, records, lines, kind="events", heading="sự kiện doanh nghiệp")
+        return self._payload(
+            symbol, records, lines, fetched_at, kind="events", heading="sự kiện doanh nghiệp"
+        )
 
     def get_company_news(self, context: ToolContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
         symbol, limit = self._request(arguments)
-        records = self._read(symbol, "news")
+        records, fetched_at = self._cached_read(context, symbol, "news")
         lines = news_lines(records, limit)
-        return self._payload(context, symbol, records, lines, kind="news", heading="tin doanh nghiệp")
+        return self._payload(symbol, records, lines, fetched_at, kind="news", heading="tin doanh nghiệp")
 
     def _request(self, arguments: Mapping[str, Any]) -> tuple[str, int]:
         try:
@@ -222,6 +227,15 @@ class CompanyTools:
         wanted = arguments.get("limit")
         return symbol, max(1, min(MAX_ITEMS, int(wanted))) if wanted is not None else DEFAULT_ITEMS
 
+    def _cached_read(
+        self, context: ToolContext, symbol: str, method: str
+    ) -> tuple[list[dict[str, Any]], datetime]:
+        """The whole feed, reused for a quarter of an hour whatever ``limit`` asks."""
+        now = (context.now or datetime.now(tz=ICT)).astimezone(ICT)
+        return vnstock_provider.cached(
+            ("company", method, symbol), FEED_TTL_SECONDS, lambda: self._read(symbol, method), now=now
+        )
+
     def _read(self, symbol: str, method: str) -> list[dict[str, Any]]:
         import_vnstock()
 
@@ -233,17 +247,16 @@ class CompanyTools:
 
     @staticmethod
     def _payload(
-        context: ToolContext,
         symbol: str,
         records: Sequence[Mapping[str, Any]],
         lines: list[str],
+        fetched_at: datetime,
         *,
         kind: str,
         heading: str,
     ) -> Mapping[str, Any]:
         if not lines:
             raise MarketDataError(vnstock_provider.NO_DATA, f"no dated {kind} for {symbol}")
-        now = (context.now or datetime.now(tz=ICT)).astimezone(ICT)
         encoded = json.dumps(list(records), ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
         newest = lines[0][:10]
         return {
@@ -255,7 +268,7 @@ class CompanyTools:
             "evidence_role": kind,
             "title": f"{symbol} · {heading}",
             "as_of": datetime.combine(date.fromisoformat(newest), datetime.min.time(), tzinfo=ICT).isoformat(),
-            "retrieved_at": now.isoformat(),
+            "retrieved_at": fetched_at.astimezone(ICT).isoformat(),
             "content_sha256": hashlib.sha256(encoded).hexdigest(),
             "item_count": len(lines),
             "excerpt": "\n".join(

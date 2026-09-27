@@ -12,7 +12,7 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from types import EllipsisType
@@ -39,8 +39,11 @@ from src.alpha.models import (
     AgentThread,
     AgentToolCall,
     AgentTurn,
+    turn_is_live,
 )
 from src.core.database import sync_session_factory
+from src.core.llm.admission import assert_turn_capacity
+from src.core.llm.config import UserCeilings
 from .loop import CHAT_MODE
 from .evidence.source_policy import POLICY_VERSION, canonical_url
 from .messages import CALL_INTERRUPTED, settle_orphan_calls
@@ -78,7 +81,7 @@ EVIDENCE_TRAJECTORY_STAGES = frozenset(
 # whole short question, short enough to sit on one line of the sidebar.
 THREAD_TITLE_LENGTH = 60
 
-# The stable reason a Turn frozen by the startup sweep carries. V1 never resumes
+# The stable reason a Turn frozen by the startup sweep or the reaper carries. V1 never resumes
 # execution after a restart, so this is a terminal reason and not a state a
 # later pass reconsiders.
 INTERRUPTED_REASON = "interrupted_restart"
@@ -170,6 +173,10 @@ def flag_counts_between(
         if reason in counts:
             counts[reason] = int(total)
     return counts
+
+
+#: The most Threads one listing returns, newest and pinned first.
+MAX_THREADS_LISTED = 1000
 
 
 @dataclass(frozen=True)
@@ -784,6 +791,10 @@ class AgentPersistence:
                     AgentThread.created_at.desc(),
                     AgentThread.id.desc(),
                 )
+                # A ceiling, not a page: far past what the sidebar shows anyone,
+                # so no reader loses a Thread, while a runaway account cannot
+                # make one request load every row it ever wrote.
+                .limit(MAX_THREADS_LISTED)
             ).scalars()
             return tuple(_thread_record(row) for row in rows)
 
@@ -1563,6 +1574,7 @@ class AgentPersistence:
         retry_of_turn_id: uuid.UUID | str | None = None,
         mode: str = CHAT_MODE,
         attachments: Sequence[Mapping[str, Any]] = (),
+        ceilings: UserCeilings | None = None,
     ) -> TurnCreation:
         """Commit the user message and the Turn, before anything is executed.
 
@@ -1570,6 +1582,12 @@ class AgentPersistence:
         user owns — id, filename, media type, size — never bytes. It travels
         into the committed request for the same reason ``symbols`` does, and the
         rows it names are bound to this Turn in the same transaction.
+
+        ``ceilings`` are the active-Turn ceilings, re-counted under admission's
+        advisory locks before the row is inserted (``assert_turn_capacity``), so
+        two creates racing past preflight cannot both commit. Over a ceiling it
+        raises the same :class:`BudgetRefusal` preflight would have. ``None``
+        checks nothing, for a caller that is not admitting a reader's Turn.
         """
         normalized = tuple(dict.fromkeys(normalize_symbol(symbol) for symbol in symbols))
         return await asyncio.to_thread(
@@ -1582,6 +1600,7 @@ class AgentPersistence:
             None if retry_of_turn_id is None else _uuid(retry_of_turn_id),
             mode,
             tuple(dict(entry) for entry in attachments),
+            ceilings,
         )
 
     def _create_turn(
@@ -1594,6 +1613,7 @@ class AgentPersistence:
         retry_of_turn_id: uuid.UUID | None,
         mode: str,
         attachments: Sequence[Mapping[str, Any]],
+        ceilings: UserCeilings | None,
     ) -> TurnCreation:
         # The whole payload, compared as one value rather than field by field.
         # An idempotency key that only checks the text would return the earlier
@@ -1643,6 +1663,22 @@ class AgentPersistence:
             ).scalar_one_or_none()
             if thread is None:
                 raise LookupError(f"Thread {thread_id} does not exist")
+            # The id is taken, and not by this user: the owned lookup above
+            # could not see it. Answered as the conflict it is, now, rather than
+            # left to the primary key — whose ``IntegrityError`` the sequence
+            # retry below would mistake for a ``seq`` race twenty times over
+            # before surfacing as a 500.
+            if session.get(AgentTurn, turn_id) is not None:
+                raise TurnPayloadConflict(turn_id)
+            # A retry names a Turn of this same Thread, which the ownership
+            # check above already proved is this user's. Anything else — another
+            # Thread's Turn, another user's, or no Turn at all — is not found.
+            if retry_of_turn_id is not None:
+                retried = session.get(AgentTurn, retry_of_turn_id)
+                if retried is None or retried.thread_id != thread_id:
+                    raise LookupError(f"Turn {retry_of_turn_id} does not exist")
+            if ceilings is not None:
+                assert_turn_capacity(session, user_id=user_id, ceilings=ceilings)
 
             message = _insert_message(session, thread_id, "user", payload, symbols)
             # The opening question names the Thread. Only the opening one, and
@@ -1736,11 +1772,37 @@ class AgentPersistence:
         await asyncio.to_thread(self._mark_turn_running, _uuid(turn_id))
 
     def _mark_turn_running(self, turn_id: uuid.UUID) -> None:
+        # The first heartbeat rides the same write, so a Turn is never
+        # ``running`` without one.
         with self._session_factory() as session:
-            row = session.get(AgentTurn, turn_id)
-            if row is None or row.status != TURN_ADMITTED:
-                return
-            row.status = TURN_RUNNING
+            session.execute(
+                update(AgentTurn)
+                .where(AgentTurn.id == turn_id, AgentTurn.status == TURN_ADMITTED)
+                .values(status=TURN_RUNNING, heartbeat_at=func.now())
+            )
+            session.commit()
+
+    async def heartbeat_turns(self, turn_ids: Collection[uuid.UUID]) -> None:
+        """Say, for every Turn this process is running, that it still is.
+
+        One statement for all of them rather than one per Turn, because it runs
+        every few seconds for as long as the process lives. A terminal row is
+        left alone: its heartbeat stopped meaning anything when it settled.
+        """
+        if not turn_ids:
+            return
+        await asyncio.to_thread(self._heartbeat_turns, tuple(turn_ids))
+
+    def _heartbeat_turns(self, turn_ids: Sequence[uuid.UUID]) -> None:
+        with self._session_factory() as session:
+            session.execute(
+                update(AgentTurn)
+                .where(
+                    AgentTurn.id.in_(turn_ids),
+                    AgentTurn.status.in_(ACTIVE_TURN_STATUSES),
+                )
+                .values(heartbeat_at=func.now())
+            )
             session.commit()
 
     async def checkpoint_turn(
@@ -1857,7 +1919,9 @@ class AgentPersistence:
         claim_ledger: Mapping[str, Any] | None,
     ) -> TurnRecord:
         def write(session: Session) -> TurnRecord:
-            row = session.get(AgentTurn, turn_id)
+            # Locked, so the reaper in another process and this Turn's own
+            # finish cannot both see it active and both write a message.
+            row = session.get(AgentTurn, turn_id, with_for_update=True)
             if row is None:
                 raise LookupError(f"Turn {turn_id} does not exist")
             if row.status not in ACTIVE_TURN_STATUSES:
@@ -2022,14 +2086,27 @@ class AgentPersistence:
             )
 
     async def freeze_interrupted_turns(
-        self, message_builder: MessageBuilder | None = None
+        self,
+        message_builder: MessageBuilder | None = None,
+        *,
+        exclude: Collection[uuid.UUID] = (),
+        only: Collection[uuid.UUID] | None = None,
     ) -> tuple[TurnRecord, ...]:
         """Freeze every Turn a crash or a deploy left active.
 
-        Called once at startup. V1 never resumes execution: replaying a
-        non-deterministic model against a store that has moved would produce a
-        plausible continuation, and an honest ``incomplete`` carrying everything
-        that actually ran is worth more than that.
+        Called at startup and then periodically by the reaper. V1 never resumes
+        execution: replaying a non-deterministic model against a store that has
+        moved would produce a plausible continuation, and an honest
+        ``incomplete`` carrying everything that actually ran is worth more than
+        that.
+
+        Only a Turn whose heartbeat has gone stale (``turn_is_live``) is taken.
+        Another process sharing the table keeps its Turns beating, so a restart
+        here no longer freezes work that is still being done there. ``exclude``
+        is what this process is running itself, spared even if a failed
+        heartbeat let it look stale. ``only`` names Turns the caller knows are
+        dead — its own, cancelled at shutdown — and freezes exactly those,
+        without waiting for them to go stale.
 
         ``message_builder`` turns one frozen draft into the canonical assistant
         message, in the same transaction that freezes the Turn. It is a callback
@@ -2037,20 +2114,33 @@ class AgentPersistence:
         like is the lifecycle's business, and this module's business is the
         transaction.
         """
-        return await asyncio.to_thread(self._freeze_interrupted_turns, message_builder)
+        if only is not None and not only:
+            return ()
+        return await asyncio.to_thread(
+            self._freeze_interrupted_turns,
+            message_builder,
+            tuple(exclude),
+            None if only is None else tuple(only),
+        )
 
     def _freeze_interrupted_turns(
-        self, message_builder: MessageBuilder | None
+        self,
+        message_builder: MessageBuilder | None,
+        exclude: Sequence[uuid.UUID] = (),
+        only: Sequence[uuid.UUID] | None = None,
     ) -> tuple[TurnRecord, ...]:
         return self._with_sequence_retry(
-            lambda session: self._freeze(session, message_builder)
+            lambda session: self._freeze(session, message_builder, exclude, only)
         )
 
     @staticmethod
     def _freeze(
-        session: Session, message_builder: MessageBuilder | None
+        session: Session,
+        message_builder: MessageBuilder | None,
+        exclude: Sequence[uuid.UUID] = (),
+        only: Sequence[uuid.UUID] | None = None,
     ) -> tuple[TurnRecord, ...]:
-        """Freeze every active Turn in one transaction, message included.
+        """Freeze the chosen active Turns in one transaction, message included.
 
         Runs under :meth:`_with_sequence_retry` like every other writer of a
         transcript row: the sweep appends assistant messages, so it races the
@@ -2065,10 +2155,18 @@ class AgentPersistence:
         the transcript would say ``interrupted`` and the snapshot would still draw
         a spinner.
         """
+        query = select(AgentTurn).where(AgentTurn.status.in_(ACTIVE_TURN_STATUSES))
+        if only is not None:
+            query = query.where(AgentTurn.id.in_(only))
+        else:
+            query = query.where(~turn_is_live())
+        if exclude:
+            query = query.where(AgentTurn.id.not_in(exclude))
+        # ``SKIP LOCKED``: two processes reaping at once split the rows rather
+        # than both freezing each one, and a row a live finish is writing is
+        # that finish's to settle.
         rows = list(
-            session.execute(
-                select(AgentTurn).where(AgentTurn.status.in_(ACTIVE_TURN_STATUSES))
-            ).scalars()
+            session.execute(query.with_for_update(skip_locked=True)).scalars()
         )
         frozen: list[TurnRecord] = []
         for row in rows:

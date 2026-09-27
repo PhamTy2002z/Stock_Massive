@@ -13,10 +13,13 @@ letting a declaration start broad and add a narrow exception deliberately.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from fnmatch import fnmatchcase
-from typing import Iterable
+from collections.abc import Iterable, Mapping
+from typing import Any
+
+from .security import URL_EGRESS_ARGUMENTS, normalise_url, source_urls, urls_in
 
 
 class ToolPermission(str, Enum):
@@ -102,12 +105,50 @@ class PermissionPolicy:
 
 @dataclass
 class TurnPermissionState:
-    """Content-light state for hard cross-origin write protection."""
+    """Content-light state for hard cross-origin write and egress protection."""
 
     untrusted_content_seen: bool = False
+    #: Every URL the user's message or a source read in this Turn wrote,
+    #: normalised. Once the Turn is tainted, only these may be requested.
+    seen_urls: set[str] = field(default_factory=set)
+
+    @classmethod
+    def for_turn(
+        cls, *, user_text: str = "", attachment_count: int = 0
+    ) -> TurnPermissionState:
+        """The state a Turn starts in, from what its request carries.
+
+        An upload is a stranger's text as far as this state is concerned: the
+        reader chose the file, not every sentence in it, so a Turn with one
+        starts tainted — before round one, since the file is already in the
+        first model call.
+        """
+        state = cls(untrusted_content_seen=attachment_count > 0)
+        state.observe_text(user_text)
+        return state
 
     def observe_untrusted_content(self) -> None:
         self.untrusted_content_seen = True
+
+    def observe_text(self, text: str) -> None:
+        """Remember the URLs the user's own message wrote."""
+        self.seen_urls.update(urls_in(text))
+
+    def observe_result(
+        self, tool_name: str, result: Any, arguments: Mapping[str, Any]
+    ) -> None:
+        """Remember the source URLs a successful tool result wrote.
+
+        Plus the URL the call itself requested, for a tool that sends one: it
+        has already left, so asking for it again carries nothing new, and a
+        second question of one page is an ordinary read.
+        """
+        self.seen_urls.update(source_urls(tool_name, result, arguments))
+        url_argument = URL_EGRESS_ARGUMENTS.get(tool_name)
+        if url_argument is not None:
+            requested = normalise_url(str(arguments.get(url_argument) or ""))
+            if requested is not None:
+                self.seen_urls.add(requested)
 
 
 __all__ = [

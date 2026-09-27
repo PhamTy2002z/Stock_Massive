@@ -184,7 +184,7 @@ class TestSniffing:
     async def test_a_filename_is_a_label_and_never_a_path(self):
         assert sanitise_filename("../../etc/passwd") == "passwd"
         assert sanitise_filename("a/b\\c.png") == "c.png"
-        assert sanitise_filename("") == "tep-dinh-kem"
+        assert sanitise_filename("") == "attachment"
         # A Vietnamese name is a name, not an attack.
         assert sanitise_filename("bảng giá.png") == "bảng giá.png"
 

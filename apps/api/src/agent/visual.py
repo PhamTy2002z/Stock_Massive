@@ -90,18 +90,19 @@ ADMITTED_VERDICTS = frozenset(
 
 #: The columns the assembled rows carry, by the names the encodings use.
 #:
-#: They are Vietnamese words rather than field names because Flint titles an
-#: axis with the name of the column encoded on it. ``time`` and ``volume`` were
-#: reaching the reader as the axis titles of a chart in a Vietnamese pane, and
+#: They are English words rather than opaque field names because Flint titles
+#: an axis with the name of the column encoded on it. ``time`` and ``volume``
+#: were reaching the reader as the axis titles of a chart in the pane, and
 #: renaming a column is host input rather than a change to what the package
-#: compiled.
-_TIME = "Phiên"
-_SYMBOL = "Mã"
-_OPEN = "Mở"
-_HIGH = "Cao"
-_LOW = "Thấp"
-_CLOSE = "Đóng"
-_VOLUME = "Khối lượng"
+#: compiled. The webapp UI is English (owner decision 2026-09-27), so the
+#: labels drawn on the axes are English regardless of the answer's language.
+_TIME = "Session"
+_SYMBOL = "Symbol"
+_OPEN = "Open"
+_HIGH = "High"
+_LOW = "Low"
+_CLOSE = "Close"
+_VOLUME = "Volume"
 
 #: How a bar's close is written on the category axis, shortest form first.
 #:
@@ -153,7 +154,13 @@ def build_visual(
     if not reads or len(reads) > MAX_SERIES:
         return None
     admitted = _admitted_evidence_ids(ledger)
-    if any(read["evidence_id"] not in admitted for read in reads):
+    # The figure check's ledger (an answer the deep pipeline could only take
+    # from prose) names a market read by its feed, not by this module's id.
+    cited_feeds = {row.source for row in ledger.evidence if row.evidence_id in admitted}
+    if any(
+        read["evidence_id"] not in admitted and read["feed"] not in cited_feeds
+        for read in reads
+    ):
         return None
 
     assemblies = _assemblies(reads)
@@ -223,6 +230,8 @@ def _market_reads(calls: Sequence[TurnToolCall]) -> list[dict[str, Any]]:
             {
                 "call_id": call.id,
                 "evidence_id": refs[0].evidence_id,
+                # How the figure check names this feed (``grounding._structured``).
+                "feed": f"{payload.get('source') or call.name}/{symbol}",
                 "symbol": symbol,
                 "interval": interval,
                 "unit": unit,

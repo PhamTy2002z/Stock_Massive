@@ -19,6 +19,7 @@ answer away from the user who is already owed it.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 
@@ -100,6 +101,19 @@ class SubscriptionLimiter:
         if self._limit(redis, "turn", str(turn_id), self._per_turn) is False:
             logger.warning("Subscription limit reached for Turn %s", turn_id)
             raise SubscriptionThrottled("turn")
+
+    async def acheck_user(self, user_id: int) -> None:
+        """:meth:`check_user` off the event loop, for async callers.
+
+        The Redis client is synchronous (and on Upstash an HTTPS round trip),
+        so counting inline would stall every stream in the process for as long
+        as Redis takes to answer.
+        """
+        await asyncio.to_thread(self.check_user, user_id)
+
+    async def acheck_turn(self, turn_id: uuid.UUID | str) -> None:
+        """:meth:`check_turn` off the event loop, for the same reason."""
+        await asyncio.to_thread(self.check_turn, turn_id)
 
     def _limit(self, redis, scope: str, identifier: str, maximum: int) -> bool | None:
         """Whether this attempt is allowed, or ``None`` when nothing counted."""

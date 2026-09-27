@@ -68,7 +68,8 @@ that" and "that took too long" are two things it can act on.
 Concurrency is ``asyncio`` and not a thread pool: this codebase is async
 throughout, and the one case that genuinely blocks — a handler that declares
 ``is_async=False`` — is moved to a worker thread individually rather than making
-every call pay for a pool.
+every call pay for a pool. That thread comes from the tools' own bounded pool
+(``core/blocking_pool.py``), never the default executor the database work uses.
 """
 
 from __future__ import annotations
@@ -84,7 +85,14 @@ from typing import Any, Literal
 
 from . import registry
 from .definitions import ResolvedToolSurface
-from .guardrails import HALT_GUIDANCE, TurnGuardrails, Verdict, result_signature
+from .evidence.source_policy import ICT, stale_year
+from .guardrails import (
+    HALT_GUIDANCE,
+    TurnGuardrails,
+    Verdict,
+    call_signature,
+    result_signature,
+)
 from .permissions import (
     AuthorizationDenied,
     PermissionDecision,
@@ -92,8 +100,15 @@ from .permissions import (
     ToolPermission,
     TurnPermissionState,
 )
+from src.core.blocking_pool import run_blocking
+
 from .schema_validation import validate_arguments
-from .security import SecretEgressBlocked, redact_trace_value
+from .security import (
+    URL_EGRESS_ARGUMENTS,
+    SecretEgressBlocked,
+    redact_trace_value,
+    tainted_egress_refusal,
+)
 from .untrusted import scan_for_threats
 
 logger = logging.getLogger(__name__)
@@ -116,6 +131,9 @@ APPROVAL_REQUIRED = "approval_required"
 #: refused regardless of what that content asked the model to do.
 CONTENT_ESCALATION_BLOCKED = "content_escalation_blocked"
 SECRET_EGRESS_BLOCKED = "secret_egress_blocked"
+#: Untrusted content was already read in this Turn, and the call would send a
+#: request to a URL nobody but the model wrote, with room in it to carry data.
+UNTRUSTED_EGRESS_BLOCKED = "untrusted_egress_blocked"
 AUTHORIZATION_DENIED = "authorization_denied"
 #: The call outlived the bound its own declaration set. Distinct from
 #: ``tool_failed`` because the tool did not fail — it was still working — and the
@@ -136,16 +154,12 @@ ROUND_FANOUT_EXCEEDED = "round_fanout_exceeded"
 #: account.
 CANCELLED_CALL = "cancelled"
 
-#: How many calls that leave this deployment one round dispatches. Arithmetic
-#: rather than taste: a Turn gets seven of them in total
-#: (``loop.MAX_EXTERNAL_TOOL_CALLS``, raised from six on 2026-08-29), so a round
-#: asking for more than eight has already asked for more than the whole Turn can
-#: fund. Eight rather than seven keeps the refusal here about the *shape* of the
-#: batch and leaves the budget itself to be spent, and refused, where it is
-#: counted. The margin is now one call rather than two, and that is the reason
-#: the Turn ceiling was held below eight: at eight the two gates would coincide
-#: and this one would start firing on batches the budget was going to fund.
-MAX_EXTERNAL_CALLS_PER_ROUND = 8
+#: How many calls that leave this deployment one round dispatches. It bounds the
+#: *shape* of one batch; the Turn's own ceiling (``loop.MAX_EXTERNAL_TOOL_CALLS``,
+#: 80 since 2026-09-27) bounds the spend. Sixteen covers a sector read — a price
+#: and a ratio call for eight tickers — in one round; the vnstock gate still
+#: paces what those calls ask of the provider.
+MAX_EXTERNAL_CALLS_PER_ROUND = 16
 
 #: How many calls that stay inside this deployment one round dispatches. Also
 #: arithmetic: the Signal Field catalog holds thirty fields
@@ -264,6 +278,10 @@ class ToolExecutor:
     #: registry, and so a future per-user surface can narrow what is visible.
     lookup: ToolLookup = registry.get
     availability: Callable[[str], bool] = registry.is_available
+    #: Calls already refused once for a past year the question never named. The
+    #: same call issued again runs: the model has been told today's date and
+    #: still wants that year, and only the question could have said it was wrong.
+    _year_refused: set[str] = field(default_factory=set)
 
     def _lookup(self, name: str) -> ToolDeclaration | None:
         if self.surface is not None:
@@ -369,6 +387,32 @@ class ToolExecutor:
             halted=self.guardrails.halted,
             halt_reason=halt_reason,
             guidance=guidance,
+        )
+
+    def _stale_year(self, name: str, arguments: Mapping[str, Any]) -> str | None:
+        """Why this call is refused for reaching into a past year, or ``None``.
+
+        Before dispatch, so a search for last year's week costs no request and
+        no quota. Refused once per distinct call: ``years_in_scope`` reads a
+        horizon the reader wrote, not one they implied, and the model repeating
+        the call is the escape for the question it misread.
+        """
+        now, in_scope = self.context.now, self.context.question_years
+        if now is None or in_scope is None:
+            return None
+        today = now.astimezone(ICT).date()
+        year = stale_year(name, arguments, today=today, in_scope=in_scope)
+        if year is None:
+            return None
+        signature = call_signature(name, arguments)
+        if signature in self._year_refused:
+            return None
+        self._year_refused.add(signature)
+        return (
+            f"Chưa chạy: lệnh này tìm theo năm {year}, nhưng hôm nay là "
+            f"{today.strftime('%d/%m/%Y')} và câu hỏi không nhắc tới năm {year}. "
+            f"Nếu câu hỏi hỏi về hiện tại, gọi lại với năm {today.year} hoặc bỏ năm. "
+            f"Nếu người dùng thật sự cần năm {year}, gọi lại đúng lệnh này thì nó sẽ chạy."
         )
 
     def _stopped(self) -> bool:
@@ -499,6 +543,22 @@ class ToolExecutor:
                 ),
             )
 
+        refused_year = self._stale_year(call.name, arguments)
+        if refused_year is not None:
+            return await self._record(
+                call,
+                arguments,
+                ToolResult(
+                    call_id=call.id,
+                    tool_name=call.name,
+                    ok=False,
+                    error=BLOCKED_CALL,
+                    text=refused_year,
+                    guidance=refused_year,
+                    dispatched=False,
+                ),
+            )
+
         resource = _permission_resource(entry, arguments)
         permission = PermissionPolicy(entry.permission_rules).evaluate(
             call.name, resource
@@ -538,6 +598,26 @@ class ToolExecutor:
                     dispatched=False,
                 ),
             )
+        url_argument = URL_EGRESS_ARGUMENTS.get(call.name)
+        if url_argument is not None and self.permission_state.untrusted_content_seen:
+            egress_refusal = tainted_egress_refusal(
+                str(arguments.get(url_argument) or ""),
+                seen=self.permission_state.seen_urls,
+            )
+            if egress_refusal is not None:
+                return await self._record(
+                    call,
+                    arguments,
+                    ToolResult(
+                        call_id=call.id,
+                        tool_name=call.name,
+                        ok=False,
+                        error=UNTRUSTED_EGRESS_BLOCKED,
+                        text=egress_refusal,
+                        guidance=egress_refusal,
+                        dispatched=False,
+                    ),
+                )
 
         decision = self.guardrails.before_call(call.name, arguments)
         if decision.verdict in {Verdict.BLOCK, Verdict.HALT}:
@@ -587,8 +667,21 @@ class ToolExecutor:
             text = (
                 f"{call.name} was still running after the {entry.timeout_seconds:g} "
                 "seconds its declaration allows one call, so it was given up on. "
-                "Ask for something narrower, or use what the other calls returned."
             )
+            if (
+                entry.effect is registry.ToolEffect.READ
+                and entry.idempotency is registry.ToolIdempotency.IDEMPOTENT
+            ):
+                # The abandoned read keeps running and fills its cache when the
+                # source finally answers, so the same call again usually returns
+                # at once; the failure guardrail still stops one that keeps timing out.
+                text += (
+                    "The source was slow, not refusing: repeating this exact call "
+                    "once is safe and often answers at once. Otherwise use what the "
+                    "other calls returned."
+                )
+            else:
+                text += "Ask for something narrower, or use what the other calls returned."
         else:
             if failure is None:
                 ok, error, text = True, None, _normalize(payload)
@@ -623,6 +716,12 @@ class ToolExecutor:
             and entry.content_trust is registry.ContentTrust.UNTRUSTED
         ):
             self.permission_state.observe_untrusted_content()
+        if ok:
+            # Recorded whether or not the Turn is tainted yet: the search that
+            # taints it is also where the links the model may follow come from.
+            # Only a source's own URL fields count, never the serialised text,
+            # which also carries whatever the model sent in its arguments.
+            self.permission_state.observe_result(call.name, payload, arguments)
 
         after = self.guardrails.after_call(
             call.name, arguments, ok=ok, result_hash=result_signature(text)
@@ -665,8 +764,11 @@ class ToolExecutor:
                 return await outcome
             return outcome
         # A declared-blocking handler is moved off the event loop, so one slow
-        # database read cannot stall the other calls of the same round.
-        return await asyncio.to_thread(entry.handler, self.context, arguments)
+        # database read cannot stall the other calls of the same round — and
+        # onto the tools' own pool rather than the default one, because a thread
+        # a timeout gave up on is still held, and the default pool is where the
+        # Turn's checkpoints and reservations wait for a worker.
+        return await run_blocking(entry.handler, self.context, arguments)
 
     async def _attempt(self, call: ToolCall) -> ToolResult:
         """One call from a sequential segment, under the parallel path's floor.
@@ -879,6 +981,7 @@ __all__ = [
     "TOOL_FAILED",
     "TOOL_UNAVAILABLE",
     "UNKNOWN_TOOL",
+    "UNTRUSTED_EGRESS_BLOCKED",
     "ExecutionOutcome",
     "Segment",
     "ToolCall",
