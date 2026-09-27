@@ -98,6 +98,13 @@ services:
       # package reads it from the environment itself, and its presence lifts the
       # host's own request gate to match (`agent/tools/vnstock_provider.py`).
       VNSTOCK_API_KEY: ${VNSTOCK_API_KEY:-}
+      # User connectors (remote MCP). Off, and refused without a key, by default.
+      CONNECTORS_ENABLED: ${CONNECTORS_ENABLED:-false}
+      CONNECTORS_ENCRYPTION_KEYS: ${CONNECTORS_ENCRYPTION_KEYS:-}
+      CONNECTORS_CUSTOM_URL: ${CONNECTORS_CUSTOM_URL:-false}
+      CONNECTORS_CUSTOM_URL_USERS: ${CONNECTORS_CUSTOM_URL_USERS:-}
+      CONNECTORS_OAUTH_REDIRECT_URL: ${CONNECTORS_OAUTH_REDIRECT_URL:-http://localhost:8000/api/v1/connectors/oauth/callback}
+      CONNECTORS_WEB_RETURN_URL: ${CONNECTORS_WEB_RETURN_URL:-http://localhost:3000/}
       # The startup Capability Probe spends real provider tokens and refuses to
       # boot the whole API when the route cannot answer it. Forwarded so an
       # operator on a constrained route (expired plan, drained credits) can

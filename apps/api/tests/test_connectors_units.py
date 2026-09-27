@@ -82,6 +82,22 @@ def test_pydantic_titles_and_optional_unions_are_folded_into_the_subset():
     }
 
 
+def test_a_union_of_simple_types_becomes_a_type_list():
+    schema = {
+        "type": "object",
+        "properties": {
+            "repo": {"anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}], "description": "Repo."}
+        },
+        "required": ["repo"],
+    }
+    built = snapshot.build("wiki", [_tool("ask", schema=schema)])
+    assert built.tools[0]["schema"]["properties"]["repo"] == {
+        "description": "Repo.",
+        "type": ["string", "array"],
+        "items": {"type": "string"},
+    }
+
+
 def test_the_fingerprint_moves_when_a_description_does():
     first = snapshot.build("notes", [_tool("a", "Đọc.")]).fingerprint
     same = snapshot.build("notes", [_tool("a", "Đọc.")]).fingerprint

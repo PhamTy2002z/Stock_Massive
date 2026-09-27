@@ -101,6 +101,19 @@ def normalise_schema(schema: Any) -> dict[str, Any]:
             merged = {k: v for k, v in cleaned.items() if k != "anyOf"}
             merged.update(normalise_schema(concrete[0]))
             cleaned = merged
+        elif concrete and len(concrete) == len(options) and all(
+            isinstance(item, Mapping) and isinstance(item.get("type"), str) for item in concrete
+        ):
+            # ``string | array of string``: one schema whose type is the list,
+            # when no two options claim the same keyword.
+            parts = [normalise_schema(item) for item in concrete]
+            keys = [key for part in parts for key in part if key != "type"]
+            if len(keys) == len(set(keys)) and len({part["type"] for part in parts}) == len(parts):
+                merged = {k: v for k, v in cleaned.items() if k != "anyOf"}
+                for part in parts:
+                    merged.update({k: v for k, v in part.items() if k != "type"})
+                merged["type"] = [part["type"] for part in parts]
+                cleaned = merged
     if cleaned.get("type") == "object":
         cleaned.setdefault("properties", {})
     return cleaned
