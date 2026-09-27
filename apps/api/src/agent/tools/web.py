@@ -92,14 +92,14 @@ from ..registry import (
     register,
 )
 
-MAX_RESULTS = 5
+MAX_RESULTS = 10
 MAX_REDIRECTS = 4
 FETCH_TIMEOUT_SECONDS = 8.0
 MAX_SNIPPET_CHARS = 700
 #: How much of one page the model may read. Generous compared with the previous
 #: harness, whose 3,000 characters existed because a page was a side source next
 #: to the market store; here a page is often the whole basis of an answer.
-MAX_PAGE_TEXT_CHARS = 20_000
+MAX_PAGE_TEXT_CHARS = 60_000
 
 #: What each tool declares to the result budget. Search results are already
 #: packed to five capped snippets, so their declaration is small; a page read

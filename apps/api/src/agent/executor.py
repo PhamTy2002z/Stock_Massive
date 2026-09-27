@@ -136,16 +136,12 @@ ROUND_FANOUT_EXCEEDED = "round_fanout_exceeded"
 #: account.
 CANCELLED_CALL = "cancelled"
 
-#: How many calls that leave this deployment one round dispatches. Arithmetic
-#: rather than taste: a Turn gets seven of them in total
-#: (``loop.MAX_EXTERNAL_TOOL_CALLS``, raised from six on 2026-08-29), so a round
-#: asking for more than eight has already asked for more than the whole Turn can
-#: fund. Eight rather than seven keeps the refusal here about the *shape* of the
-#: batch and leaves the budget itself to be spent, and refused, where it is
-#: counted. The margin is now one call rather than two, and that is the reason
-#: the Turn ceiling was held below eight: at eight the two gates would coincide
-#: and this one would start firing on batches the budget was going to fund.
-MAX_EXTERNAL_CALLS_PER_ROUND = 8
+#: How many calls that leave this deployment one round dispatches. It bounds the
+#: *shape* of one batch; the Turn's own ceiling (``loop.MAX_EXTERNAL_TOOL_CALLS``,
+#: 80 since 2026-09-27) bounds the spend. Sixteen covers a sector read — a price
+#: and a ratio call for eight tickers — in one round; the vnstock gate still
+#: paces what those calls ask of the provider.
+MAX_EXTERNAL_CALLS_PER_ROUND = 16
 
 #: How many calls that stay inside this deployment one round dispatches. Also
 #: arithmetic: the Signal Field catalog holds thirty fields
@@ -587,8 +583,21 @@ class ToolExecutor:
             text = (
                 f"{call.name} was still running after the {entry.timeout_seconds:g} "
                 "seconds its declaration allows one call, so it was given up on. "
-                "Ask for something narrower, or use what the other calls returned."
             )
+            if (
+                entry.effect is registry.ToolEffect.READ
+                and entry.idempotency is registry.ToolIdempotency.IDEMPOTENT
+            ):
+                # The abandoned read keeps running and fills its cache when the
+                # source finally answers, so the same call again usually returns
+                # at once; the failure guardrail still stops one that keeps timing out.
+                text += (
+                    "The source was slow, not refusing: repeating this exact call "
+                    "once is safe and often answers at once. Otherwise use what the "
+                    "other calls returned."
+                )
+            else:
+                text += "Ask for something narrower, or use what the other calls returned."
         else:
             if failure is None:
                 ok, error, text = True, None, _normalize(payload)

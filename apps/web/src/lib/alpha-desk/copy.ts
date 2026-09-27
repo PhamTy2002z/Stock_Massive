@@ -48,6 +48,8 @@ const REFUSED_CALL_LABELS: Record<string, string> = {
   // Nothing ran and nothing will: the route is closed rather than broken, so the
   // word must not invite a retry.
   permission_denied: "Không được phép",
+  // The source did not answer within the call's bound; it is not a broken page.
+  tool_call_timeout: "Quá thời gian",
 }
 
 /** The word shown beside a call that did not succeed. */

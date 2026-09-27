@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { Loader2 } from "lucide-react"
+import { Check, Loader2 } from "lucide-react"
 
 import { toolCallErrorLabel } from "@/lib/alpha-desk/copy"
 import {
@@ -75,6 +75,7 @@ export function ReasoningTimeline({
 
   if (!running && items.length === 0) return null
 
+  const waitingCount = toolCalls.filter(toolCallWaiting).length
   const seconds = Math.max(0, Math.round(elapsedMs / 1000))
 
   return (
@@ -131,6 +132,13 @@ export function ReasoningTimeline({
             // The live row below is the last one whenever there is one, so a
             // trace that is still growing keeps its connecting line.
             const isLast = !running && index === items.length - 1
+            if (item.kind === "step") {
+              return (
+                <h3 key={item.key} className="mb-2 mt-3 text-micro font-medium text-ink-3 first:mt-0">
+                  {item.text}
+                </h3>
+              )
+            }
             if (item.kind === "thought") {
               return (
                 <RailRow key={item.key} icon={<BulbIcon />} isLast={isLast}>
@@ -158,7 +166,9 @@ export function ReasoningTimeline({
                 role="status"
                 className="text-meta leading-[22px] text-muted-foreground"
               >
-                {items.length === 0 ? "Đang chuẩn bị…" : "Đang xử lý…"}
+                {waitingCount > 0
+                  ? `Đang tra cứu · còn ${waitingCount} tác vụ…`
+                  : items.length === 0 ? "Đang chuẩn bị…" : "Đang xử lý kết quả…"}
               </span>
             </RailRow>
           )}
@@ -196,7 +206,7 @@ function WorkingDots() {
         <span
           key={delay}
           style={{ animationDelay: `${delay}ms` }}
-          className="size-[3px] rounded-full bg-current animate-vg-dot-pulse"
+          className="size-[3px] rounded-full bg-current motion-safe:animate-vg-dot-pulse"
         />
       ))}
     </span>
@@ -204,6 +214,7 @@ function WorkingDots() {
 }
 
 type RailItem =
+  | { kind: "step"; key: string; text: string }
   | { kind: "thought"; key: string; text: string }
   | { kind: "single"; key: string; call: ToolCall }
   | { kind: "group"; key: string; calls: ToolCall[] }
@@ -219,7 +230,8 @@ function buildRailItems(thoughts: Thought[], toolCalls: ToolCall[]): RailItem[] 
   for (const call of toolCalls) rounds.add(call.round)
 
   const items: RailItem[] = []
-  for (const round of Array.from(rounds).sort((a, b) => a - b)) {
+  for (const [index, round] of Array.from(rounds).sort((a, b) => a - b).entries()) {
+    items.push({ kind: "step", key: `step-${round}`, text: `Bước ${index + 1}` })
     thoughts
       .filter((thought) => thought.round === round)
       .forEach((thought, index) => {
@@ -344,7 +356,7 @@ function SingleCallRow({ call, isLast }: { call: ToolCall; isLast: boolean }) {
 
   return (
     <RailRow
-      icon={waiting ? <Spinner /> : <CallIcon call={call} />}
+      icon={waiting ? <Spinner /> : call.status === "ok" ? <Check aria-label="Đã xong" className="size-[15px]" /> : <CallIcon call={call} />}
       isLast={isLast}
     >
       {hasResults ? (
@@ -432,12 +444,9 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
         className="flex w-full items-center gap-[0.55rem] text-left text-meta leading-[22px] text-muted-foreground transition-colors hover:text-ink-2"
       >
         <span className="min-w-0">
-          {allStore
-            ? `Đã chạy ${calls.length} công cụ nội bộ`
-            : `Đã chạy ${calls.length} truy vấn`}
+          {`${anyWaiting ? "Đang chạy" : "Đã chạy"} ${calls.length} ${allStore ? "công cụ nội bộ" : "truy vấn"}`}
         </span>
-        {/* Only while the rows that would say it themselves are folded away. */}
-        {!open && anyWaiting && (
+        {anyWaiting && (
           <span className="flex-none tabular-nums">{`· ${settled}/${calls.length}`}</span>
         )}
         {!open && failed > 0 && (
@@ -451,6 +460,8 @@ function GroupRow({ calls, isLast }: { calls: ToolCall[]; isLast: boolean }) {
           <div key={call.id} className="flex items-center gap-[0.55rem]">
             {toolCallWaiting(call) ? (
               <Spinner className="flex-none" />
+            ) : call.status === "ok" ? (
+              <Check aria-label="Đã xong" className="size-[15px] flex-none text-muted-foreground" />
             ) : (
               <BranchIcon className="flex-none text-muted-foreground/70" />
             )}

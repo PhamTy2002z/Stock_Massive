@@ -45,7 +45,9 @@ ANALYSIS_OUTPUT_PER_CALL = 3_000
 # ``budget.ANALYSIS_COST_CEILING_USD`` in the ledger's own unit. One number in
 # two places, and the test suite compares them rather than trusting the comment.
 ANALYSIS_COST_MICRO_USD = 15_000
-TURN_CONTEXT_PER_CALL = 32_000
+# 120k of a measured ~137k-token window on the internal route (2026-09-27),
+# counted at 3 chars/token, which over-counts Vietnamese against the provider.
+TURN_CONTEXT_PER_CALL = 120_000
 TURN_INPUT_TOTAL = 100_000
 TURN_OUTPUT_TOTAL = 20_000
 TURN_COST_MICRO_USD = 500_000
@@ -63,8 +65,8 @@ TURN_COST_MICRO_USD = 500_000
 # Three times today's figures, which is the widest lane anyone has proposed plus
 # room to be wrong about it. The money is bounded separately and always was:
 # ``TURN_COST_MICRO_USD`` does not move with these.
-TURN_OUTPUT_TOTAL_MAX = 60_000
-TURN_INPUT_TOTAL_MAX = 300_000
+TURN_OUTPUT_TOTAL_MAX = 448_000
+TURN_INPUT_TOTAL_MAX = 3_360_000
 # The five per-user ceilings live in ``UserCeilings`` (``config.py``) rather
 # than here. They are the one group of ceilings a deployment legitimately
 # changes without changing what the product promises, and each of them may be

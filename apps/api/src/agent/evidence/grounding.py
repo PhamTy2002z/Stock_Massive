@@ -44,7 +44,7 @@ import json
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import Enum
@@ -126,7 +126,7 @@ _KIND_RANK = {SourceKind.STRUCTURED: 0, SourceKind.PAGE: 1, SourceKind.SNIPPET: 
 #: so ``tỷ đồng`` is read whole rather than as ``tỷ`` followed by a word.
 _UNIT = re.compile(
     r"^[ \u00a0]*(%|phần trăm|nghìn tỷ đồng|ngàn tỷ đồng|nghìn tỷ|ngàn tỷ|tỷ đồng|tỉ đồng|"
-    r"triệu đồng|nghìn đồng|ngàn đồng|đồng/cp|đ/cp|đồng|đ|vnđ|vnd|usd|tỷ|tỉ|triệu|nghìn|"
+    r"triệu đồng|nghìn đồng|ngàn đồng|đồng/cp|đ/cp|đồng|đ|vnđ|vnd|usd|tỷ|tỉ|triệu|tr|nghìn|"
     r"ngàn|trillion|billion|million|thousand|bn|mn|k|cp|cổ phiếu|điểm|lần|x)(?![\w])",
     re.IGNORECASE,
 )
@@ -147,6 +147,7 @@ _SCALE = {
     "bn": Decimal(10) ** 9,
     "triệu đồng": Decimal(10) ** 6,
     "triệu": Decimal(10) ** 6,
+    "tr": Decimal(10) ** 6,
     "million": Decimal(10) ** 6,
     "mn": Decimal(10) ** 6,
     "nghìn đồng": Decimal(10) ** 3,
@@ -163,7 +164,7 @@ _FINANCIAL_UNITS = frozenset(
     {
         "%", "phần trăm", "nghìn tỷ đồng", "ngàn tỷ đồng", "nghìn tỷ", "ngàn tỷ",
         "tỷ đồng", "tỉ đồng", "triệu đồng", "nghìn đồng", "ngàn đồng", "đồng/cp",
-        "đ/cp", "đồng", "đ", "vnđ", "vnd", "usd", "tỷ", "tỉ", "triệu", "nghìn",
+        "đ/cp", "đồng", "đ", "vnđ", "vnd", "usd", "tỷ", "tỉ", "triệu", "tr", "nghìn",
         "ngàn", "k", "cp", "cổ phiếu", "điểm", "x",
     }
 )
@@ -191,7 +192,8 @@ _CURRENT = re.compile(
     r"phien (?:gan nhat|moi nhat)|gia (?:gan nhat|moi nhat))\b"
 )
 _YESTERDAY = re.compile(r"\bhom qua\b")
-_DOWN_WORDS = re.compile(r"(giam|mat|lo|am|sut|di xuong|thap hon)\s*$")
+# "Bán ròng 1,72tr" is a feed's "mua ròng -1.723.800" read by its sign.
+_DOWN_WORDS = re.compile(r"(giam|mat|lo|am|sut|di xuong|thap hon|ban rong)\s*$")
 _ROMAN = {"i": 1, "ii": 2, "iii": 3, "iv": 4}
 
 
@@ -562,6 +564,8 @@ class Sources:
 
     items: tuple[_Source, ...]
     exempt: tuple[_Value, ...]
+    #: Dates the reader wrote, or that come back from their own memory.
+    exempt_dates: _Dates = field(default_factory=lambda: _Dates(frozenset(), frozenset()))
 
     @property
     def latest_session(self) -> date | None:
@@ -578,6 +582,7 @@ def collect_sources(calls: Sequence[TurnToolCall], *, user_text: str = "") -> So
     items: list[_Source] = []
     seen: set[str] = set()
     exempt: list[_Value] = list(_values_of(user_text or ""))
+    exempt_text: list[str] = [user_text or ""]
 
     def add(source: _Source | None) -> None:
         if source is not None and source.evidence.evidence_id not in seen:
@@ -589,6 +594,7 @@ def collect_sources(calls: Sequence[TurnToolCall], *, user_text: str = "") -> So
             continue
         if call.name in EXEMPT_TOOLS:
             exempt.extend(_values_of(call.result_text or ""))
+            exempt_text.append(call.result_text or "")
             continue
         payload = _payload(call)
         if payload is None:
@@ -611,7 +617,101 @@ def collect_sources(calls: Sequence[TurnToolCall], *, user_text: str = "") -> So
         else:
             add(_structured(call, payload))
     _resolve_calculations(items)
-    return Sources(items=tuple(items), exempt=tuple(exempt))
+    return Sources(
+        items=tuple(items), exempt=tuple(exempt), exempt_dates=_dates_in("\n".join(exempt_text))
+    )
+
+
+# -- dates in the prose ------------------------------------------------------
+
+#: How sources spell a date: 10/07/2026, 2026-07-10, 10-07-2026, "ngày 10 tháng 7
+#: năm 2026". A page that omits the year ("ngày 10/7") still names the day.
+_SOURCE_DMY = re.compile(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b")
+_SOURCE_WORDS = re.compile(r"(?i)\b(\d{1,2})\s+tháng\s+(\d{1,2})(?:\s*(?:năm|,)\s*(\d{4}))?")
+_SOURCE_DM = re.compile(r"(?<![\d/.-])(\d{1,2})/(\d{1,2})(?![\d/])")
+
+
+@dataclass(frozen=True)
+class _Dates:
+    """The full dates a text names, and the day/months it names without a year."""
+
+    full: frozenset[date]
+    day_month: frozenset[tuple[int, int]]
+
+    def names(self, when: date) -> bool:
+        return when in self.full or (when.day, when.month) in self.day_month
+
+
+def _dates_in(text: str) -> _Dates:
+    full: set[date] = set()
+    day_month: set[tuple[int, int]] = set()
+
+    def keep(day: str, month: str, year: str | None) -> None:
+        try:
+            if year:
+                full.add(date(int(year), int(month), int(day)))
+            elif 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+                day_month.add((int(day), int(month)))
+        except ValueError:
+            pass
+
+    folded = unicodedata.normalize("NFC", text)
+    for match in _ISO_DATE.finditer(folded):
+        keep(match.group(3), match.group(2), match.group(1))
+    for match in _SOURCE_DMY.finditer(folded):
+        keep(match.group(1), match.group(2), match.group(3))
+    for match in _SOURCE_WORDS.finditer(folded):
+        keep(match.group(1), match.group(2), match.group(3))
+    for match in _SOURCE_DM.finditer(folded):
+        keep(match.group(1), match.group(2), None)
+    return _Dates(frozenset(full), frozenset(day_month))
+
+
+def _source_dates(sources: Sources) -> _Dates:
+    full: set[date] = set()
+    day_month: set[tuple[int, int]] = set()
+    for item in sources.items:
+        found = _dates_in(f"{item.evidence.title}\n{item.evidence.excerpt}")
+        full |= found.full | {when for when in (item.published, item.latest) if when}
+        day_month |= found.day_month
+    return _Dates(frozenset(full), frozenset(day_month))
+
+
+def _check_dates(
+    answer: str, sources: Sources, today: date, checked_until: int
+) -> list[FigureCheck]:
+    """Every full date the answer writes that nothing this Turn read names.
+
+    Only ``dd/mm/yyyy``: a month or a bare year is too loose to hold a source to,
+    and a wrong day on an appointment or a record date is the error readers act
+    on. Grounded dates are not listed — they need no label and carry no figure.
+    """
+    named = _source_dates(sources)
+    checks: list[FigureCheck] = []
+    for match in _VN_DATE.finditer(_URL.sub(lambda m: " " * len(m.group(0)), answer)):
+        if match.start() >= checked_until:
+            break
+        try:
+            when = date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+        except ValueError:
+            continue
+        if when == today or named.names(when) or sources.exempt_dates.names(when):
+            continue
+        line_start = answer.rfind("\n", 0, match.start()) + 1
+        line_end = answer.find("\n", match.end())
+        checks.append(
+            FigureCheck(
+                text=match.group(0),
+                start=match.start(),
+                end=match.end(),
+                value=Decimal(when.toordinal()),
+                unit="date",
+                status=FigureStatus.UNVERIFIED,
+                line=answer[line_start : line_end if line_end != -1 else len(answer)],
+                reason="date_not_in_sources",
+            )
+        )
+    return checks
 
 
 # -- figures in the answer ---------------------------------------------------
@@ -668,22 +768,42 @@ def _is_list_marker(answer: str, start: int, end: int) -> bool:
 _SENTENCE_END = re.compile(r"(?<=[.!?;])\s+(?=\S)")
 
 
-def _context(line: str, offset: int) -> str:
+def _context(line: str, offset: int, header: str | None = None) -> str:
     """The part of a line a figure's time is read from.
 
     A table row whole — its first cell is usually the period ("Cuối 2025") and
-    the figure sits in another cell. A line of prose, only the figure's own
-    sentence: "đóng 76.500 đồng hôm qua. NPL 6,31%." puts "hôm qua" on the
-    price, not on the ratio.
+    the figure sits in another cell — preceded by the header of the figure's
+    own column, because a table as often names the period, or the ticker, only
+    there: in "| Chỉ số | Q3/2025 | Q4/2025 |" the row "| Nợ/Vốn CSH | 0,93 |
+    0,97 |" names no time at all, and on 2026-09-27 a Q4/2025 cell filled with
+    Q2/2026's figure passed as grounded because of it. A line of prose, only
+    the figure's own sentence: "đóng 76.500 đồng hôm qua. NPL 6,31%." puts
+    "hôm qua" on the price, not on the ratio.
     """
     if line.lstrip().startswith("|"):
-        return line
+        if header is None:
+            return line
+        column = line[:offset].count("|") - 1
+        cells = header.strip().strip("|").split("|")
+        return f"{cells[column].strip()} {line}" if 0 < column < len(cells) else line
     start = 0
     for match in _SENTENCE_END.finditer(line):
         if match.start() >= offset:
             return line[start : match.start()]
         start = match.end()
     return line[start:]
+
+
+def _table_header(answer: str, line_start: int) -> str | None:
+    """The first row of the table the line at ``line_start`` sits in, when it is not that row."""
+    header = None
+    start = line_start
+    while start > 0:
+        previous = answer.rfind("\n", 0, start - 1) + 1
+        if not answer[previous : start - 1].lstrip().startswith("|"):
+            break
+        header, start = answer[previous : start - 1], previous
+    return header
 
 
 def _figures(answer: str) -> list[_Figure]:
@@ -713,7 +833,11 @@ def _figures(answer: str) -> list[_Figure]:
         stop = end + (unit_match.end() if unit_match else 0)
         line_start = answer.rfind("\n", 0, start) + 1
         line_end = answer.find("\n", end)
-        line = _context(answer[line_start : line_end if line_end != -1 else len(answer)], start - line_start)
+        line = _context(
+            answer[line_start : line_end if line_end != -1 else len(answer)],
+            start - line_start,
+            _table_header(answer, line_start),
+        )
         found.append(
             _Figure(
                 text=answer[start:stop],
@@ -896,6 +1020,8 @@ def check_answer(
         if any(_theirs(figure, value) for value in sources.exempt):
             continue
         results.append(_decide(figure, sources, today, latest_session))
+    results.extend(_check_dates(answer, sources, today, checked_until))
+    results.sort(key=lambda item: item.start)
     return GroundingReport(answer=answer, figures=tuple(results), sources=sources, today=today)
 
 
@@ -1149,11 +1275,10 @@ def repair_note(report: GroundingReport) -> str:
     """What the model is told when its draft states figures nothing backs."""
     items = []
     for figure in report.unverified[:MAX_REPAIR_ITEMS]:
-        why = (
-            "có trong dữ liệu nhưng sai mốc thời gian câu đó nói tới"
-            if figure.reason == "wrong_period"
-            else "không có trong dữ liệu công cụ của lượt này"
-        )
+        why = {
+            "wrong_period": "có trong dữ liệu nhưng sai mốc thời gian câu đó nói tới",
+            "date_not_in_sources": "ngày này không có trong dữ liệu công cụ của lượt này",
+        }.get(figure.reason or "", "không có trong dữ liệu công cụ của lượt này")
         items.append(f'- "{figure.text}" ({why}) — trong câu: «{figure.line.strip()[:200]}»')
     more = len(report.unverified) - MAX_REPAIR_ITEMS
     if more > 0:
@@ -1176,7 +1301,9 @@ def repair_note(report: GroundingReport) -> str:
         "gần nhất và ghi rõ ngày phiên. Số nào không có trong dữ liệu thì bỏ, hoặc "
         "nói rõ là chưa có dữ liệu — không ước lượng. Tỷ lệ, tăng trưởng hay chênh "
         "lệch tự tính thì bỏ, trừ khi đã có kết quả của công cụ calculate cho đúng "
-        "phép tính đó. Không nhắc tới bản nháp hay việc kiểm số.\n\nBẢN NHÁP:\n<<<\n"
+        "phép tính đó. Ngày cụ thể (ngày/tháng/năm) cũng vậy: chỉ ghi ngày có trong "
+        "kết quả công cụ, không thì chỉ nêu tháng. Không nhắc tới bản nháp hay việc "
+        "kiểm số.\n\nBẢN NHÁP:\n<<<\n"
         + report.answer
         + "\n>>>"
     )
@@ -1227,9 +1354,15 @@ def to_ledger(report: GroundingReport, *, as_of: datetime) -> ClaimLedger:
     )
 
 
+#: A figure label in the host's own format. The model copies it from earlier
+#: answers in the Thread; a label it wrote vouches for nothing, so it is removed
+#: before the check and only the host's labels reach the reader.
+_WRITTEN_LABEL = re.compile(rf" ?\[(?:\d{{1,3}} · [^\]\n]{{1,80}}|{UNVERIFIED_LABEL})\]")
+
+
 def normalise(text: str) -> str:
-    """The answer in composed form, which is how the unit patterns are written."""
-    return unicodedata.normalize("NFC", text or "")
+    """The answer in composed form, without labels the model wrote itself."""
+    return _WRITTEN_LABEL.sub("", unicodedata.normalize("NFC", text or ""))
 
 
 __all__ = [

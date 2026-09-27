@@ -147,6 +147,8 @@ export function ChatView() {
   const desk = useDesk()
   const { dispatch } = useShell()
   const container = useRef<HTMLDivElement>(null)
+  const content = useRef<HTMLDivElement>(null)
+  const hasTranscript = desk.threadId !== null || desk.entries.length > 0
   const following = useRef(true)
   // The newest question, while it is held at the top of the viewport. Cleared by
   // any scroll the reader performs themselves, and by the spacer running out.
@@ -217,14 +219,20 @@ export function ChatView() {
   // question never appears at the bottom for a frame on its way to the top.
   useIsoLayoutEffect(() => {
     const element = container.current
-    if (!element) return
-
+    const continuingFirstQuestion = thread.current === null && asked.current > 0
     const switched = thread.current !== desk.threadId
     thread.current = desk.threadId
     const isNew = questionCount > asked.current
     asked.current = questionCount
+    if (!element) {
+      pinned.current = false
+      landing.current = false
+      following.current = true
+      setTailHeight(0)
+      return
+    }
 
-    if (switched) {
+    if (switched && !continuingFirstQuestion) {
       // Reopening a Thread lands at its end. The last answer is what the reader
       // came back for, not the question that produced it.
       pinned.current = false
@@ -278,34 +286,30 @@ export function ChatView() {
     scrollTo(element, plan.scroll)
   })
 
-  // The answer arriving. While a question is pinned the spacer gives back
-  // exactly the height the answer took, so the transcript does not move at all;
-  // when there is nothing left to give back, the bottom takes over.
-  useEffect(() => {
+  // Read actual layout: the timeline also changes height between React commits.
+  const syncLayout = useCallback(() => {
     const element = container.current
-    if (!element) return
-
-    // A pin still landing owns the spacer. Recomputing it here on the same
-    // commit would measure a DOM that does not carry the new spacer yet and ask
-    // for it twice over — a spacer of double the height, and a scrollbar that
-    // lurches before settling back.
-    if (landing.current) return
-
+    if (!element || landing.current) return
     if (tailHeight.current > 0) {
       const next = step().tail
       setTailHeight(next)
       if (next === 0) pinned.current = false
       return
     }
+    if (!pinned.current && following.current) element.scrollTop = element.scrollHeight
+  }, [step, setTailHeight])
 
-    if (pinned.current || !following.current) return
-    // Assigned rather than animated. A smooth scroll per delta turns a fast
-    // answer into a moving target, and it is motion nobody asked for.
-    element.scrollTop = element.scrollHeight
-    // Every event the live Turn applies produces a new projection, so this is
-    // one dependency for every way the transcript can get taller: a delta, a
-    // tool call joining the list, a status line under an answer that ended.
-  }, [desk.entries, step, setTailHeight])
+  useIsoLayoutEffect(() => {
+    syncLayout()
+  }, [desk.entries, syncLayout])
+
+  useEffect(() => {
+    if (!container.current || !content.current || typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(syncLayout)
+    observer.observe(content.current)
+    observer.observe(container.current)
+    return () => observer.disconnect()
+  }, [hasTranscript, syncLayout])
 
   function onScroll() {
     const element = container.current
@@ -384,9 +388,9 @@ export function ChatView() {
         onWheel={onUserScroll}
         onTouchMove={onUserScroll}
         onClick={() => dispatch({ type: "overlay", overlay: null })}
-        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-[190px] pt-2"
+        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none] px-5 pb-[190px] pt-2"
       >
-        <div className="mx-auto w-full max-w-[760px] space-y-7 py-5">
+        <div ref={content} className="mx-auto w-full max-w-[760px] space-y-7 py-5">
           {desk.entries.map((entry, index) => {
             if (entry.kind === "user") {
               // Only the newest question is an anchor. `ref` is never cleared on
@@ -396,7 +400,8 @@ export function ChatView() {
               const isAnchor = index === lastQuestionIndex
               return (
                 <UserMessage
-                  key={entry.key}
+                  // Questions are append-only; admission changes the server key, not the row.
+                  key={`question-${index}`}
                   text={entry.text}
                   pending={entry.pending}
                   attachments={entry.attachments}
@@ -685,47 +690,49 @@ function UserMessage({
           surface rather than the muted one: on this ground `bg-muted` sits a
           percent off the page and stops reading as a bubble at all. */}
       <p
-        className={cn(
-          "max-w-[82%] animate-vg-message-in whitespace-pre-wrap rounded-2xl bg-surface-bubble px-[1.05em] py-[0.7em] text-[0.95rem] leading-[1.5] text-foreground",
-          pending && "opacity-70",
-        )}
+        aria-busy={pending || undefined}
+        className="max-w-[82%] motion-safe:animate-vg-message-in whitespace-pre-wrap rounded-2xl bg-surface-bubble px-[1.05em] py-[0.7em] text-[0.95rem] leading-[1.5] text-foreground"
       >
         {text}
       </p>
 
       {/* Nothing to act on until the question exists on the backend: a pending
           bubble is a sentence this tab has not yet been told was written. */}
-      {!pending && (
-        <div className="flex items-center gap-0.5 pr-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100">
-          <IconButton label={copied ? "Đã sao chép" : "Sao chép"} size="sm" onClick={() => void copy()}>
-            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          </IconButton>
-          <IconButton
-            label="Sửa câu hỏi"
-            size="sm"
-            onClick={() => dispatch({ type: "ask", text })}
-          >
-            <Pencil className="size-3.5" />
-          </IconButton>
-          <IconButton
-            label="Gửi lại"
-            size="sm"
-            // A Turn is running: the composer offers Stop rather than Send for
-            // this stretch, and this control says the same thing by going inert.
-            disabled={desk.canCancel}
-            // Its own attachments, because this control re-asks *this*
-            // question: the ids are on the message the button sits under.
-            onClick={() =>
-              desk.resend(
-                text,
-                attachments.map((attachment) => attachment.id),
-              )
-            }
-          >
-            <RotateCcw className="size-3.5" />
-          </IconButton>
-        </div>
-      )}
+      <div
+        aria-hidden={pending || undefined}
+        className={cn(
+          "flex h-7 items-center gap-0.5 pr-1 opacity-0 transition-opacity motion-reduce:transition-none",
+          pending ? "invisible" : "focus-within:opacity-100 group-hover/msg:opacity-100",
+        )}
+      >
+        <IconButton label={copied ? "Đã sao chép" : "Sao chép"} size="sm" onClick={() => void copy()}>
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        </IconButton>
+        <IconButton
+          label="Sửa câu hỏi"
+          size="sm"
+          onClick={() => dispatch({ type: "ask", text })}
+        >
+          <Pencil className="size-3.5" />
+        </IconButton>
+        <IconButton
+          label="Gửi lại"
+          size="sm"
+          // A Turn is running: the composer offers Stop rather than Send for
+          // this stretch, and this control says the same thing by going inert.
+          disabled={desk.canCancel || desk.isSubmitting || desk.isCancelling}
+          // Its own attachments, because this control re-asks *this*
+          // question: the ids are on the message the button sits under.
+          onClick={() =>
+            desk.resend(
+              text,
+              attachments.map((attachment) => attachment.id),
+            )
+          }
+        >
+          <RotateCcw className="size-3.5" />
+        </IconButton>
+      </div>
     </div>
   )
 }

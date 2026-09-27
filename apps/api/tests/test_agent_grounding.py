@@ -408,3 +408,142 @@ def test_the_readers_threshold_is_theirs_whatever_unit_the_answer_adds():
     report = check("Có 9 mã có P/B dưới 1,5 lần.", [STB_NOW], user_text="mã nào có P/B dưới 1,5?")
 
     assert report.figures == ()
+
+
+def test_labels_the_model_wrote_are_removed_before_the_check() -> None:
+    draft = (
+        "Bổ nhiệm Phó TGĐ cuối 2025 [1 · tháng 5/2026]\n"
+        "| Ông Đức | Tháng 5/2026 [1 · tháng 5/2026] | Cựu lãnh đạo LPBank [1 · tháng 5/2026] |\n"
+        "ROE 9% [chưa kiểm chứng]"
+    )
+    assert grounding.normalise(draft) == (
+        "Bổ nhiệm Phó TGĐ cuối 2025\n"
+        "| Ông Đức | Tháng 5/2026 | Cựu lãnh đạo LPBank |\n"
+        "ROE 9%"
+    )
+    # Links and plain brackets are prose, not labels.
+    assert grounding.normalise("xem [báo cáo](https://a.vn) [1]") == "xem [báo cáo](https://a.vn) [1]"
+
+
+def test_a_full_date_no_source_names_is_unverified():
+    page = page_call(
+        "Ông Loic Faussier chính thức giữ chức Tổng giám đốc từ ngày 10/7. "
+        "Quyết định ký ngày 08-07-2026.",
+        published="2026-07-11T08:00:00+07:00",
+    )
+    answer = (
+        "Nhậm chức 13/07/2026, theo quyết định ký 08/07/2026, hiệu lực 10/07/2026. "
+        "Tin đăng 11/07/2026; bạn hỏi về 01/01/2026; hôm nay 26/09/2026."
+    )
+    report = check(answer, [page], user_text="Từ 01/01/2026 STB đổi lãnh đạo thế nào?")
+
+    assert [(item.text, item.reason) for item in report.unverified] == [
+        ("13/07/2026", "date_not_in_sources")
+    ]
+    annotated = grounding.annotate(report)
+    assert "Nhậm chức 13/07/2026 [chưa kiểm chứng]" in annotated
+    assert "ngày này không có trong dữ liệu" in grounding.repair_note(report)
+
+
+def test_a_month_a_year_and_a_link_are_not_dates_to_check():
+    report = check("Bổ nhiệm tháng 5/2026, năm 2025, xem https://a.vn/tin-13/07/2026.", [])
+    assert report.unverified == ()
+
+
+def test_tr_is_millions_and_a_wrong_magnitude_still_fails():
+    volume = market_call([("2026-09-25", 76_500, 14_512_300)], call_id="mv")
+    right = check("Khối lượng phiên gần nhất 14,5tr cổ phiếu.", [volume])
+    wrong = check("Khối lượng phiên gần nhất 14,5tr cổ phiếu, trang 3.", [market_call([("2026-09-25", 76_500, 14_512)], call_id="mw")])
+
+    assert [f.status for f in right.figures] == [FigureStatus.GROUNDED]
+    assert [f.status for f in wrong.figures] == [FigureStatus.UNVERIFIED]
+
+
+def test_a_net_sell_written_as_a_word_matches_a_signed_net_buy():
+    screen = TurnToolCall(
+        id="s1",
+        name="screen_stocks",
+        status=ToolCallStatus.OK,
+        result_text=json.dumps(
+            {
+                "publisher": "KB Securities",
+                "source": "screener",
+                "source_class": "store",
+                "title": "Lọc cổ phiếu · Bất động sản",
+                "retrieved_at": "2026-09-26T14:00:00+07:00",
+                "content_sha256": "c" * 64,
+                "excerpt": "2026-09-25: NVL · khối ngoại mua ròng -1.723.800 cổ phiếu",
+            },
+            ensure_ascii=False,
+        ),
+    )
+    report = check("NVL phiên 25/09/2026: khối ngoại bán ròng 1,72tr cổ phiếu.", [screen])
+    assert [f.status for f in report.figures] == [FigureStatus.GROUNDED]
+
+
+# -- a table's column names the period ---------------------------------------
+
+
+def ratios_call(symbol: str, lines: list[str], *, call_id: str = "r1") -> TurnToolCall:
+    """A statements read written the way ``get_financial_ratios`` writes its excerpt."""
+    payload = {
+        "symbol": symbol,
+        "publisher": "Vietcap",
+        "source": "vci",
+        "source_class": "store",
+        "evidence_kind": "store_figure",
+        "title": f"{symbol} · chỉ số tài chính · Quý 2/2026",
+        "as_of": "2026-06-30T00:00:00+07:00",
+        "retrieved_at": "2026-09-26T14:00:00+07:00",
+        "content_sha256": hashlib.sha256(call_id.encode()).hexdigest(),
+        "excerpt": "\n".join(
+            [f"{symbol} · chỉ số tài chính · nguồn Vietcap · mỗi dòng bắt đầu bằng ngày kết thúc kỳ", *lines]
+        ),
+    }
+    return TurnToolCall(
+        id=call_id,
+        name="get_financial_ratios",
+        status=ToolCallStatus.OK,
+        result_text=json.dumps(payload, ensure_ascii=False),
+    )
+
+
+HPG_RATIOS = ratios_call(
+    "HPG",
+    [
+        "2026-06-30: Quý 2/2026 · Nợ/Vốn CSH 0,97 lần · ROE 17,38%",
+        "2025-12-31: Quý 4/2025 · Nợ/Vốn CSH 0,91 lần · ROE 12,69%",
+    ],
+)
+
+
+def test_a_cell_filled_from_another_quarter_than_its_column_is_the_wrong_period():
+    """The live miss (2026-09-27): the Q4/2025 column held Q2/2026's 0,97, cited to 30/06/2026."""
+    report = check(
+        "| Chỉ số | Quý 4/2025 | Quý 2/2026 |\n|---|---|---|\n| Nợ/Vốn CSH | 0,97 lần | 0,97 lần |",
+        [HPG_RATIOS],
+    )
+
+    first, second = report.figures
+    assert (first.status, first.reason) == (FigureStatus.UNVERIFIED, "wrong_period")
+    assert second.status is FigureStatus.GROUNDED
+    assert second.source_date == date(2026, 6, 30)
+
+
+def test_a_cell_matching_its_columns_quarter_is_grounded():
+    report = check(
+        "| Chỉ số | Q4/2025 | Q2/2026 |\n|:--|:-:|:-:|\n| ROE | 12,69% | 17,38% |",
+        [HPG_RATIOS],
+    )
+
+    assert [f.status for f in report.figures] == [FigureStatus.GROUNDED] * 2
+    assert [f.source_date for f in report.figures] == [date(2025, 12, 31), date(2026, 6, 30)]
+
+
+def test_a_ticker_column_scopes_the_cell_to_that_tickers_statements():
+    """Row periods, ticker columns: MWG's column cannot rest on PNJ's line."""
+    mwg = ratios_call("MWG", ["2026-06-30: Quý 2/2026 · Biên lợi nhuận gộp 22,17%"], call_id="a")
+    pnj = ratios_call("PNJ", ["2026-06-30: Quý 2/2026 · Biên lợi nhuận gộp 18,43%"], call_id="b")
+    report = check("| Kỳ | MWG | PNJ |\n|---|---|---|\n| Q2/2026 | 18,43% | 18,43% |", [mwg, pnj])
+
+    assert [f.status for f in report.figures] == [FigureStatus.UNVERIFIED, FigureStatus.GROUNDED]

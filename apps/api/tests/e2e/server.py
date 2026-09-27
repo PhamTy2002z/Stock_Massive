@@ -170,7 +170,7 @@ class ScriptedLoop:
         self._checkpoint = checkpoint
         self._publisher = publisher
 
-    async def run(self, request, cancelled) -> TurnOutcome:
+    async def run(self, request, cancelled, *, cancel_event=None) -> TurnOutcome:
         self._control.publisher = self._publisher
         self._control.started.set()
         await self._control.release.wait()
@@ -210,9 +210,9 @@ def build_service() -> AlphaDeskService:
     slots = SessionSlots()
     config = _config()
 
-    # ``lane`` is accepted and dropped: a scripted loop runs no rounds, so it has
-    # no ceilings to take from the Turn's lane.
-    def loop_factory(*, checkpoint, publisher, lane):
+    # The scripted loop runs no tools or model rounds; it accepts the production
+    # factory's lane and toolsets while the control endpoints supply its events.
+    def loop_factory(*, checkpoint, publisher, lane, toolsets):
         return ScriptedLoop(CONTROL, checkpoint=checkpoint, publisher=publisher)
 
     return AlphaDeskService(
@@ -243,7 +243,8 @@ Base.metadata.create_all(
     checkfirst=True,
 )
 
-set_alpha_desk(build_service())
+SERVICE = build_service()
+set_alpha_desk(SERVICE)
 
 
 # -- the control surface ---------------------------------------------------
@@ -300,6 +301,15 @@ async def churn(request: ChurnRequest) -> dict[str, int]:
 @control_router.post("/turn/finish")
 async def finish() -> dict[str, bool]:
     CONTROL.release.set()
+    # Cleanup must wait for the terminal transaction before deleting its rows.
+    tasks = [
+        running.task
+        for turn_id in SERVICE.turns.running_ids
+        if (running := SERVICE.turns.running(turn_id)) is not None
+        and running.task is not None
+    ]
+    if tasks:
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
     return {"ok": True}
 
 

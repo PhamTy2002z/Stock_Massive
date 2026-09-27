@@ -94,6 +94,10 @@ services:
       # accidental licence breach.
       DEPLOYMENT_PROFILE: ${DEPLOYMENT_PROFILE:-production}
       MARKET_DATA_ENABLED: ${MARKET_DATA_ENABLED:-false}
+      # The provider's community key (60 requests/min instead of 20). The
+      # package reads it from the environment itself, and its presence lifts the
+      # host's own request gate to match (`agent/tools/vnstock_provider.py`).
+      VNSTOCK_API_KEY: ${VNSTOCK_API_KEY:-}
       # The startup Capability Probe spends real provider tokens and refuses to
       # boot the whole API when the route cannot answer it. Forwarded so an
       # operator on a constrained route (expired plan, drained credits) can

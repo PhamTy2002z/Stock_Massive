@@ -16,7 +16,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, render } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 const desk = {
   threadId: "thread-1" as string | null,
@@ -50,6 +50,8 @@ vi.mock("./desk-state", () => ({
   useDesk: () => desk,
   DeskProvider: ({ children }: { children: React.ReactNode }) => children,
 }))
+
+vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ user: null, isPending: false }) }))
 
 import { ChatView } from "./view-chat"
 import { ShellProvider } from "./shell-state"
@@ -99,6 +101,9 @@ const followUp = {
 
 /** Every scroll the view asked for, in order. */
 let scrolls: number[] = []
+let contentHeight = CONTENT_HEIGHT
+let resize: () => void
+const disconnect = vi.fn()
 const realScrollTo = HTMLElement.prototype.scrollTo
 const realRect = Element.prototype.getBoundingClientRect
 
@@ -114,6 +119,12 @@ function tailHeight(): number {
 
 beforeEach(() => {
   scrolls = []
+  contentHeight = CONTENT_HEIGHT
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(callback: () => void) { resize = callback }
+    observe() {}
+    disconnect = disconnect
+  })
   desk.entries = []
   desk.threadId = "thread-1"
 
@@ -128,7 +139,7 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
     configurable: true,
     get(this: HTMLElement) {
-      return isTranscript(this) ? CONTENT_HEIGHT + tailHeight() : 0
+      return isTranscript(this) ? contentHeight + tailHeight() : 0
     },
   })
   Element.prototype.getBoundingClientRect = function (this: Element) {
@@ -144,6 +155,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
   HTMLElement.prototype.scrollTo = realScrollTo
   Element.prototype.getBoundingClientRect = realRect
   // @ts-expect-error restoring jsdom's own zero-height getters
@@ -186,6 +198,7 @@ describe("asking a follow-up", () => {
     desk.entries = [...answered, followUp]
     act(() => view.rerender(shell()))
     const afterAsking = scrolls.length
+    const bubble = screen.getByText(followUp.text)
 
     // Two keys, one question. Re-anchoring on the swap would jump the page a
     // second time for nothing.
@@ -193,6 +206,7 @@ describe("asking a follow-up", () => {
     act(() => view.rerender(shell()))
 
     expect(scrolls.length).toBe(afterAsking)
+    expect(screen.getByText(followUp.text)).toBe(bubble)
   })
 
   it("holds the transcript still while the answer streams in", () => {
@@ -227,4 +241,34 @@ describe("asking a follow-up", () => {
     expect(tailHeight()).toBe(EXPECTED_TAIL)
     expect(scrolls.length).toBe(landed)
   })
+})
+
+it("keeps the first question pinned when thread creation finishes", () => {
+  desk.threadId = null
+  desk.entries = []
+  const view = render(shell())
+  desk.entries = [followUp]
+  act(() => view.rerender(shell()))
+  const tail = tailHeight()
+  expect(tail).toBeGreaterThan(0)
+  desk.threadId = "created-thread"
+  act(() => view.rerender(shell()))
+  expect(tailHeight()).toBe(tail)
+})
+
+it("tracks animated content height and stops following when the reader scrolls away", () => {
+  desk.entries = [...answered]
+  const view = render(shell())
+  const transcript = document.querySelector<HTMLElement>(".overflow-y-auto")!
+  contentHeight += 100
+  act(() => resize())
+  expect(transcript.scrollTop).toBe(contentHeight)
+  fireEvent.wheel(transcript)
+  transcript.scrollTop = 0
+  fireEvent.scroll(transcript)
+  contentHeight += 100
+  act(() => resize())
+  expect(transcript.scrollTop).toBe(0)
+  view.unmount()
+  expect(disconnect).toHaveBeenCalled()
 })

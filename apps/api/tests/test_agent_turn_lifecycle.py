@@ -841,6 +841,9 @@ async def test_the_canonical_message_says_which_lane_answered_and_why(owner):
         for part in trail[1:]
         if part["kind"] == "model_attempt"
     ] == [
+        # Prose on the planning pass, then the one retry that asks for the batch.
+        "running",
+        "completed",
         "running",
         "completed",
     ]

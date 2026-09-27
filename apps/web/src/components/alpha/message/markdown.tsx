@@ -1,10 +1,10 @@
 "use client"
 
-import { useMemo, useRef, type ComponentPropsWithoutRef } from "react"
+import { memo, useMemo, useRef, type ComponentPropsWithoutRef } from "react"
 import ReactMarkdown, { type Options } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
-import { readSources, rehypeFigureMarkers } from "@/lib/alpha-desk/figure-markers"
+import { readSources, rehypeFigureMarkers, withoutUnverifiedNote } from "@/lib/alpha-desk/figure-markers"
 import { rehypeWordCadence } from "@/lib/alpha-desk/word-cadence"
 import { cn } from "@/lib/utils"
 
@@ -41,11 +41,12 @@ import { MarkdownCopyButton } from "./markdown-copy-button"
  * through.
  *
  * **The host's figure labels become chips** (`figure-markers`): a cited figure
- * shows its source number and date, a stale one says so, and one nothing backs
- * is marked in the caution tone — never the market's up/down red, which a reader
- * can invert in settings and which means direction, not doubt.
+ * draws nothing (its source is in the closing list), and neither does one nothing
+ * backs (owner decision, 2026-09-27); a stale one says so in the caution tone —
+ * never the market's up/down red, which a reader can invert in settings and
+ * which means direction, not doubt.
  */
-export function Markdown({
+export const Markdown = memo(function Markdown({
   text,
   animate = false,
   className,
@@ -95,11 +96,11 @@ export function Markdown({
           td: TableCell,
         }}
       >
-        {text}
+        {withoutUnverifiedNote(text)}
       </ReactMarkdown>
     </div>
   )
-}
+})
 
 /**
  * The hast node react-markdown hands a component alongside the element's own

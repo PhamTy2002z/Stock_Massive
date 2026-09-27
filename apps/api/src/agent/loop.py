@@ -244,7 +244,7 @@ logger = logging.getLogger(__name__)
 # the ceiling rather than enforce it — the guardrail rungs, the attachment token
 # arithmetic, the replay harness — are describing the lane nearly every Turn
 # gets, and a test compares the two so they cannot drift.
-MAX_TOOL_ROUNDS = 10
+MAX_TOOL_ROUNDS = 25
 
 # In-process is correct because uvicorn runs a single worker.
 #
@@ -262,8 +262,10 @@ SESSION_CONCURRENCY = 3
 # with ``finish_reason`` ``length``: a truncated answer rather than a short one.
 #
 # Every lane carries this same figure, and that is a decision rather than an
-# oversight: a lane buys more *rounds of evidence*, not a longer reply.
-DEFAULT_MAX_OUTPUT_TOKENS = 4_000
+# oversight: a lane buys more *rounds of evidence*, not a longer reply. 16,000
+# since 2026-09-27: the internal route is unmetered, and a sector comparison
+# with its tables ran out at 4,000.
+DEFAULT_MAX_OUTPUT_TOKENS = 16_000
 
 # What the route calls a completion it had to cut short, and the stable reason
 # the Turn ends under when it does. Both are strings the interactive surface
@@ -368,7 +370,7 @@ TOOL_TIMEOUT_SECONDS = 30.0
 #
 # The light lane's figure. A Turn reads its own lane's deadline, and a caller may
 # still pass one explicitly — which is how a test forces the expiry it is about.
-TURN_DEADLINE_SECONDS = 1_800.0
+TURN_DEADLINE_SECONDS = 3_600.0
 
 # How many calls to tools that cost money or reach off this deployment one Turn
 # may make. A round cap alone does not bound this: one round may fan out to five
@@ -408,7 +410,7 @@ TURN_DEADLINE_SECONDS = 1_800.0
 # measurement, so a route change is a reason to run the arithmetic again rather
 # than to trust this comment. A lane that raises it is making the same claim
 # about money and owes the same measurement.
-MAX_EXTERNAL_TOOL_CALLS = 20
+MAX_EXTERNAL_TOOL_CALLS = 80
 EXTERNAL_TOOL_EXHAUSTED_MESSAGE = (
     "This turn has reached its limit on external tool calls. Answer from what has "
     "already been gathered, and say what you could not look up."
@@ -525,6 +527,18 @@ SYSTEM_NOTE_TOKENS = 160
 # for this note to point at, and spending a call to ask it to try again would be
 # the apology call this loop does not make.
 MAX_EMPTY_NUDGES = 1
+# The deep planning pass is asked for tools with ``tool_choice="required"``, and
+# a route may ignore it: on 2026-09-27 the kiro route answered a Signal Desk
+# chart request and a long pasted-news question in prose on the planning pass,
+# and both Turns settled with an empty ledger and no chart. One more asking,
+# saying why the prose was not taken, is what a route that will not be forced
+# gets; a second prose reply still fails closed.
+MAX_PLANNING_RETRIES = 1
+PLANNING_RETRY_NOTE = (
+    "Your last reply on the planning pass contained no tool call, so it was not "
+    "used and the reader has not seen it. This pass accepts only the tool calls "
+    "the note below asks for, in one batch, and no text."
+)
 EMPTY_AFTER_TOOLS_NOTE = (
     "Your last message contained no answer for the reader — only the sentence "
     "introducing the tool calls. The results of those calls are above. Write the "
@@ -1132,6 +1146,7 @@ class _TurnState:
     # without a reply once has been asked again already, and rediscovering that in
     # a later round costs another call.
     empty_nudges: int = 0
+    planning_retries: int = 0
     # Per-Turn for the same reason: a route that could not write a call's
     # arguments twice will not learn to on the third asking.
     argument_repairs: int = 0
@@ -1673,6 +1688,7 @@ class AgentLoop:
                     state=state,
                     completion=completion,
                     last_iteration=round_index + 1 == loop_iterations,
+                    market=market,
                 )
                 if finished is not None:
                     return finished
@@ -1839,11 +1855,22 @@ class AgentLoop:
         state: _TurnState,
         completion: Completion,
         last_iteration: bool,
+        market: bool,
     ) -> TurnOutcome | None:
         """Advance only after a pass actually returned its typed draft."""
 
         assert state.as_of is not None
         if state.pipeline_stage is PipelineStage.PLANNING:
+            if state.planning_retries < MAX_PLANNING_RETRIES and not last_iteration:
+                state.planning_retries += 1
+                logger.warning(
+                    "Turn %s planning pass answered in prose with no tool call "
+                    "(model=%s); asking once more for the batch",
+                    request.request_message_id,
+                    completion.model,
+                )
+                state.note = f"{PLANNING_RETRY_NOTE}\n\n{planner_note(market=market)}"
+                return None
             return await self._fail_deep_pipeline(
                 request, state, "planner_returned_no_search_batch"
             )
@@ -3484,6 +3511,9 @@ class AgentLoop:
         deep = self._lane.name == DEEP.name
         if report.figures:
             self._replace_answer(state, grounding.annotate(report, cite=not deep))
+        elif state.answer and report.answer != state.answer:
+            # No figure to label, but the draft carried labels of its own.
+            self._replace_answer(state, report.answer)
         # Only beside an answer: a ledger is anchored to the message it
         # substantiates, and a Turn that wrote no prose — or ended on a question
         # card — has no answer for figures to be checked in.

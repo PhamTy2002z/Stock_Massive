@@ -588,3 +588,21 @@ def test_an_index_is_read_in_points_and_never_scaled_like_a_price():
     assert "đóng 1.785,11 điểm" in lines[1]
     assert "thay đổi +10,02 điểm (+0,56%)" in lines[1]
     assert "đồng" not in result["excerpt"]
+
+
+def test_a_repeated_read_is_served_from_memory_and_keeps_its_fetch_time() -> None:
+    tools = tools_returning(daily(24, 25, 26, 27, 28))
+    asked: list[tuple[Any, ...]] = []
+    frame = tools._history
+    tools._history = lambda *args, **kwargs: asked.append(args) or frame(*args, **kwargs)  # type: ignore[method-assign]
+
+    first = read(tools)
+    later = ToolContext(user_id=11, now=NOW + timedelta(minutes=30))
+    second = read(tools, context=later)
+    other = read(tools, symbol="VNM", context=later)
+
+    assert len(asked) == 2  # FPT once, VNM once
+    assert second["rows"] == first["rows"]
+    # The bars were sent when the first call ran, not when the second read them.
+    assert second["retrieved_at"] == first["retrieved_at"] == NOW.isoformat()
+    assert other["retrieved_at"] == later.now.isoformat()

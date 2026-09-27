@@ -58,6 +58,7 @@ from src.core.llm.client import (
     EMPTY_RUN_FOR_DETERMINISM,
     MAX_EMPTY_ATTEMPTS,
     MAX_ROUTE_ATTEMPTS,
+    RATE_LIMIT_WAITS,
     ReservedLLMClient,
 )
 from src.core.llm.config import (
@@ -708,20 +709,43 @@ class TestBreakerInTheClient:
         assert transport.seen == []
         assert raised.value.retry_after is not None
 
-    async def test_a_rate_limit_is_never_retried_even_with_the_breaker_off(self):
-        """``errors.RouteRateLimited`` is unchanged by any of this.
+    async def test_a_short_throttle_is_waited_out_and_the_call_answers(self):
+        """A subscription route's "please wait" 429 is served moments later."""
+        waited: list[float] = []
 
-        The route answered, precisely, and what it said was *not now*. The
-        breaker shares that answer; it does not turn it into a retry.
-        """
+        async def sleep(seconds: float) -> None:
+            waited.append(seconds)
+
         transport = Script(
-            RouteRateLimited("out of allowance (429)"), answer()
+            RouteRateLimited("Too many requests (429)", retry_after=5.0), answer()
+        )
+        llm = ReservedLLMClient(
+            transport, Ledger(), config=config(), breaker=RouteBreaker(enabled=False), sleep=sleep
+        )
+
+        result = await llm.complete(request(), spend())
+
+        assert result.text == answer().text
+        assert len(transport.seen) == 2
+        assert waited == [5.0]
+
+    async def test_a_long_hold_is_an_allowance_and_is_raised_at_once(self):
+        transport = Script(
+            RouteRateLimited("out of allowance (429)", retry_after=3_600.0), answer()
         )
 
         with pytest.raises(RouteRateLimited):
             await client(transport).complete(request(), spend())
 
         assert len(transport.seen) == 1
+
+    async def test_a_throttle_that_never_lifts_is_raised_after_its_waits(self):
+        transport = Script(*[RouteRateLimited("Too many requests (429)")] * 5)
+
+        with pytest.raises(RouteRateLimited):
+            await client(transport).complete(request(), spend())
+
+        assert len(transport.seen) == 1 + RATE_LIMIT_WAITS
 
 
 class TestRebuildingASharedTransport:

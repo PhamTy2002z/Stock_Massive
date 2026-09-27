@@ -92,7 +92,8 @@ class GuardrailThresholds:
     five it needed five byte-identical calls fanned out inside a single round,
     which is the one shape the ladder should not have to depend on.
 
-    ``same_tool_failure_halt_after=20``: the external-call ceiling itself. Twenty
+    ``same_tool_failure_halt_after=80``: the external-call ceiling itself (20
+    until 2026-09-27, when the internal deployment opened the lanes). That many
     failures of one tool is that whole allowance spent on nothing, so the two
     numbers are one fact and are written as one — change either and change
     both. It moved from six with the ceiling on 2026-08-29, and following it was
@@ -112,7 +113,7 @@ class GuardrailThresholds:
     same_tool_failure_warn_after: int = 3
     no_progress_warn_after: int = 2
     exact_failure_block_after: int = 3
-    same_tool_failure_halt_after: int = 20
+    same_tool_failure_halt_after: int = 80
 
 
 DEFAULT_THRESHOLDS = GuardrailThresholds()

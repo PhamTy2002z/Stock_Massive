@@ -119,7 +119,7 @@ MAX_USER_INPUT_BYTES = 8 * 1024
 # accepts one explicitly, and a number given here overrides every lane — which is
 # what an operator capping a deployment, or a test forcing an expiry, is asking
 # for.
-TURN_DEADLINE_SECONDS = 1_800.0
+TURN_DEADLINE_SECONDS = 3_600.0
 
 # How long active Turns get to reach a safe checkpoint. The container's stop
 # grace must exceed it, or the checkpoint this buys never lands.

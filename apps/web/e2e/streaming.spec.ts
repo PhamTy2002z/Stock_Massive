@@ -52,6 +52,55 @@ test.afterEach(async ({ request }) => {
   await purge(request, email)
 })
 
+test("Enter keeps the send control and question stable through admission and streaming", async ({ page, request }, testInfo) => {
+  const errors: string[] = []
+  page.on("pageerror", (error) => errors.push(error.message))
+  let admit!: () => void
+  const admission = new Promise<void>((resolve) => { admit = resolve })
+  await page.route("**/api/alpha-desk/threads", async (route) => {
+    if (route.request().method() === "POST") await admission
+    await route.continue()
+  })
+  const field = page.getByLabel("Hỏi VisgniteAI")
+  await field.fill("Theo dõi các bước phân tích VCB")
+  await expect(page.getByRole("button", { name: "Gửi", exact: true })).toBeEnabled()
+  await field.press("Enter")
+  const sending = page.getByRole("button", { name: "Đang gửi…", exact: true })
+  await expect(sending).toBeVisible()
+  const button = await sending.elementHandle()
+  const question = await page.locator("p").filter({ hasText: "Theo dõi các bước phân tích VCB" }).elementHandle()
+  const before = await sending.boundingBox()
+  admit()
+  expect((await request.post(`${API_ORIGIN}/e2e/turn/wait`)).ok()).toBeTruthy()
+  const stop = page.getByRole("button", { name: "Dừng", exact: true })
+  await expect(stop).toBeEnabled()
+  expect(await stop.evaluate((node, previous) => node === previous, button)).toBe(true)
+  expect(await page.locator("p").filter({ hasText: "Theo dõi các bước phân tích VCB" }).evaluate(
+    (node, previous) => node === previous, question,
+  )).toBe(true)
+  const during = await stop.boundingBox()
+  expect(during?.width).toBe(before?.width)
+  expect(during?.height).toBe(before?.height)
+  await churn(request, 1)
+  await expect(page.getByRole("heading", { name: "Bước 1", exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("chat-steps-desktop.png") })
+  await say(request, "**Kết quả phân tích**\n\nDữ liệu được trình bày theo từng bước để dễ đối chiếu.")
+  await expect(page.getByLabel(ANSWER_LABEL)).toContainText("dễ đối chiếu")
+  await finish(request)
+  await expect(page.getByRole(CANONICAL_MARK.role, { name: CANONICAL_MARK.name })).toBeVisible()
+  await expect(page.getByLabel(ANSWER_LABEL)).toHaveCount(1)
+  await page.setViewportSize({ width: 375, height: 812 })
+  await expect.poll(() => page.locator("main").evaluate((node) => node.getBoundingClientRect().width)).toBe(375)
+  await expect(field).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath("chat-answer-mobile.png") })
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  expect(await page.locator("p").filter({ hasText: "Theo dõi các bước phân tích VCB" }).evaluate(
+    (node) => getComputedStyle(node).animationName,
+  )).toBe("none")
+  expect(errors).toEqual([])
+})
+
 test("the first delta and a heartbeat arrive before the Turn completes", async ({
   page,
   request,

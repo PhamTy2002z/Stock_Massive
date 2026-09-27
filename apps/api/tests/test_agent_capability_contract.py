@@ -88,7 +88,7 @@ def test_every_shipped_description_says_when_to_use_it_and_where_arguments_come_
 def test_shipped_schema_order_and_display_contract_are_locked():
     expected_runtime = {
         "web_search": ("Tìm trên web", True, 8_000, "query", False),
-        "fetch_url": ("Đọc trang", True, 22_000, "url", False),
+        "fetch_url": ("Đọc trang", True, 62_000, "url", False),
         "session_search": ("Tìm trong hội thoại trước", True, None, "query", False),
         "remember_fact": ("Ghi nhớ", True, None, "title", False),
         "recall_facts": ("Đọc lại ghi chú", True, None, "query", False),

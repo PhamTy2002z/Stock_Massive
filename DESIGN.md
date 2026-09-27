@@ -340,6 +340,15 @@ segmented controls use a raised neutral surface; sidebar selection may use the
 single accent stroke. On compact widths, secondary labels disappear before
 icons or core controls.
 
+The sidebar offers new chat and a labeled conversation search with the platform
+keyboard shortcut. It shows pinned conversations only when present and up to
+20 recent unpinned conversations. When more exist, **Xem tất cả** opens the
+complete searchable list. Search supports arrow-key selection and Enter to
+open the selected conversation. Empty results offer clearing the query or
+starting a new chat. Unavailable screener, saved-report, and watchlist entries
+are omitted. Conversation menu controls remain visible on touch devices, and
+opening or creating a conversation dismisses a floating sidebar.
+
 ### Figures and Evidence
 
 Comparable figures always use JetBrains Mono and tabular numerals. Positive,
@@ -353,6 +362,17 @@ The composer is one 18px rounded, sunken card containing the text field and all
 message controls. It can float above the transcript with the composer shadow.
 The field grows to 150px before scrolling, preserves a draft across view changes,
 and remains available while an answer arrives.
+
+Send, admission, Stop, and cancellation share one 36px transparent control.
+Send uses a 24px seven-bar waveform, with a subtle surface on hover. Keep
+the size stable; change the icon and accessible label. Enter must
+not submit during admission or cancellation. Reserve the question action row
+before admission so server confirmation does not shift the answer.
+
+The research timeline numbers the actual rounds as steps. Show running work,
+completed calls, and failures distinctly, with counts while a group is running.
+Transcript scrolling follows rendered height, including timeline transitions,
+and respects readers who scroll away from the latest answer.
 
 ## Do's and Don'ts
 

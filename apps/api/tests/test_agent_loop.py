@@ -1297,6 +1297,8 @@ async def test_unparseable_arguments_twice_settle_the_turn_with_what_it_has() ->
 @pytest.mark.asyncio
 async def test_a_turn_cannot_spend_more_than_its_external_call_budget() -> None:
     calls = 0
+    # Enough per round that the rounds outlast the external ceiling.
+    per_round = MAX_EXTERNAL_TOOL_CALLS // MAX_TOOL_ROUNDS + 1
 
     async def counted(_context, arguments):
         nonlocal calls
@@ -1306,7 +1308,11 @@ async def test_a_turn_cannot_spend_more_than_its_external_call_budget() -> None:
     registry.register(entry("web_search", counted), override=True)
     client = FakeClient(
         [
-            wants(*(["web_search"] * 3), prefix=f"r{index}", query=f"q{index}")
+            wants(
+                *(["web_search"] * per_round),
+                prefix=f"r{index}",
+                query=f"q{index}",
+            )
             for index in range(MAX_TOOL_ROUNDS)
         ]
     )
@@ -1317,7 +1323,7 @@ async def test_a_turn_cannot_spend_more_than_its_external_call_budget() -> None:
     refused = [
         call for call in outcome.tool_calls if call.error == "external_budget_exhausted"
     ]
-    assert len(refused) == MAX_TOOL_ROUNDS * 3 - MAX_EXTERNAL_TOOL_CALLS
+    assert len(refused) == MAX_TOOL_ROUNDS * per_round - MAX_EXTERNAL_TOOL_CALLS
     # A refused call is answered rather than dropped: a call with no result at
     # all is a transcript the model has to guess at.
     assert all(call.result_text == EXTERNAL_TOOL_EXHAUSTED_MESSAGE for call in refused)
@@ -1479,30 +1485,40 @@ async def test_a_local_tool_is_not_charged_to_the_external_budget() -> None:
 # -- the guardrail ladder ----------------------------------------------------
 
 
+def halting_rounds() -> list[Completion]:
+    """Full rounds of a failing tool until the halt rung (the external ceiling)."""
+    from src.agent.executor import MAX_STORE_CALLS_PER_ROUND
+
+    return [
+        Completion(
+            model=SESSION_MODEL,
+            tool_calls=tuple(
+                ToolCall(id=f"c{index}", name="broken", arguments={"query": f"q{index}"})
+                for index in range(start, min(start + MAX_STORE_CALLS_PER_ROUND, MAX_EXTERNAL_TOOL_CALLS))
+            ),
+        )
+        for start in range(0, MAX_EXTERNAL_TOOL_CALLS, MAX_STORE_CALLS_PER_ROUND)
+    ]
+
+
 @pytest.mark.asyncio
 async def test_a_halt_makes_the_next_call_the_answering_one() -> None:
-    # The halt rung is the whole external allowance, and one round can reach it:
-    # a round that fans out is exactly where the model loses the plot. It is also
-    # reachable across rounds — ``test_agent_guardrails`` holds that arithmetic —
-    # so this batch is a shape the ladder handles rather than the only one. The
-    # count follows ``MAX_EXTERNAL_TOOL_CALLS`` because the rung is that number.
-    halting_round = Completion(
-        model=SESSION_MODEL,
-        tool_calls=tuple(
-            ToolCall(id=f"c{index}", name="broken", arguments={"query": f"q{index}"})
-            for index in range(MAX_EXTERNAL_TOOL_CALLS)
-        ),
-    )
-    client = FakeClient([halting_round, answer(), answer()])
+    # The halt rung is the whole external allowance. One round can no longer
+    # hold that many calls (the per-round fan-out is smaller), so the failures
+    # arrive over consecutive full rounds — the shape of a model that keeps
+    # hammering a broken tool. The count follows ``MAX_EXTERNAL_TOOL_CALLS``
+    # because the rung is that number.
+    rounds = halting_rounds()
+    client = FakeClient([*rounds, answer(), answer()])
 
     outcome = await loop(client).run(turn_request())
 
-    assert outcome.rounds_used == 1
+    assert outcome.rounds_used == len(rounds)
     assert outcome.status is TurnStatus.COMPLETE
     # The rounds were not spent, so the Turn does not claim they were.
     assert outcome.rounds_exhausted is False
-    assert len(client.requests) == 2
-    second = client.requests[1]
+    assert len(client.requests) == len(rounds) + 1
+    second = client.requests[-1]
     assert not any(
         message.content == ROUNDS_EXHAUSTED_NOTE for message in second.messages
     )
@@ -1861,16 +1877,9 @@ async def test_the_ceiling_is_reported_once_with_the_lane_that_set_it() -> None:
 async def test_a_halted_tool_loop_says_so_with_the_ladders_own_code() -> None:
     """The ladder's guidance is prose for the model; this channel carries codes."""
     publisher = RecordingPublisher()
-    # The same fan-out the halt rung is measured on: one round of a tool that
-    # fails as many times as the ladder allows before it stops the tool loop.
-    halting_round = Completion(
-        model=SESSION_MODEL,
-        tool_calls=tuple(
-            ToolCall(id=f"c{index}", name="broken", arguments={"query": f"q{index}"})
-            for index in range(MAX_EXTERNAL_TOOL_CALLS)
-        ),
-    )
-    client = FakeClient([halting_round, answer("Xong.")])
+    # Rounds of a tool that fails as many times as the ladder allows before it
+    # stops the tool loop.
+    client = FakeClient([*halting_rounds(), answer("Xong.")])
 
     outcome = await loop(client, publisher=publisher).run(turn_request())
 
@@ -2388,12 +2397,19 @@ async def test_a_call_the_turn_refused_tells_the_surface_which_ceiling_refused_i
     exactly like a search engine going down — and the two ask opposite things of
     the reader, because only one of them is worth trying again.
     """
+    from src.agent.executor import MAX_EXTERNAL_CALLS_PER_ROUND
+
+    # One call more than the Turn allows, in full rounds inside the per-round
+    # fan-out gate, so it is the Turn ceiling that fires and not that one.
+    asked = MAX_EXTERNAL_TOOL_CALLS + 1
     rounds = [
-        wants(*(["web_search"] * 7), prefix="a", query="qa"),
-        wants(*(["web_search"] * 7), prefix="b", query="qb"),
-        wants(*(["web_search"] * 7), prefix="c", query="qc"),
-        answer(),
-    ]
+        wants(
+            *(["web_search"] * min(MAX_EXTERNAL_CALLS_PER_ROUND, asked - start)),
+            prefix=f"r{start}",
+            query=f"q{start}",
+        )
+        for start in range(0, asked, MAX_EXTERNAL_CALLS_PER_ROUND)
+    ] + [answer()]
     published: list[dict[str, Any]] = []
 
     class Surface:
@@ -2408,9 +2424,7 @@ async def test_a_call_the_turn_refused_tells_the_surface_which_ceiling_refused_i
 
     outcome = await loop(FakeClient(rounds), publisher=Surface()).run(turn_request())
 
-    # Twenty-one calls asked for, and the allowance is twenty: the last one had
-    # nothing left to spend. Seven a round is inside the per-round fan-out gate
-    # of eight, so this is the Turn ceiling firing and not that one.
+    # The last call had nothing left to spend.
     refused = [call for call in outcome.tool_calls if not call.dispatched]
     assert [call.error for call in refused] == ["external_budget_exhausted"]
     assert outcome.status is TurnStatus.COMPLETE
@@ -2760,7 +2774,9 @@ async def test_the_lane_a_memo_was_funded_on_carries_the_playbook_by_itself() ->
 
     await loop(client, lane=DEEP).run(turn_request(user_text="Bạn là ai?"))
 
-    assert _bodies(client) == [1]
+    # Prose on the planning pass is asked for the batch once more, and that call
+    # carries the playbook exactly as the first did.
+    assert _bodies(client) == [1, 1]
 
 
 @pytest.mark.asyncio

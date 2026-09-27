@@ -9,6 +9,7 @@ route — forced `tool_choice`, parallel tool calls through streaming, strict
 from __future__ import annotations
 
 import asyncio
+import time
 import json
 from datetime import date, datetime, timezone
 
@@ -105,7 +106,11 @@ class TransportHarness:
 
     def __init__(self, transport: OpenAICompatibleTransport) -> None:
         self.transport = transport
-        self.client = ReservedLLMClient(transport, FreeAdmission())
+        # Waits are stubbed: a throttle the client sleeps through is asserted by
+        # what it asked, not by a suite that actually sleeps.
+        self.client = ReservedLLMClient(
+            transport, FreeAdmission(), sleep=lambda _seconds: asyncio.sleep(0)
+        )
 
     async def complete(self, completion_request):
         return await self.client.complete(
@@ -429,7 +434,8 @@ class TestTheErrorTaxonomy:
             return httpx.Response(
                 429,
                 text=body,
-                headers={"Retry-After": "30", "X-RateLimit-Reset": "1787097600000"},
+                # The daily window resets eight hours out, whatever Retry-After says.
+                headers={"Retry-After": "30", "X-RateLimit-Reset": str(int((time.time() + 8 * 3600) * 1000))},
             )
 
         with pytest.raises(RouteRateLimited) as raised:
@@ -439,7 +445,7 @@ class TestTheErrorTaxonomy:
         assert not isinstance(raised.value, GatewayTimeout)
         # The window the route reported, in seconds, however it spelled it.
         assert raised.value.retry_after == 30.0
-        assert raised.value.reset_at == 1787097600.0
+        assert raised.value.reset_at == pytest.approx(time.time() + 8 * 3600, abs=5)
 
     async def test_a_429_without_headers_still_classifies(self):
         with pytest.raises(RouteRateLimited) as raised:

@@ -61,3 +61,15 @@ def test_the_packages_own_quota_exception_is_classified_by_name():
         pass
 
     assert vnstock_provider.classify(RateLimitExceeded("x"), "STB").code == vnstock_provider.RATE_LIMITED
+
+
+def test_a_background_fill_leaves_room_for_the_reads_a_model_asks_for():
+    clock = Clock()
+    gate = RequestGate(limit=6, window=60.0, clock=clock, sleep=clock.sleep)
+    for _ in range(4):
+        gate.acquire(max_wait=0.0, keep_free=2)
+
+    with pytest.raises(MarketDataError):
+        gate.acquire(max_wait=0.0, keep_free=2)  # the fill stops two short
+    gate.acquire(max_wait=0.0)
+    gate.acquire(max_wait=0.0)  # and the model's own reads still get in

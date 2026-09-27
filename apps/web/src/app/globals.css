@@ -351,19 +351,10 @@
     vertical-align: 0.08em;
     cursor: help;
   }
-  .vg-figure-cited {
-    color: hsl(var(--ink-3));
-    background: hsl(var(--surface-raised));
-  }
   .vg-figure-stale {
     color: hsl(var(--caution));
     background: hsl(var(--surface-raised));
     border: 1px dashed hsl(var(--caution) / 0.55);
-  }
-  .vg-figure-unverified {
-    color: hsl(var(--caution));
-    background: hsl(var(--caution) / 0.12);
-    border: 1px solid hsl(var(--caution) / 0.45);
   }
 
   /* 0.26s is `CHUNK_FADE_MS` in `word-cadence.ts`, which is how the surface

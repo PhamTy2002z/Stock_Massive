@@ -815,3 +815,53 @@ async def test_a_label_policy_corrects_still_earns_the_chart_it_evidenced():
 
     assert outcome.claim_ledger["claims"][0]["verdict"] == "single_source"
     assert outcome.visual is not None
+
+
+class ProsePlannerClient(PipelineClient):
+    """The planning pass answers in prose before it plans.
+
+    Measured on 2026-09-27: the kiro route ignores ``tool_choice="required"``
+    (and a named function), so a model that decides to answer at once returns
+    text on the planning pass and nothing the gate can dispatch.
+    """
+
+    def __init__(self, *, prose_replies: int = 1) -> None:
+        super().__init__()
+        self.prose_left = prose_replies
+
+    async def complete(self, request, spend=None):
+        if self.prose_left:
+            self.prose_left -= 1
+            self.requests.append(request)
+            return completion(text="HPG đang giao dịch quanh 28.000 đồng.")
+        return await super().complete(request, spend)
+
+
+def _notes(request) -> str:
+    return "\n".join(str(message.content) for message in request.messages)
+
+
+@pytest.mark.asyncio
+async def test_a_planning_pass_answered_in_prose_is_asked_once_more_for_the_batch():
+    client = ProsePlannerClient()
+
+    outcome = await AgentLoop(client=client, config=config(), lane=DEEP, clock=lambda: NOW).run(request())
+
+    assert outcome.status is TurnStatus.COMPLETE
+    assert outcome.claim_ledger["verifierOutcome"] != "verifier_failed"
+    assert "planner_returned_no_search_batch" not in outcome.answer
+    # The prose is not the answer, and the retry says why it was not taken.
+    assert "28.000" not in outcome.answer
+    assert "PLANNING PASS" in _notes(client.requests[1])
+    assert "no tool call" in _notes(client.requests[1])
+
+
+@pytest.mark.asyncio
+async def test_a_planning_pass_that_answers_in_prose_twice_still_fails_closed():
+    client = ProsePlannerClient(prose_replies=2)
+
+    outcome = await AgentLoop(client=client, config=config(), lane=DEEP, clock=lambda: NOW).run(request())
+
+    assert outcome.claim_ledger["verifierOutcome"] == "verifier_failed"
+    assert "planner_returned_no_search_batch" in outcome.answer
+    assert len(client.requests) == 2

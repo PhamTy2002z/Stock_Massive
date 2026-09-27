@@ -16,7 +16,16 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 import pytest
 from fastapi.testclient import TestClient
 
+from src.agent.tools import vnstock_provider
 from src.main import app
+
+
+@pytest.fixture(autouse=True)
+def _fresh_provider_reads():
+    """Provider reads are memoised process-wide; each test starts with none."""
+    vnstock_provider.READS.clear()
+    yield
+    vnstock_provider.READS.clear()
 @pytest.fixture(scope="session")
 def event_loop():
     """Create session-scoped event loop for async tests."""

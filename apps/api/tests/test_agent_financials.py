@@ -342,3 +342,19 @@ def test_one_source_down_still_answers_from_the_other():
 
     assert result["unavailable_providers"] == ["KB Securities"]
     assert "Không trả lời lượt này: KB Securities" in result["excerpt"]
+
+
+def test_every_source_refusing_says_why_rather_than_no_data():
+    class Throttled:
+        publisher = "KB Securities"
+        source = "kbs"
+        not_carried = ()
+
+        def ratios(self, *args: Any, **kwargs: Any) -> financials.Statement:
+            raise MarketDataError("rate_limited", "quota spent")
+
+    tools = financials.FinancialsTools(settings=settings(), providers=[Throttled()])
+    with pytest.raises(MarketDataError) as refused:
+        tools.get_financial_ratios(ToolContext(user_id=1, now=NOW), {"symbol": "VRE"})
+
+    assert refused.value.code == "rate_limited"

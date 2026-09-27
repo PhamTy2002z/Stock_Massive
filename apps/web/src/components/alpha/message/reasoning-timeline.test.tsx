@@ -204,7 +204,7 @@ describe("saying the Turn has not stopped", () => {
       />,
     )
 
-    expect(screen.getByRole("status")).toHaveTextContent("Đang xử lý…")
+    expect(screen.getByRole("status")).toHaveTextContent("Đang xử lý kết quả…")
   })
 
   it("says it is preparing while there is nothing to show yet", () => {
@@ -573,4 +573,16 @@ it("keeps the old sentence for a call that counted results but carried none", ()
   )
 
   expect(screen.getByText("6 kết quả")).toBeInTheDocument()
+})
+
+it("numbers actual rounds and reports unfinished calls without claiming completion", () => {
+  render(<ReasoningTimeline thoughts={[thought({ round: 2 })]} toolCalls={[
+    call({ id: "a", round: 2, status: "ok" }),
+    call({ id: "b", round: 2, status: "running" }),
+    call({ id: "c", round: 4, status: "pending" }),
+  ]} elapsedMs={1000} running />)
+  expect(screen.getAllByRole("heading").map((node) => node.textContent)).toEqual(["Bước 1", "Bước 2"])
+  expect(screen.getByText("Đang chạy 2 truy vấn")).toBeInTheDocument()
+  expect(screen.getByText("· 1/2")).toBeInTheDocument()
+  expect(screen.getByRole("status")).toHaveTextContent("Đang tra cứu · còn 2 tác vụ…")
 })

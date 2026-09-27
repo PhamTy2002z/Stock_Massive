@@ -3,9 +3,6 @@
 import * as React from "react"
 import {
   ExternalLink,
-  FileText,
-  Filter,
-  Layers,
   MoreVertical,
   PanelLeft,
   Pencil,
@@ -29,10 +26,10 @@ import { IconButton, Menu, MenuItem, MenuSeparator, QuietLine } from "./primitiv
 import { SIDEBAR_WIDTH, sidebarFloats, useShell } from "./shell-state"
 
 /**
- * The left column: identity, the two main modes, and everything the user keeps.
+ * The left column: navigation and conversation history.
  *
  * Collapsing is a width transition on a wrapper rather than an unmount, so the
- * Watchlist and the Thread list keep their scroll position and their queries
+ * Thread list keep their scroll position and their queries
  * across a fold. The `aside` inside it holds a fixed 274px so its own contents
  * never reflow while the wrapper animates — a sidebar whose rows re-wrap on the
  * way out reads as breaking rather than as sliding.
@@ -109,17 +106,11 @@ function SidebarBody() {
 
   return (
     <>
-      <div className="flex items-center gap-2 py-2.5 pl-[18px] pr-3.5 pt-4">
+      <div className="flex items-center gap-2 px-3.5 py-2.5">
         <VisgniteWordmark />
         <div className="ml-auto flex gap-0.5">
-          <IconButton label="Thu gọn thanh bên" onClick={() => dispatch({ type: "toggle-sidebar" })}>
+          <IconButton className="max-md:size-11" label="Thu gọn thanh bên" onClick={() => dispatch({ type: "toggle-sidebar" })}>
             <PanelLeft className="size-[17px]" strokeWidth={1.6} />
-          </IconButton>
-          <IconButton
-            label="Tìm hội thoại"
-            onClick={() => dispatch({ type: "overlay", overlay: "palette" })}
-          >
-            <Search className="size-[17px]" strokeWidth={1.6} />
           </IconButton>
         </div>
       </div>
@@ -137,68 +128,57 @@ function SidebarBody() {
 
 function Nav() {
   const desk = useDesk()
+  const { state, dispatch } = useShell()
+  const [shortcut, setShortcut] = React.useState("Ctrl K")
+
+  React.useEffect(() => {
+    if (/Mac|iPhone|iPad/.test(navigator.platform)) setShortcut("⌘ K")
+  }, [])
 
   return (
-    <nav className="grid grid-cols-fit gap-px px-2.5">
+    <nav aria-label="Điều hướng hội thoại" className="grid gap-1 px-2.5">
       <NavRow
-        icon={<Plus className="size-[17px] text-ink-4" strokeWidth={1.6} />}
+        icon={<Plus className="size-[17px]" aria-hidden="true" />}
         onClick={() => {
           desk.newThread()
+          if (sidebarFloats(state)) dispatch({ type: "toggle-sidebar" })
         }}
       >
         Trò chuyện mới
       </NavRow>
-      {/* No screener and no saved-report resource exists yet. Drawn because the
-          reference draws them, inert because pressing them would do nothing. */}
-      <NavRow icon={<Filter className="size-[17px] text-ink-4" strokeWidth={1.6} />} disabled>
-        Bộ lọc cổ phiếu
-      </NavRow>
-      <NavRow icon={<FileText className="size-[17px] text-ink-4" strokeWidth={1.6} />} disabled>
-        Báo cáo đã lưu
+      <NavRow
+        icon={<Search className="size-[17px]" aria-hidden="true" />}
+        onClick={() => dispatch({ type: "overlay", overlay: "palette" })}
+        hint={shortcut}
+      >
+        Tìm hội thoại
       </NavRow>
     </nav>
   )
 }
 
-function NavRow({
-  icon,
-  children,
-  onClick,
-  disabled = false,
-}: {
+function NavRow({ icon, children, onClick, hint }: {
   icon: React.ReactNode
   children: React.ReactNode
-  onClick?: () => void
-  disabled?: boolean
+  onClick: () => void
+  hint?: string
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
-      title={disabled ? "Sắp có" : undefined}
-      className={cn(
-        "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-row transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        disabled
-          ? "cursor-default text-ink-5 opacity-60"
-          : "text-ink-2 hover:bg-foreground/[0.045] hover:text-foreground",
-      )}
+      className="flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 [@media(pointer:coarse)]:min-h-11 text-left text-row text-ink-2 transition-colors hover:bg-foreground/[0.045] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       {icon}
       <span className="min-w-0 flex-1 truncate">{children}</span>
-      {disabled && (
-        <span className="shrink-0 text-micro font-medium uppercase tracking-[0.04em] text-ink-6">
-          Sắp ra mắt
-        </span>
-      )}
+      {hint && <kbd aria-hidden="true" className="hidden text-micro text-ink-5 md:inline">{hint}</kbd>}
     </button>
   )
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-4 pb-1.5 pt-[18px] text-micro tracking-[0.02em] text-ink-6">
+    <div className="px-3.5 pb-1 pt-3 text-micro tracking-[0.02em] text-ink-6">
       {children}
     </div>
   )
@@ -222,6 +202,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
  */
 export function Conversations() {
   const threads = useThreads(true)
+  const { dispatch } = useShell()
   const [menuFor, setMenuFor] = React.useState<string | null>(null)
   const [renamingId, setRenamingId] = React.useState<string | null>(null)
 
@@ -238,17 +219,16 @@ export function Conversations() {
 
   return (
     <>
-      <SectionLabel>Đã ghim</SectionLabel>
-      <div className="grid grid-cols-fit flex-none content-start gap-px px-2.5">
-        <NavRow icon={<Layers className="size-[17px] text-primary" strokeWidth={1.6} />} disabled>
-          Danh mục theo dõi
-        </NavRow>
-        {pinned.map((row) => (
-          <ThreadRow key={row.id} row={row} {...rowProps} />
-        ))}
-      </div>
+      {pinned.length > 0 && (
+        <>
+          <SectionLabel>Đã ghim</SectionLabel>
+          <div className="grid flex-none content-start gap-px px-2.5">
+            {pinned.map((row) => <ThreadRow key={row.id} row={row} {...rowProps} />)}
+          </div>
+        </>
+      )}
 
-      <SectionLabel>Hội thoại</SectionLabel>
+      <SectionLabel>Gần đây</SectionLabel>
       {threads.isPending ? (
         <QuietLine>Đang tải hội thoại…</QuietLine>
       ) : threads.isError ? (
@@ -270,9 +250,20 @@ export function Conversations() {
         </QuietLine>
       ) : (
         <div className="grid grid-cols-fit flex-none content-start gap-px px-2.5 pb-2.5">
-          {rest.map((row) => (
+          {rest.slice(0, 20).map((row) => (
             <ThreadRow key={row.id} row={row} {...rowProps} />
           ))}
+        </div>
+      )}
+      {rest.length > 20 && (
+        <div className="px-2.5 pb-2.5">
+          <button
+            type="button"
+            onClick={() => dispatch({ type: "overlay", overlay: "palette" })}
+            className="min-h-9 rounded-lg px-2.5 py-1.5 [@media(pointer:coarse)]:min-h-11 text-row text-ink-4 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Xem tất cả
+          </button>
         </div>
       )}
     </>
@@ -304,7 +295,7 @@ function ThreadRow({
   onRename: (id: string | null) => void
 }) {
   const desk = useDesk()
-  const { dispatch } = useShell()
+  const { state, dispatch } = useShell()
   const update = useUpdateThread()
   const remove = useDeleteThread()
   const container = React.useRef<HTMLDivElement>(null)
@@ -355,9 +346,10 @@ function ThreadRow({
         onClick={() => {
           desk.openThread(row.id)
           dispatch({ type: "view", view: "chat" })
+          if (sidebarFloats(state)) dispatch({ type: "toggle-sidebar" })
         }}
         className={cn(
-          "flex w-full items-center gap-2.5 rounded-lg py-2 pl-2.5 pr-9 text-left text-control transition-colors",
+          "flex min-h-9 w-full items-center gap-2.5 rounded-lg py-1.5 pl-2.5 pr-9 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:pr-12 text-left text-control transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           active
             ? "bg-foreground/[0.06] text-foreground"
             : "text-ink-3 hover:bg-foreground/[0.04] hover:text-foreground",
@@ -387,8 +379,8 @@ function ThreadRow({
         aria-expanded={open}
         onClick={() => onMenu(open ? null : row.id)}
         className={cn(
-          "absolute right-1 top-1/2 -translate-y-1/2",
-          open ? "opacity-100" : "opacity-0 focus-visible:opacity-100 group-hover/row:opacity-100",
+          "absolute right-0 top-1/2 -translate-y-1/2 [@media(pointer:coarse)]:size-11",
+          open ? "opacity-100" : "opacity-100 md:opacity-0 focus-visible:opacity-100 group-hover/row:opacity-100 [@media(hover:none)]:opacity-100",
         )}
       >
         <MoreVertical className="size-[15px]" strokeWidth={1.7} />

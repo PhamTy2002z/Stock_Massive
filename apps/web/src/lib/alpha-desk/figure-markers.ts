@@ -25,6 +25,14 @@ export const MARKER = /\[(?:(\d{1,3}) · ([^\]\n]{1,80})|(chưa kiểm chứng))
 export const STALE_LABEL = "nguồn cũ"
 export const UNVERIFIED_LABEL = "chưa kiểm chứng"
 
+/** The note the host appends to explain the unverified label, which is no longer drawn. */
+const UNVERIFIED_NOTE = /\n*Số có nhãn \[chưa kiểm chứng\][^\n]*/g
+
+/** The answer as the surface draws it: without the note about a label it does not show. */
+export function withoutUnverifiedNote(text: string): string {
+  return text.replace(UNVERIFIED_NOTE, "")
+}
+
 /** The heading the host writes above the dated source list. */
 export const SOURCES_HEADING = "**Nguồn số liệu**"
 
@@ -126,7 +134,7 @@ function walk(node: Node, sources: Map<number, string>): void {
 }
 
 /**
- * One text node as prose and chips, in order, with every character kept.
+ * One text node as prose and chips, in order, with every prose character kept.
  *
  * Exported for its own test: a dropped character here is invisible on screen.
  */
@@ -137,8 +145,16 @@ export function splitMarkers(value: string, sources: Map<number, string> = new M
     const start = match.index ?? 0
     const marker = readMarker(match[0])
     if (!marker) continue
-    if (start > cursor) nodes.push({ type: "text", value: value.slice(cursor, start) })
-    nodes.push(chip(marker, sources))
+    // A cited figure is the normal case and draws nothing, not even the space the
+    // host wrote before its label: its source and date are in the closing list.
+    // An unverified one draws nothing either (owner decision, 2026-09-27: the
+    // words cost the reader more than they told). The label stays in the text and
+    // in the claim ledger; a figure with no source is simply absent from the list.
+    const silent = marker.kind !== "stale"
+    const before = value.slice(cursor, start)
+    const prose = silent ? before.replace(/ $/, "") : before
+    if (prose) nodes.push({ type: "text", value: prose })
+    if (!silent) nodes.push(chip(marker, sources))
     cursor = start + match[0].length
   }
   if (cursor < value.length) nodes.push({ type: "text", value: value.slice(cursor) })
@@ -147,13 +163,10 @@ export function splitMarkers(value: string, sources: Map<number, string> = new M
 
 function chip(marker: FigureMarker, sources: Map<number, string>): ElementNode {
   const source = marker.source === null ? undefined : sources.get(marker.source)
-  const title =
-    marker.kind === "unverified"
-      ? "Số này không có trong dữ liệu công cụ của lượt này, hoặc không khớp mốc thời gian câu đó nói tới."
-      : [source ? `[${marker.source}] ${source}` : `Nguồn [${marker.source}]`, marker.label]
-          .filter(Boolean)
-          .join(" · ")
-  const text = marker.source === null ? marker.label : `${marker.source} · ${marker.label}`
+  const title = [source ? `[${marker.source}] ${source}` : `Nguồn [${marker.source}]`, marker.label]
+    .filter(Boolean)
+    .join(" · ")
+  const text = STALE_LABEL
   return {
     type: "element",
     tagName: "span",

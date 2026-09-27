@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Callable, Protocol
@@ -35,7 +36,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from .admission import AdmissionLedger, BudgetLane, SpendAdmission, SpendRequest
-from .breaker import RouteBreaker, route_key
+from .breaker import DEFAULT_HOLD_SECONDS, RouteBreaker, route_key
 from .config import LLMConfig
 from .errors import (
     GatewayTimeout,
@@ -62,6 +63,14 @@ MAX_ROUTE_ATTEMPTS = 4
 # partial because the point is decorrelation, not politeness.
 BACKOFF_BASE_SECONDS = 0.5
 BACKOFF_MAX_SECONDS = 4.0
+
+#: A 429 that asks for a short wait is a per-minute throttle, not a spent
+#: allowance: a subscription route answers "Too many requests, please wait" and
+#: serves the same request moments later. Waited out up to this many times, each
+#: no longer than the hold it names (the breaker's default when it names none).
+#: A longer hold is an allowance problem for the operator and is raised at once.
+RATE_LIMIT_WAITS = 3
+RATE_LIMIT_MAX_WAIT_SECONDS = 60.0
 
 # How many empty answers with the same signature it takes to call the emptiness
 # deterministic. Two: one is a route having a bad second, and paying for a third
@@ -198,9 +207,18 @@ class ReservedLLMClient:
         empty_attempts = 0
         switched = False
 
+        rate_waits = 0
+
         while True:
             attempt += 1
-            await self._refuse_while_rate_limited(request.model)
+            try:
+                await self._refuse_while_rate_limited(request.model)
+            except RouteRateLimited as exc:
+                if not await self._wait_out(exc, rate_waits):
+                    raise
+                rate_waits += 1
+                attempt -= 1
+                continue
             # The first attempt is funded from the lane the caller named; every
             # attempt after it is a retry, and a retry is what the emergency lane
             # is for.
@@ -238,7 +256,13 @@ class ReservedLLMClient:
                     await asyncio.to_thread(
                         self._record_rate_limit, request.model, exc
                     )
-                    raise
+                    if not await self._wait_out(exc, rate_waits):
+                        raise
+                    # A throttled attempt is not a failed one: it does not count
+                    # against the route's attempts, only against the waits.
+                    rate_waits += 1
+                    attempt -= 1
+                    continue
                 if action is RouteAction.REBUILD_AND_RETRY and self._may_retry(
                     attempt, gateway_attempts
                 ):
@@ -329,6 +353,22 @@ class ReservedLLMClient:
             await rebuild()
         except Exception as exc:  # noqa: BLE001 - a failed rebuild is not a failed Turn
             logger.debug("The LLM transport could not be rebuilt: %s", exc)
+
+    async def _wait_out(self, exc: RouteRateLimited, waits: int) -> bool:
+        """Sleep through a short rate-limit hold; ``False`` when it should be raised."""
+        hold = exc.retry_after if exc.retry_after is not None else DEFAULT_HOLD_SECONDS
+        # A daily quota can say "Retry-After: 30" while its window resets hours
+        # later (measured); the reset instant, when sent, is the one to believe.
+        resets_in = exc.reset_at - time.time() if exc.reset_at is not None else 0.0
+        if (
+            waits >= RATE_LIMIT_WAITS
+            or hold > RATE_LIMIT_MAX_WAIT_SECONDS
+            or resets_in > RATE_LIMIT_MAX_WAIT_SECONDS
+        ):
+            return False
+        logger.info("The LLM route is throttling; waiting %.1fs before asking again", hold)
+        await self._sleep(max(0.0, hold))
+        return True
 
     async def _backoff(self, attempt: int) -> None:
         """Wait a jittered, exponentially-growing moment before asking again."""

@@ -25,15 +25,16 @@ describe("splitMarkers", () => {
           : `<${((node as { children: { value: string }[] }).children[0]).value}>`,
       )
       .join("")
-    expect(text).toBe("Giá 76.500 đồng <1 · phiên 25/09/2026>, ROE 9% <chưa kiểm chứng>.")
+    // Neither a cited nor an unverified figure draws anything on screen.
+    expect(text).toBe("Giá 76.500 đồng, ROE 9%.")
   })
 
-  it("titles a cited chip with its source line", () => {
-    const [, chip] = splitMarkers("76.500 đồng [1 · phiên 25/09/2026]", new Map([[1, "KB Securities — STB · nến ngày"]]))
+  it("titles a stale chip with its source line", () => {
+    const [, chip] = splitMarkers("6,31% [2 · 07/01/2026 · nguồn cũ]", new Map([[2, "cafef.vn — Sacombank"]]))
     expect((chip as { properties: Record<string, unknown> }).properties).toMatchObject({
-      "data-figure": "cited",
-      "data-source": "1",
-      title: "[1] KB Securities — STB · nến ngày · phiên 25/09/2026",
+      "data-figure": "stale",
+      "data-source": "2",
+      title: "[2] cafef.vn — Sacombank · 07/01/2026 · nguồn cũ",
     })
   })
 })

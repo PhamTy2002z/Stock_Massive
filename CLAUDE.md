@@ -108,10 +108,12 @@ Vietnamese). The big picture:
   dev only), `get_company_events`, `get_company_news`, `screen_stocks` and
   `calculate` (fixed operations, formula printed). Every vnstock call goes
   through `agent/tools/vnstock_provider.py`: guest quota is 20 req/min and
-  `vnai` calls `sys.exit` on breach, so the gate stops at 16 and turns a
-  `SystemExit` into a `rate_limited` refusal.
-- Every answer's figures are checked by `agent/evidence/grounding.py` against
-  that Turn's tool data, dated and labelled in place (`chưa kiểm chứng`,
+  `vnai` calls `sys.exit` on breach, so the gate stops at 16 (48 when
+  `VNSTOCK_API_KEY` holds a community key) and turns a `SystemExit` into a
+  `rate_limited` refusal. Provider reads are memoised in process
+  (`vnstock_provider.cached`); `retrieved_at` is when the data was fetched.
+- Every answer's figures and full dates (`dd/mm/yyyy`) are checked by
+  `agent/evidence/grounding.py` against that Turn's tool data, dated and labelled in place (`chưa kiểm chứng`,
   `nguồn cũ`), with one repair round; each answered Turn writes a claim ledger. Adding a
   tool, MCP, multi-agent, code execution or side-effect tool is a scope decision
   for the product owner, not an implementation detail.

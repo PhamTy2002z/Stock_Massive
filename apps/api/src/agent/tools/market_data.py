@@ -171,6 +171,10 @@ MAX_RESULT_CHARS = 24_000
 #: How long one provider round trip may take before the call is given up on.
 FETCH_TIMEOUT_SECONDS = 20.0
 
+#: How long a provider read is reused: a range still forming, and a closed one.
+LIVE_READ_TTL_SECONDS = 60.0
+CLOSED_READ_TTL_SECONDS = 6 * 3600.0
+
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 #: The columns the provider contract promises. A payload missing one of them is
@@ -451,7 +455,15 @@ class MarketDataTools:
         # model never sees a row it could not have known about.
         horizon = min(now, context.as_of.astimezone(ICT)) if context.as_of else now
 
-        frame = self._history(symbol, start, end, interval)
+        # A range reaching today holds a bar still forming, so a repeat within a
+        # minute is served from memory and a later one asks again; a closed range
+        # only changes when the provider re-adjusts history.
+        frame, fetched_at = vnstock_provider.cached(
+            ("history", SOURCE, symbol, start, end, interval),
+            LIVE_READ_TTL_SECONDS if end >= now.date() else CLOSED_READ_TTL_SECONDS,
+            lambda: self._history(symbol, start, end, interval),
+            now=now,
+        )
         raw_payload, records = _raw(frame)
         rows, dropped_future = _normalise(
             records, start, end, interval, horizon, index=is_index(symbol)
@@ -501,7 +513,8 @@ class MarketDataTools:
             "rows_dropped_after_horizon": dropped_future,
             "truncated": truncated,
             "quality": "partial" if (truncated or dropped_future) else "ok",
-            "retrieved_at": now.isoformat(),
+            # When the provider sent these bars: earlier than now on a cached read.
+            "retrieved_at": fetched_at.astimezone(ICT).isoformat(),
             # The hash is of what the provider sent, before the scale was
             # applied and before anything was filtered. One hash rather than
             # two: the normalised rows follow from the raw ones deterministically,

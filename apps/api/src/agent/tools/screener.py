@@ -28,8 +28,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from concurrent.futures import TimeoutError as FuturesTimeout
 import operator
 import re
-import threading
-import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -54,7 +52,7 @@ from . import vnstock_provider
 from ..evidence.numbers import fold
 from .financials import KbsFinancials, VciFinancials
 from .market_data import ICT, INTERNAL_PROFILE, is_index
-from .vnstock_provider import MarketDataError, import_vnstock
+from .vnstock_provider import MarketDataError, TtlCache, import_vnstock
 
 TOOLSET = "market_data"
 TOOL_NAME = "screen_stocks"
@@ -103,27 +101,6 @@ class Reported:
     label: str
     ended: date
     values: Mapping[str, float]
-
-
-class _Cache:
-    """A small time-bounded memo, safe across the worker threads tools run on."""
-
-    def __init__(self, ttl: float, clock: Callable[[], float] = time.monotonic) -> None:
-        self._ttl = ttl
-        self._clock = clock
-        self._items: dict[str, tuple[float, Any]] = {}
-        self._lock = threading.Lock()
-
-    def get(self, key: str) -> Any | None:
-        with self._lock:
-            hit = self._items.get(key)
-            if hit is None or self._clock() - hit[0] > self._ttl:
-                return None
-            return hit[1]
-
-    def put(self, key: str, value: Any) -> None:
-        with self._lock:
-            self._items[key] = (self._clock(), value)
 
 
 def _vn(value: float, unit: str) -> str:
@@ -178,12 +155,13 @@ class ScreenerTools:
     ) -> None:
         self._settings_override = settings
         # Both read with no wait: the screen fills what quota there is now.
-        self._ratios = ratios or KbsFinancials(max_wait=0.0)
-        self._quality = quality or VciFinancials(max_wait=0.0)
+        keep = vnstock_provider.BACKGROUND_KEEP_FREE
+        self._ratios = ratios or KbsFinancials(max_wait=0.0, keep_free=keep)
+        self._quality = quality or VciFinancials(max_wait=0.0, keep_free=keep)
         self._board = board or _read_board
         self._listing = listing or _read_listing
-        self._reported = _Cache(FUNDAMENTALS_TTL_SECONDS)
-        self._universes = _Cache(LISTING_TTL_SECONDS)
+        self._reported = TtlCache(FUNDAMENTALS_TTL_SECONDS)
+        self._universes = TtlCache(LISTING_TTL_SECONDS)
 
     def available(self) -> bool:
         settings = self._settings_override or get_settings()

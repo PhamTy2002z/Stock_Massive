@@ -398,7 +398,7 @@ def test_the_web_tools_declare_what_their_results_may_weigh():
 
 @pytest.mark.asyncio
 async def test_every_result_carries_the_position_the_provider_returned_it_in():
-    """Five snippets with no order at all give a model nothing to prefer."""
+    """Snippets with no order at all give a model nothing to prefer."""
     raw = [
         {"title": f"R{index}", "url": f"https://s{index}.example/a", "content": "x"}
         for index in range(web.MAX_RESULTS)
@@ -409,7 +409,7 @@ async def test_every_result_carries_the_position_the_provider_returned_it_in():
 
     result = await tools.web_search(CONTEXT, {"query": "vn-index"})
 
-    assert [item["rank"] for item in result["results"]] == [1, 2, 3, 4, 5]
+    assert [item["rank"] for item in result["results"]] == list(range(1, web.MAX_RESULTS + 1))
     assert [item["url"] for item in result["results"]] == [
         f"https://s{index}.example/a" for index in range(web.MAX_RESULTS)
     ]
@@ -475,7 +475,8 @@ async def test_search_result_is_typed_as_discovery_only_even_for_a_primary_domai
 
 def long_page(needle: str) -> str:
     """A page whose answer sits far past where the old cut fell."""
-    filler = "Tin thị trường chung không liên quan. " * 900
+    sentence = "Tin thị trường chung không liên quan. "
+    filler = sentence * (web.MAX_PAGE_TEXT_CHARS // len(sentence) + 100)
     assert len(filler) > web.MAX_PAGE_TEXT_CHARS
     return filler + needle + " " + filler
 
@@ -566,7 +567,7 @@ async def test_two_questions_about_one_cached_page_get_two_different_excerpts():
     body = (
         "<html><body>"
         + "<p>Lãi suất điều hành giữ ở 4,5 phần trăm.</p>"
-        + "<p>Nội dung xen giữa. </p>" * 1_400
+        + "<p>Nội dung xen giữa. </p>" * (web.MAX_PAGE_TEXT_CHARS // 18 + 200)
         + "<p>Khối ngoại bán ròng 1.245 tỷ đồng.</p>"
         + "</body></html>"
     ).encode("utf-8")
@@ -620,8 +621,8 @@ def test_the_question_is_an_argument_the_model_fills_in_not_part_of_identity():
     assert not hasattr(ToolContext(user_id=11), "looking_for")
 
 
-def test_the_page_ceiling_is_unchanged_by_this_phase():
-    assert web.MAX_PAGE_TEXT_CHARS == 20_000
+def test_the_page_ceiling_is_the_internal_deployments():
+    assert web.MAX_PAGE_TEXT_CHARS == 60_000
 
 
 # -- the page this conversation has already read -----------------------------

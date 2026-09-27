@@ -3,6 +3,7 @@
 import { useEffect, useRef, type FormEvent, type KeyboardEvent } from "react"
 import {
   Camera,
+  Loader2,
   ChevronDown,
   ChevronRight,
   Paperclip,
@@ -27,32 +28,26 @@ import { useDesk } from "./desk-state"
 import { IconButton, Menu, MenuItem, MenuSeparator } from "./primitives"
 import { SIGNAL_DESK_PAUSED, useShell } from "./shell-state"
 
-/**
- * The five-bar waveform on the send control.
- *
- * Hand-drawn rather than taken from the icon set: the design fixes each bar's
- * height, and the symmetry — tall in the middle, tapering either side — is the
- * whole of what makes it read as sound rather than as a bar chart. The nearest
- * packaged icon has different proportions, and matching a design by eye is how
- * two surfaces drift apart.
- */
+/** Thin waveform matching the composer reference. */
 function WaveformIcon() {
   return (
     <svg
-      width="18"
-      height="18"
+      width="24"
+      height="24"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.9}
+      strokeWidth={1.5}
       strokeLinecap="round"
       aria-hidden="true"
     >
-      <line x1="4.5" y1="10" x2="4.5" y2="14" />
-      <line x1="8" y1="7.5" x2="8" y2="16.5" />
-      <line x1="11.5" y1="5.5" x2="11.5" y2="18.5" />
-      <line x1="15" y1="8.5" x2="15" y2="15.5" />
-      <line x1="18.5" y1="10.5" x2="18.5" y2="13.5" />
+      <line x1="3" y1="10" x2="3" y2="14" />
+      <line x1="6" y1="7" x2="6" y2="17" />
+      <line x1="9" y1="4" x2="9" y2="20" />
+      <line x1="12" y1="8" x2="12" y2="16" />
+      <line x1="15" y1="3" x2="15" y2="21" />
+      <line x1="18" y1="7" x2="18" y2="17" />
+      <line x1="21" y1="10" x2="21" y2="14" />
     </svg>
   )
 }
@@ -90,6 +85,11 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
   const { state, dispatch } = useShell()
   const text = state.draft
   const field = useRef<HTMLTextAreaElement>(null)
+
+  const busy = desk.isSubmitting || desk.canCancel || desk.isCancelling
+  const actionLabel = desk.isCancelling
+    ? CANCELLING_LABEL
+    : desk.canCancel ? "Dừng" : desk.isSubmitting ? "Đang gửi…" : SEND_LABEL
 
   const attachOpen = state.overlay === "attach"
 
@@ -129,7 +129,7 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
   function submit(event: FormEvent) {
     event.preventDefault()
     const trimmed = text.trim()
-    if (!trimmed || desk.canCancel || desk.isSubmitting) return
+    if (!trimmed || busy) return
     desk.submit(trimmed)
     dispatch({ type: "draft", text: "" })
     if (field.current) field.current.style.height = "auto"
@@ -158,7 +158,7 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
     <form
       onSubmit={submit}
       className={cn(
-        "composer-shell relative rounded-composer bg-surface-sunken px-4 pb-4 pt-6",
+        "composer-shell relative rounded-composer bg-surface-sunken px-4 pb-3 pt-4",
         variant === "docked" && "shadow-composer",
       )}
     >
@@ -262,7 +262,7 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
             ? `Hỏi về ${state.contextSymbol}, hay mã nào khác…`
             : "Hỏi về một mã hay cả thị trường…"
         }
-        className="composer-field block max-h-[150px] min-h-[28px] w-full resize-none border-0 bg-transparent p-0 pb-5 text-[0.92rem] leading-[1.5] text-foreground outline-none placeholder:text-ink-6"
+        className="composer-field block max-h-[150px] min-h-[28px] w-full resize-none border-0 bg-transparent p-0 pb-3 text-[0.92rem] leading-[1.5] text-foreground outline-none placeholder:text-ink-6"
       />
 
       <div className="flex items-center gap-1.5">
@@ -307,40 +307,21 @@ export function Composer({ variant = "docked" }: { variant?: "docked" | "opening
             Visgnite Pro
             <ChevronDown className="size-3 shrink-0 text-ink-6" strokeWidth={1.8} />
           </span>
-          {desk.canCancel ? (
-            <button
-              type="button"
-              onClick={desk.cancel}
-              disabled={desk.isCancelling}
-              className="inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[10px] border border-border px-3.5 text-control text-ink-3 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-50"
-            >
-              <Square className="size-3.5" />
-              {desk.isCancelling ? CANCELLING_LABEL : "Dừng"}
-            </button>
-          ) : (
-            <button
-              type="submit"
-              title={SEND_LABEL}
-              disabled={!text.trim() || desk.isSubmitting}
-              // Inverted rather than coloured: the design makes this the one
-              // solid light shape on the whole surface, which is what picks it
-              // out without the accent colour — that is spoken for by the
-              // context chip a few pixels away, and two oranges in one
-              // card compete. `bg-foreground` inverts with the theme, so the
-              // button stays the opposite of its ground in light mode too.
-              //
-              // Three states, and the pressed one is the point: this is the
-              // last thing the reader touches before waiting, so it has to
-              // acknowledge the press itself rather than leave them wondering
-              // whether it registered. Lift on hover, settle and darken on
-              // press, and no pointer events at all while there is nothing to
-              // send — a disabled control that still reacts reads as broken.
-              className="composer-icon inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-[filter,transform] duration-150 hover:-translate-y-px hover:brightness-110 active:translate-y-0 active:brightness-90 disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
-            >
-              <WaveformIcon />
-              <span className="sr-only">{SEND_LABEL}</span>
-            </button>
-          )}
+          <button
+            type={busy ? "button" : "submit"}
+            title={actionLabel}
+            aria-label={actionLabel}
+            aria-busy={desk.isSubmitting || desk.isCancelling || undefined}
+            onClick={desk.canCancel ? desk.cancel : undefined}
+            disabled={busy ? desk.isSubmitting || desk.isCancelling : !text.trim()}
+            className="composer-icon inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-transparent text-ink-2 transition-colors duration-150 hover:bg-foreground/[0.06] hover:text-foreground active:bg-foreground/[0.1] disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface-sunken motion-reduce:transition-none"
+          >
+            {desk.isSubmitting || desk.isCancelling ? (
+              <Loader2 aria-hidden className="size-4 animate-spin motion-reduce:animate-none" />
+            ) : desk.canCancel ? (
+              <Square aria-hidden className="size-3.5 fill-current" />
+            ) : <WaveformIcon />}
+          </button>
         </div>
       </div>
     </form>
