@@ -47,7 +47,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime, timezone
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from src.alpha.refusals import AlphaRefusal
@@ -185,7 +185,7 @@ class RunningTurn:
 
 async def _connector_surface(
     *, user_id: int, running: RunningTurn, client_capabilities: Sequence[str]
-) -> tuple[tuple[Any, ...], tuple[Any, ...], Any]:
+) -> tuple[tuple[Any, ...], tuple[Any, ...], Any, tuple[str, ...]]:
     """One user's connector tools and the approver for this Turn, or nothing.
 
     Imported here rather than at module scope: ``connectors`` depends on this
@@ -203,7 +203,7 @@ async def _connector_surface(
         service=service,
     )
     if overlay.empty:
-        return (), (), None
+        return (), (), None, ()
     approver = make_approver(
         overlay=overlay,
         publisher=running.publisher,
@@ -212,7 +212,8 @@ async def _connector_surface(
         cancel_event=running.cancel_event,
         service=service,
     )
-    return overlay.offered, overlay.hidden, approver
+    names = tuple(dict.fromkeys(tool.connector_name for tool in overlay.tools.values()))
+    return overlay.offered, overlay.hidden, approver, names
 
 
 class Checkpointer:
@@ -564,11 +565,13 @@ class TurnService:
         self._running[record.id] = running
         # Read once, here, like the lane: a connector switched on mid-Turn
         # belongs to the next one.
-        connector_tools, connector_hidden, approver = await _connector_surface(
+        connector_tools, connector_hidden, approver, connector_names = await _connector_surface(
             user_id=user_id,
             running=running,
             client_capabilities=client_capabilities,
         )
+        if connector_names:
+            runtime = replace(runtime, connectors=connector_names)
         request = TurnRequest(
             thread_id=record.thread_id,
             turn_id=record.id,

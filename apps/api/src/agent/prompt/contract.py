@@ -140,6 +140,12 @@ class RuntimeContext:
     today: date
     user_name: str | None = None
     market: MarketDay = field(default_factory=lambda: MarketDay(MarketPhase.UNKNOWN))
+    #: The names of the connectors this reader has switched on, when there are
+    #: any. Here and not in a tool description: the on-demand tools are one fixed
+    #: text for every reader so the cached head never moves, and without the names
+    #: the model cannot know a connector the reader just named is there to search.
+    #: Sanitised like ``user_name``, because the reader typed them.
+    connectors: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.today, date):
@@ -150,6 +156,11 @@ class RuntimeContext:
             if not isinstance(self.user_name, str):
                 raise TypeError("user_name must be a string when present")
             object.__setattr__(self, "user_name", sanitise_name(self.user_name))
+        object.__setattr__(
+            self,
+            "connectors",
+            tuple(name for name in (sanitise_name(str(item)) for item in self.connectors) if name),
+        )
 
 
 def assert_no_formatting_hole(sections: Sequence[PromptSection]) -> None:
@@ -232,6 +243,14 @@ def render(context: RuntimeContext) -> str:
         )
     if context.user_name:
         lines.append(f"- user_name: {context.user_name}")
+    if context.connectors:
+        # Named with the tool that reaches them, so a reader who says "dùng
+        # DeepWiki" is answered from DeepWiki rather than from a web search.
+        lines.append(
+            f"- connectors: {', '.join(context.connectors)} "
+            "(the reader's own connected tools; find them with search_connector_tools "
+            "before searching the web)"
+        )
     return _STATIC_TEXT + "\n\n" + "\n".join(lines) + "\n"
 
 

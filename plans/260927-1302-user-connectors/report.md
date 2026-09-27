@@ -11,14 +11,13 @@ Làm đủ P1–P4 theo phương án B và bốn quyết định của owner. C�
 - Backend: **1588 passed** (baseline 1507), trong đó 70 test connector mới.
 - Web: **556 passed** (baseline 524). Lint, type-check và build sạch.
 
-Hỏi thử trên dev **đạt một phần**:
+Hỏi thử trên dev **đạt**:
 
-- **4 Turn có dùng connector đã hoàn tất** và chấm đạt ở cả bốn tiêu chí.
-- Các câu còn lại dừng vì route LLM dev hết hạn mức: kiro trả 402 "You have
-  reached the limit". Các model Claude trên cùng proxy thì từ chối schema strict
-  có `minimum`/`maximum` của tool base.
-- Đây là giới hạn môi trường, không phải lỗi connector. Khi route có lại hạn mức,
-  cần hỏi bù ít nhất 1 câu (xem cuối file).
+- **5 Turn có dùng connector đã hoàn tất**, cộng thêm 1 Turn kiểm tra cách ly của
+  tài khoản B, và chấm đạt ở cả bốn tiêu chí.
+- Lần chạy đầu bị route hết hạn mức giữa chừng; các câu còn thiếu đã được hỏi bù
+  sau khi route có lại quota.
+- Còn một phát hiện về hành vi model ở chế độ "nạp khi cần" (xem phần hỏi thử).
 
 ## Thay đổi theo phase
 
@@ -89,7 +88,10 @@ UI Cài đặt còn được kiểm tra thêm trên trình duyệt thật (Playw
 | `c991a69a-f6cc-48f1-aeac-0fa8f1131711` | DeepWiki: cấu trúc wiki thinh-vu/vnstock | nạp sẵn | complete | Tool ghi (không có `readOnlyHint`) bị khoá ở Cần duyệt và hiện thẻ. Ledger ghi `connector:deepwiki/read_wiki_structure` kèm `observedAt`. Có nhãn "chưa kiểm chứng". |
 | `a717a638-8dd0-40ae-9984-5b3abc0a7010` | DeepWiki: rolling window của pandas | nạp sẵn | complete | Nhánh từ chối: 2 thẻ bị từ chối, model nhận `approval_required`, server không bị gọi. 5 số model tự viết đều mang nhãn "chưa kiểm chứng" (`not_in_sources`). |
 | `a9295c17-f69e-481c-bdaa-3f8060c2a2e7` | Giá VNM + Context7 | nạp sẵn | incomplete (`route_error` 402) | `get_market_data` ok; "Luôn cho phép" được lưu thành `resolve-library-id: allow`; tool chạy ok. Route hết hạn mức trước khi viết xong câu trả lời. |
-| `75d25a49…`, `a998e817…`, `ee78660f…`, `9c1d9569…`, `60cdb96b…` | các câu còn lại, cả câu của B | — | incomplete | Route: 402 hết hạn mức; hoặc 400 từ route Claude (`tools.0: minimum/maximum not supported`, thuộc tool base). |
+| `75d25a49…`, `a998e817…`, `ee78660f…`, `9c1d9569…`, `60cdb96b…` | các câu còn lại, cả câu của B | — | incomplete | Route: 402 hết hạn mức; hoặc 400 từ route Claude (`tools.0: minimum/maximum not supported`, thuộc tool base). Đã hỏi bù ở các dòng dưới. |
+| `edb9791a-c08c-4854-8879-3968585c7e9c` | Hỏi bù câu 4: giá VNM + Context7 | nạp sẵn | complete | `get_market_data`, `resolve-library-id`, `query-docs` đều ok. Không hiện thẻ, vì "Luôn cho phép" đã lưu từ `a9295c17`. Giá được kiểm là grounded `[1 · phiên 25/09/2026]` từ nguồn kbs; ledger có `kbs/VNM` và hai nguồn connector. |
+| `106adc29-ee5d-44a0-b02d-d87e2394ac1a` | Tài khoản B: dùng Context7 | — | complete | Cách ly: B không có tool connector nào nên chỉ dùng web (4 lời gọi `web_search`/`fetch_url`, 0 connector). |
+| `cf43838f…`, `805c171e…`, `c126f2b3-09fe-400a-8b3e-7ebc5f9c95c7` | Hỏi bù câu 5: "Theo wiki DeepWiki…" | nạp khi cần | complete | **Phát hiện:** model (`kiro-glm-5`) không gọi `search_connector_tools` mà dùng web. Ở `cf43838f`, model còn khẳng định đã "tìm trên Context7" dù không có lời gọi nào. Đã thêm tên các connector đang bật vào runtime tail (ngoài prefix được cache), nhưng model vẫn chọn web. Khi câu hỏi viết "Dùng kết nối …" (`dc969f59`, `538161dd`) và ở chế độ nạp sẵn (`c991a69a`, `a717a638`, `edb9791a`), connector được dùng đúng. |
 
 Chấm tổng theo log Turn và DB:
 - **Quyền được áp đúng** ở mọi Turn.
@@ -117,6 +119,10 @@ Chấm tổng theo log Turn và DB:
 6. **OAuth mới được thử với server giả theo spec MCP.** Provider thật có thể khác ở bước discovery.
 7. **Pane Kết nối đang đăng ký theo shape Settings cũ.** Khi modal Settings mới của phiên kia merge, cần đăng ký lại ở hai chỗ có comment `connectors pane: re-register…`.
 8. **Flyout của composer** có thể tràn trên màn hình rất hẹp.
+9. **Ở chế độ "nạp khi cần", model có thể bỏ qua connector**, tuỳ cách người dùng
+   đặt câu. Model cũng có thể khẳng định sai là đã dùng connector (xem các Turn hỏi
+   bù câu 5). Chế độ "nạp sẵn" không gặp vấn đề này. Có thể cân nhắc mặc định "nạp
+   sẵn" khi tổng số tool connector còn nhỏ.
 
 ## Chưa làm / cần quyết
 
